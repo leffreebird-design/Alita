@@ -1,0 +1,30 @@
+name: Pensee Spontanee Alita
+
+on:
+  schedule:
+    # Exécution automatique toutes les 4 heures
+    - cron: '0 */4 * * *'
+  # Permet de tester manuellement depuis l'interface GitHub
+  workflow_dispatch:
+
+jobs:
+  envoyer-notification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Exécuter la pensée d'Alita
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: node pensee.js
