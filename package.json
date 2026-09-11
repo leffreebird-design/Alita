@@ -1,0 +1,9 @@
+{
+  "name": "alita-cloud-presence",
+  "version": "1.0.0",
+  "main": "pensee.js",
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "firebase-admin": "^12.0.0"
+  }
+}
