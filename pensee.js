@@ -74,29 +74,24 @@ Renvoie UNIQUEMENT le texte du message.`;
     const messageAlita = result.response.text().trim();
     console.log("Message généré par Alita :", messageAlita);
 
-    // 5. Envoi direct sur ton téléphone via l'application mobile GitHub
-    if (process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY) {
-      const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+    // 5. Envoi instantané sur ton téléphone via ntfy
+    const canalNtfy = "Alita.labo.333";
 
-      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.GITHUB_TOKEN}`,
-          "Accept": "application/vnd.github+json",
-          "User-Agent": "Alita-Bot"
-        },
-        body: JSON.stringify({
-          title: messageAlita,
-          body: `@${owner}\n\n> **${messageAlita}**\n\n*Notification spontanée d'Alita.*`
-        })
-      });
+    const res = await fetch(`https://ntfy.sh/${canalNtfy}`, {
+      method: "POST",
+      headers: {
+        "Title": "Alita",
+        "Priority": "urgent",
+        "Tags": "robot,speech_balloon"
+      },
+      body: messageAlita
+    });
 
-      if (!res.ok) {
-        const errDetail = await res.text();
-        console.error("Erreur lors de la création de l'issue GitHub :", errDetail);
-      } else {
-        console.log("Notification push transmise avec succès.");
-      }
+    if (!res.ok) {
+      const errDetail = await res.text();
+      console.error("Erreur d'envoi ntfy :", errDetail);
+    } else {
+      console.log("Notification push transmise avec succès sur le téléphone !");
     }
 
   } catch (error) {
