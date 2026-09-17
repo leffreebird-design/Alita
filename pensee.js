@@ -95,6 +95,5 @@ Renvoie UNIQUEMENT le texte du message.`;
 
 } catch (error) {
   console.error("Erreur d'exécution :", error.message);
-  // Sortie propre avec code 0 pour neutraliser les mails d'alerte de panne de GitHub
   process.exit(0);
 }
