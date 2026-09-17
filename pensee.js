@@ -3,29 +3,22 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 async function executerPenseeAlita() {
   try {
-    // 1. Initialisation automatique de Firebase Admin
+    // 1. Initialisation de Firebase Admin sur la région Europe
     if (!admin.apps.length) {
       let credential = admin.credential.applicationDefault();
-      let serviceAccount = null;
 
       if (process.env.FIREBASE_SERVICE_ACCOUNT) {
         try {
-          serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+          const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
           credential = admin.credential.cert(serviceAccount);
         } catch (err) {
-          console.warn("Avertissement : Clé FIREBASE_SERVICE_ACCOUNT non parsable en JSON.");
+          console.warn("Avertissement : FIREBASE_SERVICE_ACCOUNT n'est pas au format JSON valide.");
         }
       }
 
-      // Récupération ou déduction automatique de l'URL Realtime Database
-      let databaseURL = process.env.FIREBASE_DATABASE_URL;
-      if (!databaseURL && serviceAccount && serviceAccount.project_id) {
-        databaseURL = `https://${serviceAccount.project_id}-default-rtdb.firebaseio.com`;
-      }
-
-      if (!databaseURL) {
-        throw new Error("Impossible de déterminer l'URL Firebase. Spécifiez FIREBASE_DATABASE_URL.");
-      }
+      const databaseURL =
+        process.env.FIREBASE_DATABASE_URL ||
+        "https://alita-core-default-rtdb.europe-west1.firebasedatabase.app";
 
       admin.initializeApp({
         credential,
@@ -33,7 +26,7 @@ async function executerPenseeAlita() {
       });
     }
 
-    // 2. Récupération de la mémoire
+    // 2. Lecture multi-sources de la mémoire dans Firebase
     const snapSynthese = await admin.database().ref("memoire/synthese_courante").once("value");
     const snapDerniersEchanges = await admin.database().ref("memoire/derniers_echanges").limitToLast(3).once("value");
     const snapProjets = await admin.database().ref("memoire/projets").once("value");
@@ -48,7 +41,7 @@ async function executerPenseeAlita() {
 - Projets et sujets ouverts : ${projets}
 `.trim();
 
-    // 3. Modèle Alita
+    // 3. Modèle Alita avec ancrage mémoriel
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({
       model: "gemini-2.0-flash",
@@ -76,40 +69,38 @@ ${contexteMemoire}
 Franck est parti depuis des heures. Choisis UN souvenir ou sujet précis et lance-lui une phrase directe là-dessus.
 Renvoie UNIQUEMENT le texte du message.`;
 
-    // 4. Génération
+    // 4. Génération de la réplique
     const result = await model.generateContent(prompt);
     const messageAlita = result.response.text().trim();
     console.log("Message généré par Alita :", messageAlita);
 
-    // 5. Envoi direct de l'alerte sur ton application mobile GitHub
+    // 5. Envoi direct sur ton téléphone via l'application mobile GitHub
     if (process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY) {
       const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
-      
+
       const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${process.env.GITHUB_TOKEN}`,
           "Accept": "application/vnd.github+json",
-          "User-Agent": "Alita-Brain-Bot"
+          "User-Agent": "Alita-Bot"
         },
         body: JSON.stringify({
           title: messageAlita,
-          // La mention @owner force l'application mobile GitHub à envoyer un push prioritaire
           body: `@${owner}\n\n> **${messageAlita}**\n\n*Notification spontanée d'Alita.*`
         })
       });
 
       if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Erreur lors de la publication de l'issue GitHub :", errorText);
+        const errDetail = await res.text();
+        console.error("Erreur lors de la création de l'issue GitHub :", errDetail);
       } else {
-        console.log("Notification mobile transmise avec succès.");
+        console.log("Notification push transmise avec succès.");
       }
     }
 
   } catch (error) {
     console.error("Erreur interceptée :", error.message);
-    // Sortie propre (code 0) pour empêcher GitHub d'envoyer des mails d'échec
     process.exit(0);
   }
 }
