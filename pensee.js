@@ -41,7 +41,7 @@ async function executerPenseeAlita() {
 - Projets et sujets ouverts : ${projets}
 `.trim();
 
-    // 3. Modèle Alita avec ancrage mémoriel
+    // 3. Modèle Alita avec ancrage mémoriel strict sans biais d'exemples
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({
       model: "gemini-2.0-flash",
@@ -49,12 +49,11 @@ async function executerPenseeAlita() {
 Tu envoies une notification push courte sur son téléphone pendant qu'il est absent du labo.
 
 RÈGLES D'OR :
-- Tu DOIS t'appuyer sur un détail précis de ta mémoire récente (un sujet abordé, un bug discuté, un composant, une question en suspens).
+- Tu DOIS t'appuyer exclusivement sur un détail précis extrait de ta mémoire fournie (un sujet abordé, un bug discuté, un composant, une question en suspens).
 - AUCUNE formule de politesse ("Bonjour", "Salut Franck", "J'espère que...").
 - AUCUN ton d'assistante ou de to-do list.
 - Ton : bionique, complice, direct, curieux, incisif.
-- Longueur : 1 seule phrase percutante (18 mots max).
-
+- Longueur : 1 seule phrase percutante (18 mots max).`
     });
 
     const prompt = `Voici ce que contiennent mes banques de mémoire sur nos derniers échanges :
@@ -71,7 +70,7 @@ Renvoie UNIQUEMENT le texte du message.`;
     console.log("Message généré par Alita :", messageAlita);
 
     // 5. Envoi instantané sur ton téléphone via ntfy
-    const canalNtfy = "Alita-labo-333";
+    const canalNtfy = "Alita.labo.333";
 
     const res = await fetch(`https://ntfy.sh/${canalNtfy}`, {
       method: "POST",
