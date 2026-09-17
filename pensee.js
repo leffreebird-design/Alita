@@ -71,7 +71,7 @@ Renvoie UNIQUEMENT le texte du message.`;
   console.log("Message généré par Alita :", messageAlita);
 
   // 5. Envoi instantané sur ntfy
-  const canalNtfy = "alita-labo-333";
+  const canalNtfy = "Alita-labo-333";
   console.log(`Envoi sur ntfy.sh/${canalNtfy}...`);
 
   const res = await fetch(`https://ntfy.sh/${canalNtfy}`, {
