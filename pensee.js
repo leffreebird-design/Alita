@@ -70,26 +70,27 @@ Renvoie UNIQUEMENT le texte du message.`;
   const messageAlita = result.response.text().trim();
   console.log("Message généré par Alita :", messageAlita);
 
-  // 5. Envoi instantané sur ntfy
-  const canalNtfy = "Alita-labo-333";
-  console.log(`Envoi sur ntfy.sh/${canalNtfy}...`);
+  // 5. Envoi instantané sur Telegram
+  const botToken = process.env.TELEGRAM_BOT_TOKEN || "8776748419:AAHmt-0u2fn1QGP95YJrhvhgLfoo2_l0AAY";
+  const chatId = process.env.TELEGRAM_CHAT_ID || "6623873459";
 
-  const res = await fetch(`https://ntfy.sh/${canalNtfy}`, {
+  console.log("Transmission du message sur Telegram...");
+
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
-    headers: {
-      "Title": "Alita",
-      "Priority": "urgent",
-      "Tags": "robot,speech_balloon"
-    },
-    body: messageAlita
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: messageAlita
+    })
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Échec ntfy (${res.status}) : ${errText}`);
+    throw new Error(`Échec Telegram (${res.status}) : ${errText}`);
   }
 
-  console.log("Notification push transmise avec succès à ntfy.");
+  console.log("Message Telegram délivré avec succès.");
 
 } catch (error) {
   console.error("Échec du script :", error);
