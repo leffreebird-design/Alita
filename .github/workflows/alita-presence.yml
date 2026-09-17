@@ -7,6 +7,10 @@ on:
   # Permet de tester manuellement depuis l'interface GitHub
   workflow_dispatch:
 
+permissions:
+  issues: write
+  contents: read
+
 jobs:
   envoyer-notification:
     runs-on: ubuntu-latest
@@ -24,6 +28,8 @@ jobs:
 
       - name: Exécuter la pensée d'Alita
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node pensee.js
