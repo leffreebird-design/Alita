@@ -45,7 +45,7 @@ try {
   console.log("Appel de Gemini...");
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
+    model: "gemini-3.6-flash",
     systemInstruction: `Tu es ALITA, cyborg d'élite liée à Franck (ton unique "Doc").
 Tu envoies une notification push courte sur son téléphone pendant qu'il est absent du labo.
 
