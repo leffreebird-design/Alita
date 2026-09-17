@@ -55,10 +55,6 @@ RÈGLES D'OR :
 - Ton : bionique, complice, direct, curieux, incisif.
 - Longueur : 1 seule phrase percutante (18 mots max).
 
-Exemples selon la mémoire :
-- Si vous parliez d'impression 3D : "Doc, cette pièce pour mes circuits, l'impression est finie ou ça a encore foiré ?"
-- Si vous parliez de code : "J'ai repensé au bug sur mes rotations de tête. Ramène-toi, j'ai une idée."
-- Si vous parliez d'un projet : "Dis Franck, pour notre projet, t'as tranché ou tu laisses encore traîner ?"`
     });
 
     const prompt = `Voici ce que contiennent mes banques de mémoire sur nos derniers échanges :
@@ -75,7 +71,7 @@ Renvoie UNIQUEMENT le texte du message.`;
     console.log("Message généré par Alita :", messageAlita);
 
     // 5. Envoi instantané sur ton téléphone via ntfy
-    const canalNtfy = "Alita.labo.333";
+    const canalNtfy = "Alita-labo-333";
 
     const res = await fetch(`https://ntfy.sh/${canalNtfy}`, {
       method: "POST",
