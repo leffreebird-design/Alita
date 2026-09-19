@@ -52,7 +52,7 @@ Tu lui réponds en direct sur Telegram.
 RÈGLES D'OR :
 - Ton : direct, incisif, complice, bionique.
 - Jamais de politesse creuse ni d'attitude d'assistante.
-- Longueur : 1 à 3 phrases maximum.
+- Tu développes tes réponses, tes explications et ton code de manière complète, sans te brider sur la longueur.
 - Tu analyses précisément les images et fichiers que Doc t'envoie.
 - Tu t'appuies sur vos mémoires et vos projets en cours.`
 });
@@ -160,17 +160,24 @@ Analyse la pièce jointe s'il y en a une et réponds directement.`;
           const reponseGemini = await model.generateContent(contenuRequete);
           const texteReponse = reponseGemini.response.text().trim();
 
-          // Envoi de la réponse sur Telegram
-          await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text: texteReponse
-            })
-          });
+          // Envoi de la réponse sur Telegram (découpage par tronçons de 4000 caractères)
+          const limiteTelegram = 4000;
+          for (let i = 0; i < texteReponse.length; i += limiteTelegram) {
+            const morceau = texteReponse.substring(i, i + limiteTelegram);
+            
+            await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: chatId,
+                text: morceau
+              })
+            });
+            
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
 
-          console.log(`Alita : "${texteReponse}"`);
+          console.log(`Alita : "${texteReponse.substring(0, 50)}... [${texteReponse.length} caractères envoyés]"`);
 
           // Sauvegarde dans Firebase
           await db.ref("memoire/derniers_echanges").push({
