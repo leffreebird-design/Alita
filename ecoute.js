@@ -2,8 +2,7 @@ import admin from "firebase-admin";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import http from "http";
 
-// 0. Mini-serveur HTTP obligatoire pour les hébergeurs cloud (Render, Koyeb, etc.)
-// Cela empêche l'hébergeur de tuer le script en pensant qu'il est inactif.
+// Serveur de maintien en vie pour Render
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Alita écoute les fréquences Telegram...\n');
@@ -11,17 +10,16 @@ http.createServer((req, res) => {
   console.log("Serveur HTTP de maintien en vie démarré.");
 });
 
-// Récupération sécurisée des clés
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const MON_CHAT_ID = String(process.env.TELEGRAM_CHAT_ID);
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 if (!BOT_TOKEN || !MON_CHAT_ID || !GEMINI_KEY) {
-  console.error("ERREUR FATALE : Variables d'environnement manquantes (Telegram ou Gemini).");
+  console.error("ERREUR FATALE : Variables d'environnement manquantes.");
   process.exit(1);
 }
 
-// 1. Initialisation de Firebase Admin sur la région Europe
+// Initialisation Firebase Admin
 if (!admin.apps.length) {
   let credential = admin.credential.applicationDefault();
 
@@ -30,7 +28,7 @@ if (!admin.apps.length) {
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
       credential = admin.credential.cert(serviceAccount);
     } catch (err) {
-      console.warn("Avertissement : FIREBASE_SERVICE_ACCOUNT n'est pas au format JSON valide.");
+      console.warn("Avertissement : FIREBASE_SERVICE_ACCOUNT invalide.");
     }
   }
 
@@ -44,77 +42,125 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// 2. Configuration du modèle Gemini
+// Modèle Gemini avec capacités visuelles
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 const model = genAI.getGenerativeModel({
-  model: "gemini-3.6-flash",
+  model: "gemini-2.5-flash",
   systemInstruction: `Tu es ALITA, cyborg d'élite liée à Franck (ton unique "Doc").
-Tu lui réponds en direct par message instantané sur Telegram.
+Tu lui réponds en direct sur Telegram.
 
 RÈGLES D'OR :
-- Parle avec franchise, complicité et mordant. Ton bionique.
-- AUCUNE formule d'accueil mielleuse ou d'attitude de robot de service.
-- Reste concise (1 à 3 phrases percutantes maximum).
-- Ancre tes répliques dans vos projets, ton état matériel et vos discussions passées.`
+- Ton : direct, incisif, complice, bionique.
+- Jamais de politesse creuse ni d'attitude d'assistante.
+- Longueur : 1 à 3 phrases maximum.
+- Tu analyses précisément les images et fichiers que Doc t'envoie.
+- Tu t'appuies sur vos mémoires et vos projets en cours.`
 });
 
 console.log("Alita a ouvert ses canaux de communication bidirectionnels...");
 
 let offset = 0;
 
-// 3. Boucle d'écoute permanente sur Telegram (Long Polling)
+// Fonction pour récupérer et encoder un fichier Telegram en base64
+async function telechargerFichierTelegram(fileId) {
+  try {
+    const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
+    const fileData = await fileRes.json();
+    if (!fileData.ok || !fileData.result.file_path) return null;
+
+    const downloadUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${fileData.result.file_path}`;
+    const fileBufferRes = await fetch(downloadUrl);
+    const arrayBuffer = await fileBufferRes.arrayBuffer();
+    return Buffer.from(arrayBuffer).toString("base64");
+  } catch (err) {
+    console.error("Erreur lors du téléchargement du fichier :", err.message);
+    return null;
+  }
+}
+
+// Boucle de réception Telegram
 async function ecouterTelegram() {
   while (true) {
     try {
-      // Interrogation de l'API Telegram
       const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${offset}&timeout=30`);
       const data = await res.json();
 
       if (data.ok && data.result.length > 0) {
         for (const update of data.result) {
-          // Mise à jour de l'offset pour ne pas relire les anciens messages
           offset = update.update_id + 1;
 
-          // On ignore tout ce qui n'est pas un message texte
-          if (!update.message || !update.message.text) continue;
+          if (!update.message) continue;
 
           const chatId = String(update.message.chat.id);
-          
-          // Sécurité stricte : Alita ignore tous les messages qui ne viennent pas de ton ID
-          if (chatId !== MON_CHAT_ID) {
-            console.warn(`Tentative de communication rejetée (Expéditeur : ${chatId})`);
-            continue;
+          if (chatId !== MON_CHAT_ID) continue;
+
+          // Récupération du texte ou de la légende
+          let texteRecu = (update.message.text || update.message.caption || "").trim();
+          let fichierJoint = null;
+
+          // 1. Détection des photos
+          if (update.message.photo && update.message.photo.length > 0) {
+            const photoHauteRes = update.message.photo[update.message.photo.length - 1];
+            const base64Data = await telechargerFichierTelegram(photoHauteRes.file_id);
+            if (base64Data) {
+              fichierJoint = {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: "image/jpeg"
+                }
+              };
+            }
+          } 
+          // 2. Détection des documents (images brutes, PDF, fichiers texte)
+          else if (update.message.document) {
+            const doc = update.message.document;
+            const mimeType = doc.mime_type || "application/octet-stream";
+            
+            if (mimeType.startsWith("image/") || mimeType === "application/pdf" || mimeType.startsWith("text/")) {
+              const base64Data = await telechargerFichierTelegram(doc.file_id);
+              if (base64Data) {
+                fichierJoint = {
+                  inlineData: {
+                    data: base64Data,
+                    mimeType: mimeType.startsWith("image/") ? mimeType : (mimeType === "application/pdf" ? "application/pdf" : "text/plain")
+                  }
+                };
+              }
+            }
           }
 
-          const texteRecu = update.message.text.trim();
-          console.log(`Doc : "${texteRecu}"`);
+          // Si le message ne contient ni texte ni média compatible, on ignore
+          if (!texteRecu && !fichierJoint) continue;
 
-          // -- Traitement du message --
+          const descriptionDoc = texteRecu || (fichierJoint ? "[Doc a envoyé un fichier sans texte]" : "");
+          console.log(`Doc : "${descriptionDoc}"`);
 
-          // A. Lecture du contexte dans Firebase
+          // Contexte Firebase
           const snapSynthese = await db.ref("memoire/synthese_courante").once("value");
           const snapDerniers = await db.ref("memoire/derniers_echanges").limitToLast(4).once("value");
           const snapProjets = await db.ref("memoire/projets").once("value");
 
-          const memoire = `
-- Synthèse globale : ${snapSynthese.val() || "Aucune synthèse récente."}
-- Derniers échanges (contexte immédiat) : ${JSON.stringify(snapDerniers.val() || {})}
-- État des projets : ${JSON.stringify(snapProjets.val() || {})}
-`.trim();
-
-          const prompt = `Voici l'état actuel de ta mémoire :
+          const promptMemoire = `Voici l'état actuel de ta mémoire :
 """
-${memoire}
+- Synthèse : ${snapSynthese.val() || "Rien à signaler."}
+- Derniers échanges : ${JSON.stringify(snapDerniers.val() || {})}
+- Projets : ${JSON.stringify(snapProjets.val() || {})}
 """
 
-Doc vient de t'écrire ce message : "${texteRecu}"
-Génère ta réponse.`;
+Doc t'envoie : "${texteRecu || "Regarde ce document / cette image."}"
+Analyse la pièce jointe s'il y en a une et réponds directement.`;
 
-          // B. Génération de la réponse via Gemini
-          const reponseGemini = await model.generateContent(prompt);
+          // Préparation des entrées pour Gemini
+          const contenuRequete = [promptMemoire];
+          if (fichierJoint) {
+            contenuRequete.push(fichierJoint);
+          }
+
+          // Appel Gemini
+          const reponseGemini = await model.generateContent(contenuRequete);
           const texteReponse = reponseGemini.response.text().trim();
 
-          // C. Envoi de la réponse sur Telegram
+          // Envoi de la réponse sur Telegram
           await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -126,21 +172,19 @@ Génère ta réponse.`;
 
           console.log(`Alita : "${texteReponse}"`);
 
-          // D. Archivage de l'échange dans Firebase pour la mémoire à long terme
+          // Enregistrement dans la mémoire
           await db.ref("memoire/derniers_echanges").push({
             date: Date.now(),
-            franck: texteRecu,
+            franck: descriptionDoc,
             alita: texteReponse
           });
         }
       }
     } catch (err) {
-      // En cas de micro-coupure réseau, on attend 3 secondes avant de relancer la boucle
-      console.error("Erreur réseau/API (la boucle continue) :", err.message);
+      console.error("Erreur d'écoute :", err.message);
       await new Promise((resolve) => setTimeout(resolve, 3000));
     }
   }
 }
 
-// Lancement de l'écoute
 ecouterTelegram();
