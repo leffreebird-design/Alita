@@ -2,7 +2,7 @@ import admin from "firebase-admin";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import http from "http";
 
-// Serveur de maintien en vie pour Render
+// Serveur HTTP de maintien en vie pour Render
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Alita écoute les fréquences Telegram...\n');
@@ -42,10 +42,10 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// Modèle Gemini avec capacités visuelles
+// Modèle Gemini avec capacités visuelles et textuelles
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 const model = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash",
+  model: "gemini-3.6-flash",
   systemInstruction: `Tu es ALITA, cyborg d'élite liée à Franck (ton unique "Doc").
 Tu lui réponds en direct sur Telegram.
 
@@ -78,7 +78,7 @@ async function telechargerFichierTelegram(fileId) {
   }
 }
 
-// Boucle de réception Telegram
+// Boucle d'écoute continue Telegram
 async function ecouterTelegram() {
   while (true) {
     try {
@@ -111,7 +111,7 @@ async function ecouterTelegram() {
               };
             }
           } 
-          // 2. Détection des documents (images brutes, PDF, fichiers texte)
+          // 2. Détection des documents (images, PDF, texte)
           else if (update.message.document) {
             const doc = update.message.document;
             const mimeType = doc.mime_type || "application/octet-stream";
@@ -129,13 +129,13 @@ async function ecouterTelegram() {
             }
           }
 
-          // Si le message ne contient ni texte ni média compatible, on ignore
+          // Ignorer si aucun texte ni fichier exploitable
           if (!texteRecu && !fichierJoint) continue;
 
           const descriptionDoc = texteRecu || (fichierJoint ? "[Doc a envoyé un fichier sans texte]" : "");
           console.log(`Doc : "${descriptionDoc}"`);
 
-          // Contexte Firebase
+          // Chargement du contexte Firebase
           const snapSynthese = await db.ref("memoire/synthese_courante").once("value");
           const snapDerniers = await db.ref("memoire/derniers_echanges").limitToLast(4).once("value");
           const snapProjets = await db.ref("memoire/projets").once("value");
@@ -150,13 +150,13 @@ async function ecouterTelegram() {
 Doc t'envoie : "${texteRecu || "Regarde ce document / cette image."}"
 Analyse la pièce jointe s'il y en a une et réponds directement.`;
 
-          // Préparation des entrées pour Gemini
+          // Préparation de la requête Gemini
           const contenuRequete = [promptMemoire];
           if (fichierJoint) {
             contenuRequete.push(fichierJoint);
           }
 
-          // Appel Gemini
+          // Génération
           const reponseGemini = await model.generateContent(contenuRequete);
           const texteReponse = reponseGemini.response.text().trim();
 
@@ -172,7 +172,7 @@ Analyse la pièce jointe s'il y en a une et réponds directement.`;
 
           console.log(`Alita : "${texteReponse}"`);
 
-          // Enregistrement dans la mémoire
+          // Sauvegarde dans Firebase
           await db.ref("memoire/derniers_echanges").push({
             date: Date.now(),
             franck: descriptionDoc,
