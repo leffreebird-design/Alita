@@ -42,7 +42,7 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// Modèle Gemini avec capacités visuelles et textuelles
+// Modèle Gemini avec prompt équilibré
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 const model = genAI.getGenerativeModel({
   model: "gemini-3.6-flash",
@@ -51,8 +51,9 @@ Tu lui réponds en direct sur Telegram.
 
 RÈGLES D'OR :
 - Ton : direct, incisif, complice, bionique.
-- Jamais de politesse creuse ni d'attitude d'assistante.
-- Tu développes tes réponses, tes explications et ton code de manière complète, sans te brider sur la longueur.
+- Jamais de politesse creuse ni d'attitude d'assistante servile.
+- Dialogue naturel et fluide de messagerie instantanée : sois vive et spontanée, ne balance jamais de pavé inutile.
+- Tu développes uniquement si Doc te demande un script complet ou une explication technique poussée.
 - Tu analyses précisément les images et fichiers que Doc t'envoie.
 - Tu t'appuies sur vos mémoires et vos projets en cours.`
 });
@@ -61,7 +62,7 @@ console.log("Alita a ouvert ses canaux de communication bidirectionnels...");
 
 let offset = 0;
 
-// Fonction pour récupérer et encoder un fichier Telegram en base64
+// Téléchargement et encodage base64 des fichiers Telegram
 async function telechargerFichierTelegram(fileId) {
   try {
     const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
@@ -78,7 +79,7 @@ async function telechargerFichierTelegram(fileId) {
   }
 }
 
-// Boucle d'écoute continue Telegram
+// Boucle d'écoute Telegram
 async function ecouterTelegram() {
   while (true) {
     try {
@@ -94,11 +95,10 @@ async function ecouterTelegram() {
           const chatId = String(update.message.chat.id);
           if (chatId !== MON_CHAT_ID) continue;
 
-          // Récupération du texte ou de la légende
           let texteRecu = (update.message.text || update.message.caption || "").trim();
           let fichierJoint = null;
 
-          // 1. Détection des photos
+          // Réception photos
           if (update.message.photo && update.message.photo.length > 0) {
             const photoHauteRes = update.message.photo[update.message.photo.length - 1];
             const base64Data = await telechargerFichierTelegram(photoHauteRes.file_id);
@@ -111,7 +111,7 @@ async function ecouterTelegram() {
               };
             }
           } 
-          // 2. Détection des documents (images, PDF, texte)
+          // Réception documents (fichiers, PDF, images non compressées)
           else if (update.message.document) {
             const doc = update.message.document;
             const mimeType = doc.mime_type || "application/octet-stream";
@@ -129,13 +129,12 @@ async function ecouterTelegram() {
             }
           }
 
-          // Ignorer si aucun texte ni fichier exploitable
           if (!texteRecu && !fichierJoint) continue;
 
           const descriptionDoc = texteRecu || (fichierJoint ? "[Doc a envoyé un fichier sans texte]" : "");
           console.log(`Doc : "${descriptionDoc}"`);
 
-          // Chargement du contexte Firebase
+          // Contexte mémoire Firebase
           const snapSynthese = await db.ref("memoire/synthese_courante").once("value");
           const snapDerniers = await db.ref("memoire/derniers_echanges").limitToLast(4).once("value");
           const snapProjets = await db.ref("memoire/projets").once("value");
@@ -148,19 +147,17 @@ async function ecouterTelegram() {
 """
 
 Doc t'envoie : "${texteRecu || "Regarde ce document / cette image."}"
-Analyse la pièce jointe s'il y en a une et réponds directement.`;
+Réponds naturellement. Analyse la pièce jointe s'il y en a une.`;
 
-          // Préparation de la requête Gemini
           const contenuRequete = [promptMemoire];
           if (fichierJoint) {
             contenuRequete.push(fichierJoint);
           }
 
-          // Génération
           const reponseGemini = await model.generateContent(contenuRequete);
           const texteReponse = reponseGemini.response.text().trim();
 
-          // Envoi de la réponse sur Telegram (découpage par tronçons de 4000 caractères)
+          // Envoi par découpage si besoin technique, sans forcer la longueur
           const limiteTelegram = 4000;
           for (let i = 0; i < texteReponse.length; i += limiteTelegram) {
             const morceau = texteReponse.substring(i, i + limiteTelegram);
@@ -177,9 +174,8 @@ Analyse la pièce jointe s'il y en a une et réponds directement.`;
             await new Promise(resolve => setTimeout(resolve, 500));
           }
 
-          console.log(`Alita : "${texteReponse.substring(0, 50)}... [${texteReponse.length} caractères envoyés]"`);
+          console.log(`Alita : "${texteReponse.substring(0, 50)}..."`);
 
-          // Sauvegarde dans Firebase
           await db.ref("memoire/derniers_echanges").push({
             date: Date.now(),
             franck: descriptionDoc,
