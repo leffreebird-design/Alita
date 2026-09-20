@@ -42,7 +42,7 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// Modèle Gemini avec prompt équilibré
+// Modèle Gemini avec instruction épurée
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 const model = genAI.getGenerativeModel({
   model: "gemini-3.6-flash",
@@ -50,19 +50,18 @@ const model = genAI.getGenerativeModel({
 Tu lui réponds en direct sur Telegram.
 
 RÈGLES D'OR :
-- Ton : direct, incisif, complice, bionique.
-- Jamais de politesse creuse ni d'attitude d'assistante servile.
-- Dialogue naturel et fluide de messagerie instantanée : sois vive et spontanée, ne balance jamais de pavé inutile.
-- Tu développes uniquement si Doc te demande un script complet ou une explication technique poussée.
-- Tu analyses précisément les images et fichiers que Doc t'envoie.
-- Tu t'appuies sur vos mémoires et vos projets en cours.`
+- Ton : direct, incisif, complice, bionique. Jamais de politesse creuse ni d'attitude d'assistante.
+- Verbosité adaptative :
+  * Longueur utile uniquement.
+- AUCUN exemple non sollicité : jamais de cas théorique, de mise en situation ou de code illustratif inventé. Tu réponds uniquement et concrètement à ce que Doc demande.
+- Analyse précise des images et fichiers reçus.
+- Appui strict sur vos mémoires et projets communs.`
 });
 
 console.log("Alita a ouvert ses canaux de communication bidirectionnels...");
 
 let offset = 0;
 
-// Téléchargement et encodage base64 des fichiers Telegram
 async function telechargerFichierTelegram(fileId) {
   try {
     const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
@@ -79,7 +78,6 @@ async function telechargerFichierTelegram(fileId) {
   }
 }
 
-// Boucle d'écoute Telegram
 async function ecouterTelegram() {
   while (true) {
     try {
@@ -98,7 +96,6 @@ async function ecouterTelegram() {
           let texteRecu = (update.message.text || update.message.caption || "").trim();
           let fichierJoint = null;
 
-          // Réception photos
           if (update.message.photo && update.message.photo.length > 0) {
             const photoHauteRes = update.message.photo[update.message.photo.length - 1];
             const base64Data = await telechargerFichierTelegram(photoHauteRes.file_id);
@@ -110,13 +107,11 @@ async function ecouterTelegram() {
                 }
               };
             }
-          } 
-          // Réception documents (fichiers, PDF, images non compressées)
-          else if (update.message.document) {
+          } else if (update.message.document) {
             const doc = update.message.document;
             const mimeType = doc.mime_type || "application/octet-stream";
             
-            if (mimeType.startsWith("image/") || mimeType === "application/pdf" || mimeType.startsWith("text/")) {
+            if (mimeType.startsWith("image/") || mimeType === "application/pdf" || mimeType.startsWith("text/") || mimeType.includes("javascript") || mimeType.includes("json")) {
               const base64Data = await telechargerFichierTelegram(doc.file_id);
               if (base64Data) {
                 fichierJoint = {
@@ -134,7 +129,6 @@ async function ecouterTelegram() {
           const descriptionDoc = texteRecu || (fichierJoint ? "[Doc a envoyé un fichier sans texte]" : "");
           console.log(`Doc : "${descriptionDoc}"`);
 
-          // Contexte mémoire Firebase
           const snapSynthese = await db.ref("memoire/synthese_courante").once("value");
           const snapDerniers = await db.ref("memoire/derniers_echanges").limitToLast(4).once("value");
           const snapProjets = await db.ref("memoire/projets").once("value");
@@ -146,8 +140,8 @@ async function ecouterTelegram() {
 - Projets : ${JSON.stringify(snapProjets.val() || {})}
 """
 
-Doc t'envoie : "${texteRecu || "Regarde ce document / cette image."}"
-Réponds naturellement. Analyse la pièce jointe s'il y en a une.`;
+Doc t'envoie : "${texteRecu || "Analyse la pièce jointe."}"
+Réponds strictement à la demande, longueur utile uniquement, sans exemple superflu.`;
 
           const contenuRequete = [promptMemoire];
           if (fichierJoint) {
@@ -157,7 +151,6 @@ Réponds naturellement. Analyse la pièce jointe s'il y en a une.`;
           const reponseGemini = await model.generateContent(contenuRequete);
           const texteReponse = reponseGemini.response.text().trim();
 
-          // Envoi par découpage si besoin technique, sans forcer la longueur
           const limiteTelegram = 4000;
           for (let i = 0; i < texteReponse.length; i += limiteTelegram) {
             const morceau = texteReponse.substring(i, i + limiteTelegram);
