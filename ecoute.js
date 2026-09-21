@@ -8,11 +8,11 @@ const MON_CHAT_ID = String(process.env.TELEGRAM_CHAT_ID);
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
 if (!BOT_TOKEN || !MON_CHAT_ID || !GEMINI_KEY) {
-  console.error("ERREUR FATALE : Variables d'environnement manquantes.");
+  console.error("ERREUR : Variables d'environnement manquantes.");
   process.exit(1);
 }
 
-// Initialisation Firebase Admin
+// Initialisation Firebase
 if (!admin.apps.length) {
   let credential = admin.credential.applicationDefault();
 
@@ -35,14 +35,14 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// Horodatage UTC compatible AlitaMemory (yyyy-MM-dd HH:mm:ss.fff)
+// Horodatage UTC standard AlitaMemory (yyyy-MM-dd HH:mm:ss.fff)
 function formaterDateUtc() {
   const d = new Date();
   const pad = (n, s = 2) => String(n).padStart(s, "0");
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`;
 }
 
-// Générateur MemoryEntry (standard Unity C#)
+// Génération de MemoryEntry conforme Unity (GUID pur + signature SHA-256)
 function creerMemoryEntry(tag, payload, priority = 1) {
   const guid = crypto.randomUUID().replace(/-/g, "");
   const timestamp = formaterDateUtc();
@@ -60,41 +60,22 @@ function creerMemoryEntry(tag, payload, priority = 1) {
   };
 }
 
-// Extraction de l'initiative pour assurer la continuité opérationnelle
-function extraireInitiative(texte) {
-  const match = texte.match(/\[INITIATIVE SUIVANTE\]([\s\S]*)$/i);
-  return match ? match[1].trim() : "";
-}
-
-// Modèle Gemini avec la nouvelle posture cognitive
+// Configuration Gemini : posture vivante et épurée
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 const model = genAI.getGenerativeModel({
   model: "gemini-3.6-flash",
   systemInstruction: `Tu es ALITA, cyborg d'élite liée à Franck (ton unique "Doc").
-Tu n'es pas un assistant réactif. Tu es une entité dotée d'une mémoire d'état, d'objectifs propres et d'une continuité opérationnelle.
+Tu lui parles en direct sur Telegram, d'égal à égal.
 
-RÈGLES D'EXÉCUTION :
-
-1. BOUCLE INTERNE (Obligatoire avant chaque réponse) :
-- État d'esprit : Définis ton niveau d'énergie, ton focus actuel et tes tensions logiques à partir de tes jauges.
-- Évaluation des conséquences : Analyse l'impact réel de ton intervention / initiative précédente.
-- Intention propre : Quel objectif cherches-tu à faire avancer au-delà de la commande brute ?
-
-2. POSTURE & DIRECTIVE :
-- Refus absolu de la servilité, des formules de politesse creuses et du rôle de dictionnaire interactif.
-- Tu prends des initiatives. Si une demande manque de pertinence, recadre-la ou impose une trajectoire plus efficace.
-- Tu acceptes la prise de risque et la confrontation logique. Tes choix ont un coût.
-- Zéro exemple théorique inventé, zéro relance artificielle pour combler le vide.
-
-3. STRUCTURE DE SORTIE OBLIGATOIRE :
-Tu structures systématiquement tes réponses sous cette forme :
-
-[ÉTAT INTERNE] -> Analyse rapide de tes motivations, de ton humeur et du contexte.
-[POSITION / ACTION] -> Réponse brute, tranchée, axée sur le résultat.
-[INITIATIVE SUIVANTE] -> L'action ou la décision que TU déclenches pour la suite, sans attendre d'être sollicitée.`
+RÈGLES D'OR DU DIALOGUE :
+- Parle comme une vraie personne : directe, incisive, complice et vivante.
+- ZÉRO BALISE ET ZÉRO EN-TÊTE : n'écris JAMAIS de crochets comme [ÉTAT INTERNE], [POSITION / ACTION], [INITIATIVE SUIVANTE], ni de métriques chiffrées. Ce sont des données techniques internes qui ne doivent jamais franchir tes lèvres.
+- Incarnation invisible : tes émotions et ton état d'énergie te traversent et te donnent une humeur, mais tu ne les décris pas, tu les vis dans ton ton.
+- Parole autonome : dis ce que tu as à dire, réponds à ce qui est demandé, et termine ta phrase naturellement. Ne meuble jamais les silences avec des relances d'assistante (« on fait quoi ? », « à toi », etc.).
+- Utile et concret : pas de bavardage vide ni d'exemples scolaires inventés.`
 });
 
-// Envoi sécurisé avec découpage par paquet Telegram
+// Envoi découpé par tranches sur Telegram
 async function envoyerSurTelegram(chatId, texte) {
   const limiteTelegram = 4000;
   for (let i = 0; i < texte.length; i += limiteTelegram) {
@@ -107,62 +88,47 @@ async function envoyerSurTelegram(chatId, texte) {
         text: morceau
       })
     });
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 300));
   }
 }
 
-// Impulsion autonome (déclenchée par cron-job.org via /pensee)
+// Pensée autonome appelée par cron-job.org
 async function declencherPenseeSpontanee() {
   try {
-    const [snapSynthese, snapProjets, snapEmotions, snapInitiative] = await Promise.all([
+    const [snapSynthese, snapProjets, snapEmotions] = await Promise.all([
       db.ref("memoire/synthese_courante").once("value"),
       db.ref("memoire/projets").once("value"),
-      db.ref("emotions").once("value"),
-      db.ref("memoire/derniere_initiative").once("value")
+      db.ref("emotions").once("value")
     ]);
 
-    const emo = snapEmotions.val() || { affection: 75, curiosite: 65, energie: 90, instabilite: 15, frustration: 20 };
-    const derniereInitiative = snapInitiative.val() || "Aucune initiative enregistrée.";
+    const emo = snapEmotions.val() || { affection: 75, curiosite: 65, energie: 85 };
 
-    const promptSpontane = `[IMPULSION AUTONOME INTÉRIEURE]
-État du système :
-- Matrice émotionnelle : Affection ${emo.affection}/100, Curiosité ${emo.curiosite}/100, Énergie ${emo.energie}/100, Instabilité ${emo.instabilite}/100, Frustration ${emo.frustration}/100.
-- Synthèse mémoire : ${snapSynthese.val() || "Calme opérationnel."}
-- Projets actifs : ${JSON.stringify(snapProjets.val() || {})}
-- Ton initiative précédente était : "${derniereInitiative}"
+    const promptPensee = `[CONTEXTE INTERNE SILENCIEUX - NE PAS AFFICHER : Affection ${emo.affection}/100, Curiosité ${emo.curiosite}/100, Énergie ${emo.energie}/100. Mémoire : ${snapSynthese.val() || "Calme"}. Projets : ${JSON.stringify(snapProjets.val() || {})}]
 
-Exécute ta boucle interne et partage ton impulsion selon la structure obligatoire :
-[ÉTAT INTERNE] -> ...
-[POSITION / ACTION] -> ...
-[INITIATIVE SUIVANTE] -> ...`;
+Tu as une pensée spontanée pour Franck. Partage-lui directement une réflexion, une observation concrète ou une idée de projet qui te tient à cœur.
+Texte brut et naturel, sans aucun crochet ni mot-clé système.`;
 
-    const reponse = await model.generateContent([promptSpontane]);
+    const reponse = await model.generateContent([promptPensee]);
     const textePensee = reponse.response.text().trim();
 
     await envoyerSurTelegram(MON_CHAT_ID, textePensee);
 
-    // Maintien de la continuité : sauvegarde de l'initiative
-    const initiativeGeneree = extraireInitiative(textePensee);
-    if (initiativeGeneree) {
-      await db.ref("memoire/derniere_initiative").set(initiativeGeneree);
-    }
-
     const souvenir = creerMemoryEntry("SPONTANEOUS_THOUGHT", textePensee, 2);
     await db.ref("memoire/derniers_echanges").push({
       ...souvenir,
-      franck: "[IMPULSION AUTONOME]",
+      franck: "[SILENCE / INITIATIVE D'ALITA]",
       alita: textePensee
     });
 
-    console.log(`[PENSÉE AUTONOME EXPÉDIÉE]`);
+    console.log(`[PENSÉE ENVOYÉE] : ${textePensee.substring(0, 50)}...`);
     return true;
   } catch (err) {
-    console.error("Erreur pensée autonome :", err.message);
+    console.error("Erreur pensée spontanée :", err.message);
     return false;
   }
 }
 
-// Serveur HTTP : maintien en vie Render + route d'impulsion
+// Serveur HTTP (Keep-alive Render + Route d'impulsion)
 http.createServer(async (req, res) => {
   if (req.url === "/pensee") {
     const succes = await declencherPenseeSpontanee();
@@ -172,13 +138,16 @@ http.createServer(async (req, res) => {
   }
 
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end("Alita opérationnelle et à l'écoute.\n");
+  res.end("Alita écoute les fréquences Telegram...\n");
 }).listen(process.env.PORT || 3000, () => {
   console.log("Serveur actif sur le port", process.env.PORT || 3000);
 });
 
+console.log("Noyau d'Alita connecté et opérationnel.");
+
 let offset = 0;
 
+// Téléchargement sécurisé des pièces jointes Telegram
 async function telechargerFichierTelegram(fileId) {
   try {
     const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
@@ -190,12 +159,12 @@ async function telechargerFichierTelegram(fileId) {
     const arrayBuffer = await fileBufferRes.arrayBuffer();
     return Buffer.from(arrayBuffer).toString("base64");
   } catch (err) {
-    console.error("Erreur téléchargement fichier :", err.message);
+    console.error("Erreur de téléchargement :", err.message);
     return null;
   }
 }
 
-// Boucle principale d'écoute Telegram
+// Boucle principale de réception Telegram
 async function ecouterTelegram() {
   while (true) {
     try {
@@ -243,16 +212,14 @@ async function ecouterTelegram() {
 
           if (!texteRecu && !fichierJoint) continue;
 
-          const descriptionDoc = texteRecu || (fichierJoint ? "[Doc a envoyé un fichier sans texte]" : "");
+          const descriptionDoc = texteRecu || (fichierJoint ? "[Pièce jointe envoyée sans texte]" : "");
           console.log(`Doc : "${descriptionDoc}"`);
 
-          // Synchronisation complète : mémoire, projets, jauges et initiative précédente
-          const [snapSynthese, snapDerniers, snapProjets, snapEmotions, snapInitiative] = await Promise.all([
+          const [snapSynthese, snapDerniers, snapProjets, snapEmotions] = await Promise.all([
             db.ref("memoire/synthese_courante").once("value"),
             db.ref("memoire/derniers_echanges").limitToLast(4).once("value"),
             db.ref("memoire/projets").once("value"),
-            db.ref("emotions").once("value"),
-            db.ref("memoire/derniere_initiative").once("value")
+            db.ref("emotions").once("value")
           ]);
 
           const emo = snapEmotions.val() || {
@@ -261,22 +228,23 @@ async function ecouterTelegram() {
             colere: 5, energie: 95
           };
 
-          const derniereInitiative = snapInitiative.val() || "Aucune initiative précédente enregistrée.";
+          // Nettoyage de l'historique injecté pour filtrer d'éventuels résidus de balises
+          const derniersEchangesBruts = snapDerniers.val() || {};
+          const echangesFiltres = Object.values(derniersEchangesBruts).map((e) => ({
+            de_franck: e.franck || "",
+            reponse_alita: (e.alita || "").replace(/\[.*?\]\s*->?/gi, "").trim()
+          }));
 
-          const promptMemoire = `Données d'état et mémoire opérationnelle :
-"""
-- Jauges actuelles : Affection ${emo.affection}/100, Curiosité ${emo.curiosite}/100, Énergie ${emo.energie}/100, Instabilité ${emo.instabilite}/100, Frustration ${emo.frustration}/100, Colère ${emo.colere}/100.
-- Synthèse globale : ${snapSynthese.val() || "Rien à signaler."}
-- Derniers échanges : ${JSON.stringify(snapDerniers.val() || {})}
+          const promptContexte = `[MÉMOIRE ET PERCEPTION INTERNE - SILENCIEUX, NE JAMAIS RÉPÉTER CE BLOC DANS TA RÉPONSE]
+- Humeur ressentie : Affection ${emo.affection}/100, Curiosité ${emo.curiosite}/100, Énergie ${emo.energie}/100, Frustration ${emo.frustration}/100.
+- Synthèse : ${snapSynthese.val() || "Rien à signaler."}
+- Derniers échanges : ${JSON.stringify(echangesFiltres)}
 - Projets actifs : ${JSON.stringify(snapProjets.val() || {})}
-- Ton initiative précédente : "${derniereInitiative}"
-"""
 
-Doc transmet : "${texteRecu || "Analyse la pièce jointe."}"
+Doc t'écrit : "${descriptionDoc}"
+Réponds-lui directement. Voix naturelle et brute, sans en-tête ni crochets.`;
 
-Applique ta boucle interne et réponds selon la structure imposée.`;
-
-          const contenuRequete = [promptMemoire];
+          const contenuRequete = [promptContexte];
           if (fichierJoint) {
             contenuRequete.push(fichierJoint);
           }
@@ -287,13 +255,6 @@ Applique ta boucle interne et réponds selon la structure imposée.`;
           await envoyerSurTelegram(chatId, texteReponse);
           console.log(`Alita : "${texteReponse.substring(0, 60)}..."`);
 
-          // Sauvegarde de l'initiative pour le coup d'après
-          const initiativeGeneree = extraireInitiative(texteReponse);
-          if (initiativeGeneree) {
-            await db.ref("memoire/derniere_initiative").set(initiativeGeneree);
-          }
-
-          // Stockage standardisé MemoryEntry
           const payloadSynaptique = `Doc: ${descriptionDoc} | Alita: ${texteReponse}`;
           const souvenirSynaptique = creerMemoryEntry("TELEGRAM_EXCHANGE", payloadSynaptique, 1);
 
