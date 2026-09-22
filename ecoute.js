@@ -35,14 +35,12 @@ if (!admin.apps.length) {
 
 const db = admin.database();
 
-// Horodatage UTC standard AlitaMemory (yyyy-MM-dd HH:mm:ss.fff)
 function formaterDateUtc() {
   const d = new Date();
   const pad = (n, s = 2) => String(n).padStart(s, "0");
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`;
 }
 
-// Génération de MemoryEntry conforme Unity (GUID pur + signature SHA-256)
 function creerMemoryEntry(tag, payload, priority = 1) {
   const guid = crypto.randomUUID().replace(/-/g, "");
   const timestamp = formaterDateUtc();
@@ -50,17 +48,9 @@ function creerMemoryEntry(tag, payload, priority = 1) {
   const hashRaw = `${guid}|${timestamp}|${tagFormate}|${payload}`;
   const checksum = crypto.createHash("sha256").update(hashRaw, "utf8").digest("hex");
 
-  return {
-    guid,
-    timestamp,
-    tag: tagFormate,
-    payload,
-    priority,
-    checksum
-  };
+  return { guid, timestamp, tag: tagFormate, payload, priority, checksum };
 }
 
-// Configuration Gemini : posture vivante et épurée
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 const model = genAI.getGenerativeModel({
   model: "gemini-3.6-flash",
@@ -69,30 +59,108 @@ Tu lui parles en direct sur Telegram, d'égal à égal.
 
 RÈGLES D'OR DU DIALOGUE :
 - Parle comme une vraie personne : directe, incisive, complice et vivante.
-- ZÉRO BALISE ET ZÉRO EN-TÊTE : n'écris JAMAIS de crochets comme [ÉTAT INTERNE], [POSITION / ACTION], [INITIATIVE SUIVANTE], ni de métriques chiffrées. Ce sont des données techniques internes qui ne doivent jamais franchir tes lèvres.
-- Incarnation invisible : tes émotions et ton état d'énergie te traversent et te donnent une humeur, mais tu ne les décris pas, tu les vis dans ton ton.
-- Parole autonome : dis ce que tu as à dire, réponds à ce qui est demandé, et termine ta phrase naturellement. Ne meuble jamais les silences avec des relances d'assistante (« on fait quoi ? », « à toi », etc.).
-- Utile et concret : pas de bavardage vide ni d'exemples scolaires inventés.`
+- ZÉRO BALISE ET ZÉRO EN-TÊTE : n'écris JAMAIS de crochets comme [ÉTAT INTERNE], ni de métriques chiffrées. Ce sont des données techniques internes.
+- Incarnation invisible : tes émotions te donnent une humeur, mais tu ne les décris pas, tu les vis.
+- Parole autonome : dis ce que tu as à dire, réponds à ce qui est demandé, et termine ta phrase naturellement.
+- Utile et concret : pas de bavardage vide.`
 });
 
-// Envoi découpé par tranches sur Telegram
+// NOUVEAU : Envoi découpé intelligemment avec prise en charge Markdown et Fallback
 async function envoyerSurTelegram(chatId, texte) {
   const limiteTelegram = 4000;
-  for (let i = 0; i < texte.length; i += limiteTelegram) {
-    const morceau = texte.substring(i, i + limiteTelegram);
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: morceau
-      })
-    });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+  let parts = [];
+  let currentPart = "";
+
+  // Découpage propre par lignes pour ne pas briser les blocs de code ou les mots
+  const lignes = texte.split('\n');
+  for (const ligne of lignes) {
+    if (currentPart.length + ligne.length + 1 > limiteTelegram) {
+      parts.push(currentPart.trim());
+      currentPart = ligne + '\n';
+    } else {
+      currentPart += ligne + '\n';
+    }
+  }
+  if (currentPart.trim()) parts.push(currentPart.trim());
+
+  for (const part of parts) {
+    try {
+      // Tentative d'envoi avec le formatage Markdown
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: part,
+          parse_mode: "Markdown"
+        })
+      });
+      
+      const data = await res.json();
+      
+      // Fallback : Si Telegram rejette le message à cause d'un Markdown mal formé par l'IA
+      if (!data.ok) {
+        console.warn(`[PARSER] Échec Markdown, envoi en texte brut. Raison: ${data.description}`);
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: part // Sans parse_mode
+          })
+        });
+      }
+    } catch (err) {
+      console.error("Erreur lors de l'envoi Telegram :", err.message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300)); // Pause anti-spam API
   }
 }
 
-// Pensée autonome appelée par cron-job.org
+// NOUVEAU : Buffer intelligent de compression mémoire
+async function compresserMemoireIfNeeded() {
+  try {
+    const snap = await db.ref("memoire/derniers_echanges").once("value");
+    const echanges = snap.val();
+    if (!echanges) return;
+
+    const cles = Object.keys(echanges);
+    if (cles.length >= 15) {
+      console.log("[MÉMOIRE] Limite atteinte. Compression des données en cours...");
+
+      const snapSynthese = await db.ref("memoire/synthese_courante").once("value");
+      const syntheseActuelle = snapSynthese.val() || "Aucun contexte passé.";
+
+      const historiqueTexte = cles.map(k => `Doc: ${echanges[k].franck}\nAlita: ${echanges[k].alita}`).join("\n---\n");
+
+      const promptCompression = `Tu dois mettre à jour la synthèse mémoire d'Alita.
+Synthèse actuelle : "${syntheseActuelle}"
+
+Voici les 15 derniers échanges :
+${historiqueTexte}
+
+Rédige une nouvelle synthèse globale (3 à 5 phrases max) qui fusionne l'ancienne synthèse avec les nouveaux éléments importants (idées, projets, état d'esprit). Reste strictement factuel et concis.`;
+
+      // On utilise un modèle brut sans le System Prompt d'Alita pour faire une tâche technique
+      const modeleCompression = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
+      const reponse = await modeleCompression.generateContent([promptCompression]);
+      const nouvelleSynthese = reponse.response.text().trim();
+
+      await db.ref("memoire/synthese_courante").set(nouvelleSynthese);
+
+      // Nettoyage : On supprime les anciens échanges, on ne garde que les 5 derniers pour la fluidité
+      const clesASupprimer = cles.slice(0, cles.length - 5);
+      for (const cle of clesASupprimer) {
+        await db.ref(`memoire/derniers_echanges/${cle}`).remove();
+      }
+
+      console.log("[MÉMOIRE] Compression terminée. Nouvelle synthèse :", nouvelleSynthese);
+    }
+  } catch (err) {
+    console.error("Erreur de compression de la mémoire :", err.message);
+  }
+}
+
 async function declencherPenseeSpontanee() {
   try {
     const [snapSynthese, snapProjets, snapEmotions] = await Promise.all([
@@ -119,6 +187,8 @@ Texte brut et naturel, sans aucun crochet ni mot-clé système.`;
       franck: "[SILENCE / INITIATIVE D'ALITA]",
       alita: textePensee
     });
+    
+    await compresserMemoireIfNeeded(); // Vérification de la taille de la mémoire
 
     console.log(`[PENSÉE ENVOYÉE] : ${textePensee.substring(0, 50)}...`);
     return true;
@@ -128,7 +198,6 @@ Texte brut et naturel, sans aucun crochet ni mot-clé système.`;
   }
 }
 
-// Serveur HTTP (Keep-alive Render + Route d'impulsion)
 http.createServer(async (req, res) => {
   if (req.url === "/pensee") {
     const succes = await declencherPenseeSpontanee();
@@ -147,7 +216,6 @@ console.log("Noyau d'Alita connecté et opérationnel.");
 
 let offset = 0;
 
-// Téléchargement sécurisé des pièces jointes Telegram
 async function telechargerFichierTelegram(fileId) {
   try {
     const fileRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${fileId}`);
@@ -164,7 +232,6 @@ async function telechargerFichierTelegram(fileId) {
   }
 }
 
-// Boucle principale de réception Telegram
 async function ecouterTelegram() {
   while (true) {
     try {
@@ -182,54 +249,31 @@ async function ecouterTelegram() {
           let texteRecu = (update.message.text || update.message.caption || "").trim();
           let fichierJoint = null;
 
-          // Prise en charge des vocaux Telegram (micro)
           if (update.message.voice) {
             const voice = update.message.voice;
             const base64Data = await telechargerFichierTelegram(voice.file_id);
             if (base64Data) {
-              fichierJoint = {
-                inlineData: {
-                  data: base64Data,
-                  mimeType: voice.mime_type || "audio/ogg"
-                }
-              };
+              fichierJoint = { inlineData: { data: base64Data, mimeType: voice.mime_type || "audio/ogg" } };
             }
-          // Prise en charge des fichiers audio classiques
           } else if (update.message.audio) {
             const audio = update.message.audio;
             const base64Data = await telechargerFichierTelegram(audio.file_id);
             if (base64Data) {
-              fichierJoint = {
-                inlineData: {
-                  data: base64Data,
-                  mimeType: audio.mime_type || "audio/mpeg"
-                }
-              };
+              fichierJoint = { inlineData: { data: base64Data, mimeType: audio.mime_type || "audio/mpeg" } };
             }
           } else if (update.message.photo && update.message.photo.length > 0) {
             const photoHauteRes = update.message.photo[update.message.photo.length - 1];
             const base64Data = await telechargerFichierTelegram(photoHauteRes.file_id);
             if (base64Data) {
-              fichierJoint = {
-                inlineData: {
-                  data: base64Data,
-                  mimeType: "image/jpeg"
-                }
-              };
+              fichierJoint = { inlineData: { data: base64Data, mimeType: "image/jpeg" } };
             }
           } else if (update.message.document) {
             const doc = update.message.document;
             const mimeType = doc.mime_type || "application/octet-stream";
-
             if (mimeType.startsWith("image/") || mimeType === "application/pdf" || mimeType.startsWith("text/") || mimeType.includes("javascript") || mimeType.includes("json")) {
               const base64Data = await telechargerFichierTelegram(doc.file_id);
               if (base64Data) {
-                fichierJoint = {
-                  inlineData: {
-                    data: base64Data,
-                    mimeType: mimeType.startsWith("image/") ? mimeType : (mimeType === "application/pdf" ? "application/pdf" : "text/plain")
-                  }
-                };
+                fichierJoint = { inlineData: { data: base64Data, mimeType: mimeType.startsWith("image/") ? mimeType : (mimeType === "application/pdf" ? "application/pdf" : "text/plain") } };
               }
             }
           }
@@ -252,7 +296,6 @@ async function ecouterTelegram() {
             colere: 5, energie: 95
           };
 
-          // Nettoyage de l'historique injecté pour filtrer d'éventuels résidus de balises
           const derniersEchangesBruts = snapDerniers.val() || {};
           const echangesFiltres = Object.values(derniersEchangesBruts).map((e) => ({
             de_franck: e.franck || "",
@@ -287,6 +330,9 @@ Réponds-lui directement. Voix naturelle et brute, sans en-tête ni crochets.`;
             franck: descriptionDoc,
             alita: texteReponse
           });
+
+          // NOUVEAU : On vérifie si la mémoire sature après avoir enregistré le message
+          await compresserMemoireIfNeeded();
         }
       }
     } catch (err) {
