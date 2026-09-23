@@ -3,7 +3,6 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-
 // Middlewares de sécurité et de parsing
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
