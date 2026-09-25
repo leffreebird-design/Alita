@@ -37,7 +37,7 @@ async function demanderVenice(prompt, systemInstruction = NYX_SYSTEM_PROMPT) {
     const response = await axios.post(
       'https://api.venice.ai/api/v1/chat/completions',
       {
-        model: "llama-3.3-70b",
+        model: "dolphin-2.9.2-qwen2-72b",
         messages: [
           { role: "system", content: systemInstruction },
           { role: "user", content: prompt }
