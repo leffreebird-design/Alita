@@ -5,7 +5,6 @@ const axios = require('axios');
 // 1. CONFIGURATION & VÉRIFICATION
 // ==========================================
 const PORT = process.env.PORT || 3000;
-// CORRECTION : On pointe bien vers TELEGRAM_BOT_TOKEN
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; 
 const VENICE_API_KEY = process.env.VENICE_API_KEY;
 
@@ -68,7 +67,6 @@ async function demanderVenice(prompt, systemInstruction = NYX_SYSTEM_PROMPT) {
  */
 async function envoyerTelegram(chatId, texte) {
   try {
-    // Utilisation de la bonne variable TELEGRAM_BOT_TOKEN ici
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
       text: texte
@@ -82,14 +80,14 @@ async function envoyerTelegram(chatId, texte) {
 // 4. ROUTES (Endpoints de l'API)
 // ==========================================
 
-// Route Webhook Telegram (Celle appelée par Telegram quand tu lui parles)
+// Route Webhook Telegram
 app.post('/telegram', async (req, res) => {
-  // 1. On libère immédiatement la connexion Telegram pour éviter les timeouts/retries
+  // On libère immédiatement la connexion Telegram
   res.sendStatus(200);
 
   const message = req.body?.message;
 
-  // 2. On ignore les événements Telegram qui ne sont pas des messages textes
+  // On ignore si ce n'est pas un message texte
   if (!message || !message.text) return;
 
   const chatId = message.chat.id;
@@ -97,15 +95,15 @@ app.post('/telegram', async (req, res) => {
 
   console.log(`[FX -> NYX]: ${textUser}`);
 
-  // 3. Nyx génère sa réponse
+  // Nyx génère sa réponse
   const reponseNyx = await demanderVenice(textUser);
   console.log(`[NYX -> FX]: ${reponseNyx}`);
 
-  // 4. On envoie la réponse à Franck
+  // On envoie la réponse à Franck
   await envoyerTelegram(chatId, reponseNyx);
 });
 
-// Route de diagnostic / Healthcheck (Très utile pour Render pour ne pas couper le serveur)
+// Route de diagnostic / Healthcheck
 app.all('/pensee', (req, res) => {
   res.json({ 
     status: "NYX_ENGINE_ACTIVE", 
