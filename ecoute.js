@@ -5,12 +5,13 @@ const axios = require('axios');
 // 1. CONFIGURATION & VÉRIFICATION
 // ==========================================
 const PORT = process.env.PORT || 3000;
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+// CORRECTION : On pointe bien vers TELEGRAM_BOT_TOKEN
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN; 
 const VENICE_API_KEY = process.env.VENICE_API_KEY;
 
 // Sécurité : On s'assure que les clés sont bien fournies avant de démarrer
-if (!TELEGRAM_TOKEN || !VENICE_API_KEY) {
-  console.error("❌ ERREUR CRITIQUE: Les variables TELEGRAM_TOKEN et VENICE_API_KEY sont manquantes.");
+if (!TELEGRAM_BOT_TOKEN || !VENICE_API_KEY) {
+  console.error("❌ ERREUR CRITIQUE: Les variables TELEGRAM_BOT_TOKEN et VENICE_API_KEY sont manquantes. Vérifie Render !");
   process.exit(1);
 }
 
@@ -67,7 +68,8 @@ async function demanderVenice(prompt, systemInstruction = NYX_SYSTEM_PROMPT) {
  */
 async function envoyerTelegram(chatId, texte) {
   try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+    // Utilisation de la bonne variable TELEGRAM_BOT_TOKEN ici
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
       text: texte
     });
