@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const https = require('https');
 
 // ==========================================
 // 1. CONFIGURATION
@@ -130,17 +131,42 @@ async function genererReponseNyx(texteBrut, aUnFichier = false) {
   }
 }
 
-// Envoi direct du message vers Telegram
-async function envoyerTelegram(chatId, texte) {
-  try {
-    const url = `[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendMessage`;
-    await axios.post(url, {
+// Envoi direct du message vers Telegram via HTTPS natif
+function envoyerTelegram(chatId, texte) {
+  return new Promise((resolve) => {
+    const payload = JSON.stringify({
       chat_id: chatId,
       text: texte
     });
-  } catch (error) {
-    console.error("❌ Erreur envoi Telegram :", error?.response?.data || error.message);
-  }
+
+    const options = {
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        console.log(`[TELEGRAM OK] Statut HTTP : ${res.statusCode}`);
+        resolve();
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error("❌ Erreur https native Telegram :", err.message);
+      resolve();
+    });
+
+    req.write(payload);
+    req.end();
+  });
 }
 
 // ==========================================
