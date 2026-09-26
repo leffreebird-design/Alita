@@ -250,9 +250,3 @@ app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "ONLINE",
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 NYX Engine (Optique & Mémoriel Optimisé) sur port ${PORT}`);
 });
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "ONLINE", memory: "ACTIVE" }));
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 NYX Engine (Optique & Mémoriel) sur port ${PORT}`);
-});
-    
