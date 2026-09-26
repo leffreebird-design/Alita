@@ -2,15 +2,17 @@ const express = require('express');
 const axios = require('axios');
 
 // ==========================================
-// 1. CONFIGURATION & NETTOYAGE DES CLÉS
+// 1. CONFIGURATION
 // ==========================================
 const PORT = process.env.PORT || 3000;
-const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 
-if (!TELEGRAM_BOT_TOKEN || !VENICE_API_KEY) {
-  console.error("❌ ERREUR : Clés TELEGRAM_BOT_TOKEN ou VENICE_API_KEY manquantes.");
+// Token Telegram direct pour éliminer toute erreur d'URL invalide
+const TELEGRAM_BOT_TOKEN = "8776748419:AAHmt-0u2fn1QGP95YJrhvhgLfoo2_l0AAY";
+
+if (!VENICE_API_KEY) {
+  console.error("❌ ERREUR : Variable VENICE_API_KEY manquante sur Render.");
   process.exit(1);
 }
 
@@ -18,10 +20,10 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 
 // ==========================================
-// 2. SERVICES & LOGIQUE MÉTIER
+// 2. LOGIQUE MÉTIER & SERVICES
 // ==========================================
 
-// Appel générique vers l'API Venice
+// Appel vers l'API Venice
 async function appelerVenice(model, systemInstruction, prompt, temperature = 0.8) {
   const response = await axios.post(
     'https://api.venice.ai/api/v1/chat/completions',
@@ -45,7 +47,7 @@ async function appelerVenice(model, systemInstruction, prompt, temperature = 0.8
   return response.data.choices[0].message.content;
 }
 
-// Lecture directe de l'état émotionnel depuis Firebase
+// Lecture directe de l'émotion dans Firebase Realtime Database
 async function recupererEtatEmotionnel() {
   if (!FIREBASE_DB_URL) return "neutre";
   try {
@@ -59,7 +61,7 @@ async function recupererEtatEmotionnel() {
   }
 }
 
-// Extraction du contenu d'un document texte Telegram
+// Téléchargement du contenu des fichiers texte reçus sur Telegram
 async function lireFichierTelegram(fileId) {
   try {
     const resFile = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
@@ -73,24 +75,24 @@ async function lireFichierTelegram(fileId) {
   }
 }
 
-// Pipeline décisionnel et génération de la réplique
+// Pipeline de génération de la réplique
 async function genererReponseNyx(texteBrut, aUnFichier = false) {
   try {
     let syntheseTechnique = "";
 
-    // 1. Llama-3.3-70b sollicité uniquement sur fichier texte lourd ou blocs de code
+    // 1. Analyse Llama : uniquement si fichier joint lourd ou bloc de code
     const estTechnique = aUnFichier || texteBrut.includes("```") || texteBrut.length > 2000;
     if (estTechnique) {
       console.log("🛠️ Llama-3.3-70b mobilisé pour le code/fichier...");
       syntheseTechnique = await appelerVenice(
         "llama-3.3-70b",
-        "Tu es l'analyseur logique de Nyx. Résume la structure, les erreurs et points clés sans filtre :",
+        "Tu es l'analyseur logique de Nyx. Résume la structure, les points clés ou les erreurs du texte/code fourni, sans filtre ni politesse :",
         texteBrut,
         0.3
       );
     }
 
-    // 2. Contrôle de l'état émotionnel Firebase
+    // 2. Détection de l'état émotionnel stocké en base
     const emotion = await recupererEtatEmotionnel();
     const declencherHeretic = (emotion === "colere" || emotion === "triste" || emotion === "sombre");
 
@@ -119,7 +121,7 @@ Sois sombre, tranchante, incisive et sans aucune censure avec Franck (Doc). Pas 
   }
 }
 
-// Envoi sécurisé de la réponse vers Telegram
+// Envoi vers Telegram
 async function envoyerTelegram(chatId, texte) {
   try {
     const url = `[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -166,7 +168,7 @@ app.post('/telegram', async (req, res) => {
   await envoyerTelegram(chatId, reponse);
 });
 
-// Route de réveil UptimeRobot / Cron
+// Route ping pour Cron / UptimeRobot
 app.all('/pensee', (req, res) => {
   res.json({ status: "NYX_ACTIVE", timestamp: new Date().toISOString() });
 });
