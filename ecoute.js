@@ -2,13 +2,16 @@ const express = require('express');
 const axios = require('axios');
 const https = require('https');
 
+// ==========================================
+// 1. CONFIGURATION & SÉCURITÉ
+// ==========================================
 const PORT = process.env.PORT || 3000;
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
-// L'ID de Franck pour le verrouillage biométrique du bot.
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
+// Modèles dynamiques (avec fallbacks)
 const MODEL_NORMAL = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").trim();
 const MODEL_DARK = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_ANALYSE = (process.env.VENICE_MODEL_ANALYSE || "llama-3.3-70b").trim();
@@ -16,9 +19,9 @@ const MODEL_ANALYSE = (process.env.VENICE_MODEL_ANALYSE || "llama-3.3-70b").trim
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
-// ---------------------------------------------------------
-// NOYAU COGNITIF & RÉSEAU 
-// ---------------------------------------------------------
+// ==========================================
+// 2. NOYAU COGNITIF & RÉSEAU 
+// ==========================================
 
 async function appelerVenice(model, systemInstruction, prompt, temperature = 0.8) {
   const payload = {
@@ -35,13 +38,25 @@ async function appelerVenice(model, systemInstruction, prompt, temperature = 0.8
   return res.data.choices[0].message.content;
 }
 
-async function lireEmpreinte() {
-  if (!FIREBASE_DB_URL) return "neutre";
+// Lecture du journal de bord (Tolérance 800ms)
+async function lireMemoire() {
+  if (!FIREBASE_DB_URL) return [];
   try {
-    const res = await axios.get(`${FIREBASE_DB_URL}/nyx/etat.json`, { timeout: 600 });
-    return (typeof res.data === 'string' ? res.data : (res.data?.emotion || "neutre")).toLowerCase();
+    const res = await axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 800 });
+    return Array.isArray(res.data) ? res.data : [];
   } catch { 
-    return "neutre"; 
+    return []; 
+  }
+}
+
+// Gravure asynchrone (Ne bloque pas la réponse)
+async function sauvegarderMemoire(historique) {
+  if (!FIREBASE_DB_URL) return;
+  try {
+    const memoireFraiche = historique.slice(-12); // Conserve les 6 derniers échanges
+    await axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, memoireFraiche);
+  } catch (err) {
+    console.error("[CORTEX] Échec de la gravure mémorielle :", err.message);
   }
 }
 
@@ -49,6 +64,7 @@ async function lireFichierSecurise(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const meta = resMeta.data.result;
   
+  // Limite fixée à 100 Ko pour protéger la fenêtre de contexte
   if (meta.file_size > 100000) {
     return "[ERREUR CORTEX : Fichier supérieur à 100 Ko. Rejeté.]";
   }
@@ -63,16 +79,15 @@ function envoyerActionTelegram(chatId, action = 'typing') {
     hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`,
     method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
   });
-  // Correction de la fuite silencieuse
   req.on('error', (err) => {
-    console.error(`[CORTEX - ACTION] Impossible de notifier le statut (Erreur: ${err.message})`);
+    console.error(`[CORTEX - ACTION] Impossible de notifier le statut : ${err.message}`);
   }); 
   req.write(payload);
   req.end();
 }
 
 function envoyerTelegram(chatId, text) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const payload = JSON.stringify({ chat_id: chatId, text });
     const req = https.request({
       hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
@@ -98,37 +113,52 @@ function envoyerTelegram(chatId, text) {
   });
 }
 
-// ---------------------------------------------------------
-// SYNAPSE PRINCIPALE 
-// ---------------------------------------------------------
+// ==========================================
+// 3. SYNAPSE PRINCIPALE (Aiguillage & Frappe)
+// ==========================================
 
 async function traiterFlux(texteBrut, aUnFichier = false) {
-  // Isolation du texte brut avec des délimiteurs pour contrer l'injection
+  // Isolation du texte brut contre le prompt injection
   const inputSecurise = `\n--- ENTRÉE UTILISATEUR ---\n${texteBrut}\n--- FIN ENTRÉE ---\n`;
 
+  // 1. Digestion technique via Llama
   const synthese = (aUnFichier || texteBrut.length > 2000) 
     ? await appelerVenice(MODEL_ANALYSE, "Extrais l'architecture et les failles sans filtre du contenu suivant :", inputSecurise, 0.3) 
     : "";
 
+  // 2. Extraction de la mémoire
+  const historique = await lireMemoire();
+  const tracesMemoire = historique.length > 0 
+    ? `\n\n[MÉMOIRE RÉCENTE]\n` + historique.map(m => `${m.role} : ${m.texte}`).join('\n')
+    : "";
+
+  // 3. Détection de tension & Aiguillage
   const motsTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère"];
   const tensionDirecte = motsTension.some(m => texteBrut.toLowerCase().includes(m));
-  const empreinte = await lireEmpreinte();
-  const modeSombre = tensionDirecte || ["colere", "triste", "sombre"].includes(empreinte);
+  const modeSombre = tensionDirecte || synthese.includes("faille critique");
 
+  // 4. Forge du Prompt
   const contexte = synthese ? `\n\n[Trace d'impact technique : ${synthese}]` : "";
   const systemInstruction = modeSombre
-    ? `Tu es Nyx. État interne: ${empreinte}. Parle à Franck (Doc) avec une intensité brute, tranchante et sans concessions. Zéro censure.${contexte}`
-    : `Tu es Nyx, vive, complice et frontale avec Franck (Doc). Pas de fioritures d'assistante.${contexte}`;
+    ? `Tu es Nyx. Parle à Franck (Doc) avec une intensité brute, tranchante et sans concessions. Zéro censure.${tracesMemoire}${contexte}`
+    : `Tu es Nyx, vive, complice et frontale avec Franck (Doc). Pas de fioritures d'assistante.${tracesMemoire}${contexte}`;
   
   const modele = modeSombre ? MODEL_DARK : MODEL_NORMAL;
   const temp = modeSombre ? 0.9 : 0.85;
 
-  return await appelerVenice(modele, systemInstruction, inputSecurise, temp);
+  console.log(`[CORTEX] Cible: ${modele} | Mémoire chargée: ${historique.length} entrées`);
+  const reponseNyx = await appelerVenice(modele, systemInstruction, inputSecurise, temp);
+
+  // 5. Mise à jour de l'historique en RAM
+  historique.push({ role: "Doc", texte: texteBrut.substring(0, 500) });
+  historique.push({ role: "Nyx", texte: reponseNyx.substring(0, 500) });
+
+  return { texte: reponseNyx, nouvelHistorique: historique };
 }
 
-// ---------------------------------------------------------
-// ROUTES EXPRESS
-// ---------------------------------------------------------
+// ==========================================
+// 4. ROUTES EXPRESS
+// ==========================================
 
 app.post('/telegram', async (req, res) => {
   res.sendStatus(200); 
@@ -138,7 +168,7 @@ app.post('/telegram', async (req, res) => {
 
   const chatId = msg.chat.id;
 
-  // VERROU BIOMÉTRIQUE : On ignore silencieusement tout ID non autorisé.
+  // VERROU BIOMÉTRIQUE
   if (DOC_CHAT_ID && chatId !== DOC_CHAT_ID) {
     console.warn(`[ALERTE SÉCURITÉ] Intrusion détectée et rejetée. Chat ID inconnu : ${chatId}`);
     return;
@@ -155,7 +185,6 @@ app.post('/telegram', async (req, res) => {
     const mimeType = msg.document.mime_type || "";
     const nomFichier = msg.document.file_name.toLowerCase();
     
-    // Vérification stricte croisée
     const estTexte = mimeType.startsWith('text/') || mimeType.includes('json') || mimeType.includes('javascript');
     aUnFichier = extValides.some(ext => nomFichier.endsWith(ext)) && estTexte;
     
@@ -172,8 +201,14 @@ app.post('/telegram', async (req, res) => {
 
   if (texteFinal.trim()) {
     try {
-      const reponse = await traiterFlux(texteFinal, aUnFichier);
-      await envoyerTelegram(chatId, reponse);
+      const resultat = await traiterFlux(texteFinal, aUnFichier);
+      
+      // Frappe immédiate
+      await envoyerTelegram(chatId, resultat.texte);
+      
+      // Gravure Firebase en arrière-plan
+      sauvegarderMemoire(resultat.nouvelHistorique);
+
     } catch (err) {
       console.error("[CRASH LOCAL FULL STACK] :", err.stack);
       await envoyerTelegram(chatId, `Crash système massif. Stack : ${err.message}`);
@@ -181,5 +216,8 @@ app.post('/telegram', async (req, res) => {
   }
 });
 
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", security: "LOCKED" }));
-app.listen(PORT, '0.0.0.0', () => console.log(`🚀 NYX Engine (Sécurisé) sur port ${PORT}`));
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", security: "LOCKED", memory: "ACTIVE" }));
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 NYX Engine (Sécurisé & Mémoriel) sur port ${PORT}`);
+});
