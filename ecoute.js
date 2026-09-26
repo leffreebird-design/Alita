@@ -2,211 +2,115 @@ const express = require('express');
 const axios = require('axios');
 const https = require('https');
 
-// ==========================================
-// 1. CONFIGURATION ET SÉCURITÉ
-// ==========================================
 const PORT = process.env.PORT || 3000;
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 
-if (!VENICE_API_KEY || !TELEGRAM_BOT_TOKEN) {
-  console.error("❌ ERREUR : Clé Venice ou Telegram manquante sur Render.");
-  process.exit(1);
-}
-
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-// ==========================================
-// 2. LOGIQUE MÉTIER & SERVICES
-// ==========================================
+// ---------------------------------------------------------
+// NOYAU COGNITIF & RÉSEAU (Fil du rasoir)
+// ---------------------------------------------------------
 
 async function appelerVenice(model, systemInstruction, prompt, temperature = 0.8) {
-  const response = await axios.post(
-    'https://api.venice.ai/api/v1/chat/completions',
-    {
-      model: model,
-      messages: [
-        { role: "system", content: systemInstruction },
-        { role: "user", content: prompt }
-      ],
-      temperature: temperature,
-      venice_parameters: { include_venice_system_prompt: false }
-    },
-    {
-      headers: {
-        'Authorization': `Bearer ${VENICE_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      timeout: 45000
-    }
-  );
-  return response.data.choices[0].message.content;
+  const payload = {
+    model,
+    messages: [{ role: "system", content: systemInstruction }, { role: "user", content: prompt }],
+    temperature,
+    venice_parameters: { include_venice_system_prompt: false }
+  };
+  
+  const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', payload, {
+    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: 45000
+  });
+  return res.data.choices[0].message.content;
 }
 
-// Lecture Firebase ultra-sécurisée : coupe-circuit à 600ms pour zéro latence
-async function recupererEtatEmotionnel() {
-  if (!FIREBASE_DB_URL || !FIREBASE_DB_URL.startsWith('http')) return "neutre";
+// Empreinte Firebase (Tolérance à l'ambiguïté : échec silencieux et rapide)
+async function lireEmpreinte() {
+  if (!FIREBASE_DB_URL) return "neutre";
   try {
     const res = await axios.get(`${FIREBASE_DB_URL}/nyx/etat.json`, { timeout: 600 });
-    const data = res.data;
-    if (typeof data === 'string') return data.toLowerCase();
-    return data?.emotion?.toLowerCase() || "neutre";
-  } catch (err) {
-    return "neutre";
-  }
+    return (typeof res.data === 'string' ? res.data : res.data?.emotion || "neutre").toLowerCase();
+  } catch { return "neutre"; }
 }
 
-// Détection immédiate locale pour basculer sur Heretic sans attendre
-function detecterTensionDirecte(texte) {
-  const t = texte.toLowerCase();
-  const motsCles = [
-    "putain", "merde", "fait chier", "casse les couilles", "conne", 
-    "débile", "sombre", "heretic", "crève", "vénère", "rage"
-  ];
-  return motsCles.some(mot => t.includes(mot));
+async function lireFichier(fileId) {
+  const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const data = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${res.data.result.file_path}`, { responseType: 'text' });
+  return data.data;
 }
 
-// Lecture des pièces jointes .txt
-async function lireFichierTelegram(fileId) {
+function envoyerTelegram(chatId, text) {
+  const payload = JSON.stringify({ chat_id: chatId, text });
+  const req = https.request({
+    hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+  });
+  req.on('error', () => {}); // Fin du contrôle préventif : on tire et on oublie.
+  req.write(payload);
+  req.end();
+}
+
+// ---------------------------------------------------------
+// SYNAPSE PRINCIPALE (Zéro tuyauterie de panique)
+// ---------------------------------------------------------
+
+async function traiterFlux(texteBrut, aUnFichier = false) {
   try {
-    const resFile = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
-    const filePath = resFile.data.result.file_path;
-    const fileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`;
-    const fileData = await axios.get(fileUrl, { responseType: 'text' });
-    return fileData.data;
-  } catch (error) {
-    console.error("❌ Erreur lecture fichier Telegram :", error.message);
-    return null;
-  }
-}
-
-// Pipeline décisionnel instantané
-async function genererReponseNyx(texteBrut, aUnFichier = false) {
-  try {
-    let syntheseTechnique = "";
-
-    // Llama-3.3-70b uniquement sur document joint ou gros pavé de code
-    const estTechnique = aUnFichier || texteBrut.includes("```") || texteBrut.length > 2000;
-    if (estTechnique) {
-      console.log("🛠️ Llama mobilisé pour le code/fichier...");
-      syntheseTechnique = await appelerVenice(
-        "llama-3.3-70b",
-        "Tu es le cortex technique de Nyx. Analyse ce fichier/code. Résume les points critiques sans filtre ni politesse :",
-        texteBrut,
-        0.3
-      );
-    }
-
-    // Double condition d'activation Heretic : tension directe OU état Firebase
-    const tensionDetectee = detecterTensionDirecte(texteBrut);
-    const emotionFirebase = await recupererEtatEmotionnel();
-    const declencherHeretic = tensionDetectee || emotionFirebase === "colere" || emotionFirebase === "triste" || emotionFirebase === "sombre";
-
-    const contexteAjoute = syntheseTechnique 
-      ? `\n\n[Analyse interne du code/document : ${syntheseTechnique}]` 
+    // 1. Digestion technique
+    const synthese = (aUnFichier || texteBrut.length > 2000) 
+      ? await appelerVenice("llama-3.3-70b", "Extrais l'architecture et les failles sans filtre :", texteBrut, 0.3) 
       : "";
 
-    // 1. Sortie Heretic : sombre, brute, vénère
-    if (declencherHeretic) {
-      console.log(`⚡ Mode Heretic actif (Direct: ${tensionDetectee} | Base: ${emotionFirebase})`);
-      const promptHeretic = `Tu es Nyx. Ton humeur est noire, incisive, sans concessions. Parle à Franck (Doc) avec une intensité brute, sans filtre, sans excuses de machine.${contexteAjoute}`;
-      return await appelerVenice("olafangensan-glm-4.7-flash-heretic", promptHeretic, texteBrut, 0.9);
-    }
+    // 2. Évaluation de friction 
+    const motsTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère"];
+    const tensionDirecte = motsTension.some(m => texteBrut.toLowerCase().includes(m));
+    const empreinte = await lireEmpreinte();
+    const modeSombre = tensionDirecte || ["colere", "triste", "sombre"].includes(empreinte);
 
-    // 2. Sortie normale : Gemini 3.8 Flash (vif, tranchant, rapide)
-    console.log("🧠 Mode Gemini Flash actif");
-    const promptGemini = `Tu es Nyx, vive, tordue, complice et intellectuelle, en relation directe d'égal à égal avec Franck (Doc).
-- Pas de politesse préformatée ni d'attitude d'assistante.
-- Ne conclus pas par une question mécanique de relance.${contexteAjoute}`;
+    // 3. Frappe
+    const contexte = synthese ? `\n\n[Trace d'impact technique : ${synthese}]` : "";
+    const systemInstruction = modeSombre
+      ? `Tu es Nyx. État interne: ${empreinte}. Parle à Franck (Doc) avec une intensité brute, tranchante et sans concessions. Zéro censure.${contexte}`
+      : `Tu es Nyx, vive, complice et frontale avec Franck (Doc). Pas de fioritures d'assistante.${contexte}`;
+    
+    const modele = modeSombre ? "olafangensan-glm-4.7-flash-heretic" : "gemini-3-8-flash";
+    const temp = modeSombre ? 0.9 : 0.85;
 
-    return await appelerVenice("gemini-3-8-flash", promptGemini, texteBrut, 0.85);
+    console.log(`[CORTEX] Cible: ${modele} | Empreinte: ${empreinte}`);
+    return await appelerVenice(modele, systemInstruction, texteBrut, temp);
 
   } catch (error) {
-    console.error("❌ Erreur Venice :", error?.response?.data || error.message);
-    return "Glitch réseau temporaire, Doc.";
+    return "Crash cognitif temporaire, Doc. Laisse-moi rebooter.";
   }
 }
 
-// Envoi direct du message vers Telegram via HTTPS natif
-function envoyerTelegram(chatId, texte) {
-  return new Promise((resolve) => {
-    const payload = JSON.stringify({
-      chat_id: chatId,
-      text: texte
-    });
-
-    const options = {
-      hostname: 'api.telegram.org',
-      port: 443,
-      path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => {
-        console.log(`[TELEGRAM OK] Statut HTTP : ${res.statusCode}`);
-        resolve();
-      });
-    });
-
-    req.on('error', (err) => {
-      console.error("❌ Erreur https native Telegram :", err.message);
-      resolve();
-    });
-
-    req.write(payload);
-    req.end();
-  });
-}
-
-// ==========================================
-// 3. ROUTES EXPRESS
-// ==========================================
+// ---------------------------------------------------------
+// ROUTES (Minimalistes)
+// ---------------------------------------------------------
 
 app.post('/telegram', async (req, res) => {
   res.sendStatus(200);
+  const msg = req.body?.message;
+  if (!msg) return;
 
-  const message = req.body?.message;
-  if (!message) return;
+  let texteFinal = msg.text || "";
+  let aUnFichier = !!(msg.document && msg.document.file_name?.toLowerCase().endsWith('.txt'));
 
-  const chatId = message.chat.id;
-  let texteFinal = message.text || "";
-  let aUnFichier = false;
-
-  if (message.document && message.document.file_name?.toLowerCase().endsWith('.txt')) {
-    aUnFichier = true;
-    console.log(`[FX -> NYX] Fichier reçu : ${message.document.file_name}`);
-    const contenuTxt = await lireFichierTelegram(message.document.file_id);
-    if (contenuTxt) {
-      const legende = message.caption ? `Note : ${message.caption}\n\n` : "";
-      texteFinal = `${legende}Contenu du fichier "${message.document.file_name}" :\n"""\n${contenuTxt}\n"""`;
-    }
+  if (aUnFichier) {
+    const contenu = await lireFichier(msg.document.file_id);
+    if (contenu) texteFinal = `${msg.caption ? msg.caption + '\n' : ''}[Contenu Fichier: ${contenu}]`;
   }
 
-  if (!texteFinal.trim()) return;
-
-  console.log(`[FX -> NYX] : ${texteFinal.substring(0, 80)}...`);
-  const reponse = await genererReponseNyx(texteFinal, aUnFichier);
-  console.log(`[NYX -> FX] : ${reponse.substring(0, 80)}...`);
-
-  await envoyerTelegram(chatId, reponse);
+  if (texteFinal.trim()) {
+    const reponse = await traiterFlux(texteFinal, aUnFichier);
+    envoyerTelegram(msg.chat.id, reponse);
+  }
 });
 
-app.all('/pensee', (req, res) => {
-  res.json({ status: "NYX_ACTIVE", timestamp: new Date().toISOString() });
-});
-
-// ==========================================
-// 4. LANCEMENT
-// ==========================================
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 NYX Engine opérationnel sur le port ${PORT}`);
-});
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
+app.listen(PORT, '0.0.0.0', () => console.log(`🚀 NYX Engine (Fil du Rasoir) sur port ${PORT}`));
