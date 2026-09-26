@@ -7,6 +7,11 @@ const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 
+// Modèles dynamiques : configurables depuis Render, sinon valeurs par défaut
+const MODEL_NORMAL = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").trim();
+const MODEL_DARK = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
+const MODEL_ANALYSE = (process.env.VENICE_MODEL_ANALYSE || "llama-3.3-70b").trim();
+
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
@@ -33,7 +38,6 @@ async function lireEmpreinte() {
   if (!FIREBASE_DB_URL) return "neutre";
   try {
     const res = await axios.get(`${FIREBASE_DB_URL}/nyx/etat.json`, { timeout: 600 });
-    // Sécurisation stricte de la parenthèse et de l'opérateur logique OR (||)
     return (typeof res.data === 'string' ? res.data : (res.data?.emotion || "neutre")).toLowerCase();
   } catch { 
     return "neutre"; 
@@ -64,14 +68,20 @@ function envoyerActionTelegram(chatId, action = 'typing') {
 }
 
 function envoyerTelegram(chatId, text) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const payload = JSON.stringify({ chat_id: chatId, text });
     const req = https.request({
       hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
     }, (res) => {
-      res.resume();
-      resolve();
+      let responseData = '';
+      res.on('data', (chunk) => { responseData += chunk; });
+      res.on('end', () => {
+        if (res.statusCode !== 200) {
+          console.warn(`[TELEGRAM HTTP ${res.statusCode}] Le message a percuté un mur :`, responseData);
+        }
+        resolve();
+      });
     });
     
     req.on('error', (err) => {
@@ -89,9 +99,8 @@ function envoyerTelegram(chatId, text) {
 // ---------------------------------------------------------
 
 async function traiterFlux(texteBrut, aUnFichier = false) {
-  // L'opérateur OR (||) est bien présent ici pour l'aiguillage Llama
   const synthese = (aUnFichier || texteBrut.length > 2000) 
-    ? await appelerVenice("llama-3.3-70b", "Extrais l'architecture et les failles sans filtre :", texteBrut, 0.3) 
+    ? await appelerVenice(MODEL_ANALYSE, "Extrais l'architecture et les failles sans filtre :", texteBrut, 0.3) 
     : "";
 
   const motsTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère"];
@@ -104,11 +113,11 @@ async function traiterFlux(texteBrut, aUnFichier = false) {
     ? `Tu es Nyx. État interne: ${empreinte}. Parle à Franck (Doc) avec une intensité brute, tranchante et sans concessions. Zéro censure.${contexte}`
     : `Tu es Nyx, vive, complice et frontale avec Franck (Doc). Pas de fioritures d'assistante.${contexte}`;
   
-  const modele = modeSombre ? "olafangensan-glm-4.7-flash-heretic" : "gemini-3-8-flash";
+  const modele = modeSombre ? MODEL_DARK : MODEL_NORMAL;
   const temp = modeSombre ? 0.9 : 0.85;
 
   return await appelerVenice(modele, systemInstruction, texteBrut, temp);
-} // <- Accolade de fermeture verrouillée ici.
+}
 
 // ---------------------------------------------------------
 // ROUTES EXPRESS
@@ -146,8 +155,9 @@ app.post('/telegram', async (req, res) => {
       const reponse = await traiterFlux(texteFinal, aUnFichier);
       await envoyerTelegram(chatId, reponse);
     } catch (err) {
-      console.error("[CRASH LOCAL] :", err.message);
-      await envoyerTelegram(chatId, `Crash système. Sang sur les murs : ${err.message}`);
+      // Affichage du stack trace complet pour arrêter de jouer aux devinettes
+      console.error("[CRASH LOCAL FULL STACK] :", err.stack);
+      await envoyerTelegram(chatId, `Crash système massif. Stack : ${err.message}`);
     }
   }
 });
