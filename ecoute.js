@@ -3,17 +3,15 @@ const axios = require('axios');
 const https = require('https');
 
 // ==========================================
-// 1. CONFIGURATION
+// 1. CONFIGURATION ET SÉCURITÉ
 // ==========================================
 const PORT = process.env.PORT || 3000;
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
+const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 
-// Token direct pour supprimer les pannes d'URL
-const TELEGRAM_BOT_TOKEN = "8776748419:AAHmt-0u2fn1QGP95YJrhvhgLfoo2_l0AAY";
-
-if (!VENICE_API_KEY) {
-  console.error("❌ ERREUR : VENICE_API_KEY manquante sur Render.");
+if (!VENICE_API_KEY || !TELEGRAM_BOT_TOKEN) {
+  console.error("❌ ERREUR : Clé Venice ou Telegram manquante sur Render.");
   process.exit(1);
 }
 
@@ -92,7 +90,7 @@ async function genererReponseNyx(texteBrut, aUnFichier = false) {
     // Llama-3.3-70b uniquement sur document joint ou gros pavé de code
     const estTechnique = aUnFichier || texteBrut.includes("```") || texteBrut.length > 2000;
     if (estTechnique) {
-      console.log("🛠️ Llama-3.3-70b mobilisé pour le code/fichier...");
+      console.log("🛠️ Llama mobilisé pour le code/fichier...");
       syntheseTechnique = await appelerVenice(
         "llama-3.3-70b",
         "Tu es le cortex technique de Nyx. Analyse ce fichier/code. Résume les points critiques sans filtre ni politesse :",
