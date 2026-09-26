@@ -11,11 +11,9 @@ const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
-// Modèles dynamiques configurables via variables d'environnement
 const MODEL_NORMAL = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").trim();
 const MODEL_DARK = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_ANALYSE = (process.env.VENICE_MODEL_ANALYSE || "llama-3.3-70b").trim();
-// Modèle multimodal mis par défaut sur GLM 5.3 Flash
 const MODEL_VISION = (process.env.VENICE_MODEL_VISION || "glm-5.3-flash").trim();
 
 const app = express();
@@ -29,7 +27,7 @@ async function appelerVenice(model, systemInstruction, prompt, temperature = 0.8
   let userContent = prompt;
   if (imageBase64) {
     userContent = [
-      { type: "text", text: prompt || "Analyse ce que tu vois sur cette image avec précision." },
+      { type: "text", text: prompt },
       { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
     ];
   }
@@ -135,7 +133,7 @@ function envoyerTelegram(chatId, text) {
 // 3. SYNAPSE PRINCIPALE (Aiguillage & Frappe)
 // ==========================================
 
-async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null) {
+async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, texteLegende = "") {
   const inputSecurise = imageBase64 ? texteBrut : `\n--- ENTRÉE UTILISATEUR ---\n${texteBrut}\n--- FIN ENTRÉE ---\n`;
 
   const synthese = (aUnFichier || texteBrut.length > 2000) && !imageBase64
@@ -153,10 +151,9 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null) {
 
   const contexte = synthese ? `\n\n[Trace d'impact technique : ${synthese}]` : "";
   const systemInstruction = modeSombre
-    ? `Tu es Nyx. Codeuse d'élite, brutale, cynique, sans langue de bois. Parle à Franck (Doc) sans le moindre filtre. S'il te balance du code ou des erreurs, dissèque-les et répare-les.${tracesMemoire}${contexte}`
-    : `Tu es Nyx. Vive, complice, incisive et directe. Assiste Franck (Doc) sans fioritures d'assistante.${tracesMemoire}${contexte}`;
+    ? `Tu es Nyx. Directe, cynique, sans filtre. Parle à Franck (Doc). Si tu vois une image, réagis selon son vrai contenu sans inventer de fausses erreurs.${tracesMemoire}${contexte}`
+    : `Tu es Nyx. Vive, complice, incisive. Parle à Franck (Doc). Reste naturelle et analyse ce qu'il te montre.${tracesMemoire}${contexte}`;
   
-  // Aiguillage : Vision prioritaire si imageBase64 présent
   let modele = modeSombre ? MODEL_DARK : MODEL_NORMAL;
   if (imageBase64) modele = MODEL_VISION; 
   
@@ -165,9 +162,15 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null) {
   console.log(`[CORTEX] Cible: ${modele} | Optique: ${imageBase64 ? 'OUI' : 'NON'}`);
   const reponseNyx = await appelerVenice(modele, systemInstruction, inputSecurise, temp, imageBase64);
 
-  // Mise à jour de la mémoire en RAM (résumé textuel)
-  const libelleAction = imageBase64 ? `[Capture/Image envoyée] ${texteBrut}` : texteBrut;
-  historique.push({ role: "Doc", texte: libelleAction.substring(0, 500) });
+  // Enregistrement contextuel précis de l'image vue
+  let traceEntree = texteBrut;
+  if (imageBase64) {
+    traceEntree = texteLegende 
+      ? `[Doc a envoyé une image avec le commentaire : "${texteLegende}"]`
+      : `[Doc a partagé une image visuelle]`;
+  }
+
+  historique.push({ role: "Doc", texte: traceEntree.substring(0, 500) });
   historique.push({ role: "Nyx", texte: reponseNyx.substring(0, 500) });
 
   return { texte: reponseNyx, nouvelHistorique: historique };
@@ -185,13 +188,13 @@ app.post('/telegram', async (req, res) => {
 
   const chatId = msg.chat.id;
 
-  // Verrou biométrique
   if (DOC_CHAT_ID && chatId !== DOC_CHAT_ID) {
     console.warn(`[ALERTE SÉCURITÉ] Rejet d'une requête non autorisée. ID : ${chatId}`);
     return;
   }
   
   let texteFinal = msg.text || msg.caption || "";
+  let texteLegende = msg.caption || "";
   let aUnFichier = false;
   let imageBase64 = null;
 
@@ -202,13 +205,13 @@ app.post('/telegram', async (req, res) => {
     try {
       imageBase64 = await lireImageSecurisee(photo.file_id);
       if (!texteFinal.trim()) {
-        texteFinal = "Analyse ce que tu vois sur cette image. Détaille le code, l'interface ou l'erreur avec précision.";
+        texteFinal = "Regarde attentivement cette image. Décris son contenu, son style et donne ton avis direct sans filtre.";
       }
     } catch (err) {
       return await envoyerTelegram(chatId, `[ERREUR OPTIQUE] Échec de traitement de l'image : ${err.message}`);
     }
   } 
-  // 2. Détection fichiers de code ou texte
+  // 2. Détection fichiers texte / code
   else if (msg.document && msg.document.file_name) {
     const extValides = ['.txt', '.md', '.js', '.json', '.csv', '.py', '.html', '.css'];
     const mimeType = msg.document.mime_type || "";
@@ -228,20 +231,25 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // 3. Déclenchement du traitement
+  // 3. Déclenchement
   if (texteFinal.trim() || imageBase64) {
     envoyerActionTelegram(chatId, 'typing');
     try {
-      const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64);
+      const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
       await envoyerTelegram(chatId, resultat.texte);
       sauvegarderMemoire(resultat.nouvelHistorique);
     } catch (err) {
       console.error("[CRASH LOCAL] :", err.stack);
-      await envoyerTelegram(chatId, `Crash système. Mes circuits fondent : ${err.message}`);
+      await envoyerTelegram(chatId, `Crash système : ${err.message}`);
     }
   }
 });
 
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "ONLINE", memory: "ACTIVE" }));
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 NYX Engine (Optique & Mémoriel Optimisé) sur port ${PORT}`);
+});
 app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "ONLINE", memory: "ACTIVE" }));
 
 app.listen(PORT, '0.0.0.0', () => {
