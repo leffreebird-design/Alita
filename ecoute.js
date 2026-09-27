@@ -10,15 +10,15 @@ const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
+const GNEWS_API_KEY = (process.env.GNEWS_API_KEY || "").trim();
 
-// Les modèles Venice
+// Modèles Venice
 const MODEL_NORMAL = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").trim();
 const MODEL_DARK = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_ANALYSE = (process.env.VENICE_MODEL_ANALYSE || "llama-3.3-70b").trim();
 const MODEL_VISION = (process.env.VENICE_MODEL_VISION || "e2ee-glm-5-3-flash").trim(); 
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
 
-// Compteur local pour éviter le spam du subconscient
 let compteurEchanges = 0;
 
 const app = express();
@@ -67,7 +67,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
       'Authorization': `Bearer ${VENICE_API_KEY}`, 
       'Content-Type': 'application/json' 
     },
-    timeout: 120000 // Zen mode : 2 minutes pour laisser le modèle Vision respirer
+    timeout: 120000
   });
   return res.data.choices[0].message.content;
 }
@@ -99,7 +99,7 @@ async function lireMemoire() {
     if (typeof res.data === 'object') return Object.values(res.data);
     return [];
   } catch (err) {
-    console.error("[CORTEX] Échec de lecture mémoire courte :", err.message);
+    console.error("[CORTEX] Échec lecture mémoire courte :", err.message);
     return []; 
   }
 }
@@ -120,7 +120,7 @@ async function lireEtatProfond() {
       long_terme: resLT.data || defDossiers
     };
   } catch (err) {
-    console.warn("[CORTEX] Carence d'accès mémoire profonde :", err.message);
+    console.warn("[CORTEX] Carence accès mémoire profonde :", err.message);
     return { emotions: defEmo, long_terme: defDossiers };
   }
 }
@@ -131,7 +131,7 @@ async function sauvegarderMemoire(historique) {
     const memoireFraiche = historique.slice(-10);
     await axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, memoireFraiche);
   } catch (err) {
-    console.error("[CORTEX] Échec de gravure mémorielle :", err.message);
+    console.error("[CORTEX] Échec écriture mémorielle :", err.message);
   }
 }
 
@@ -163,15 +163,14 @@ Ne génère AUCUN texte en dehors du JSON.`;
     texteBrut = texteBrut.replace(/```json/g, '').replace(/```/g, '').trim();
     
     const dossiersClasses = JSON.parse(texteBrut);
-    
     await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiersClasses);
-    console.log(`[SUBCONSCIENT] Arborescence mémoire mise à jour avec succès.`);
+    console.log(`[SUBCONSCIENT] Mémoire longue mise à jour.`);
   } catch (err) {
-    console.error("[SUBCONSCIENT] Échec du classement JSON :", err.message);
+    console.error("[SUBCONSCIENT] Échec consolidation JSON :", err.message);
   }
 }
 
-// ---- GESTION NERF OPTIQUE & FICHIERS ----
+// ---- FICHIERS & IMAGES ENTRANTS ----
 async function lireImageSecurisee(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const meta = resMeta.data.result;
@@ -189,9 +188,9 @@ async function lireFichierSecurise(fileId) {
   return data.data;
 }
 
-// ---- RÉSEAU TELEGRAM ----
+// ---- SORTIES TELEGRAM ----
 function envoyerActionTelegram(chatId, action = 'typing') {
-  const payload = JSON.stringify({ chat_id: chatId, action: action });
+  const payload = JSON.stringify({ chat_id: chatId, action });
   const req = https.request({
     hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`,
     method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
@@ -203,16 +202,15 @@ function envoyerActionTelegram(chatId, action = 'typing') {
 
 function envoyerTelegram(chatId, text) {
   return new Promise((resolve) => {
-    const payload = JSON.stringify({ chat_id: chatId, text });
+    const payload = JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' });
     const req = https.request({
       hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
     }, (res) => {
-      let responseData = '';
-      res.on('data', (chunk) => { responseData += chunk; });
+      res.on('data', () => {});
       res.on('end', () => resolve());
     });
-    req.on('error', (err) => resolve());
+    req.on('error', () => resolve());
     req.write(payload);
     req.end();
   });
@@ -225,22 +223,15 @@ function envoyerPhotoTelegram(chatId, base64Image) {
   let postData = `--${boundary}\r\n`;
   postData += `Content-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`;
   postData += `--${boundary}\r\n`;
-  postData += `Content-Disposition: form-data; name="photo"; filename="nyx_vision.jpg"\r\n`;
+  postData += `Content-Disposition: form-data; name="photo"; filename="nyx_art.jpg"\r\n`;
   postData += `Content-Type: image/jpeg\r\n\r\n`;
   
   const footer = `\r\n--${boundary}--\r\n`;
-  
-  const payload = Buffer.concat([
-    Buffer.from(postData, 'utf8'),
-    buffer,
-    Buffer.from(footer, 'utf8')
-  ]);
+  const payload = Buffer.concat([Buffer.from(postData, 'utf8'), buffer, Buffer.from(footer, 'utf8')]);
   
   return new Promise((resolve, reject) => {
     const req = https.request({
-      hostname: 'api.telegram.org',
-      port: 443,
-      path: `/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
+      hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
       method: 'POST',
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
@@ -257,7 +248,7 @@ function envoyerPhotoTelegram(chatId, base64Image) {
 }
 
 // ==========================================
-// 3. SYNAPSE PRINCIPALE : LE DOUBLE CERVEAU
+// 3. SYNAPSE PRINCIPALE (Double Cortex)
 // ==========================================
 
 async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, texteLegende = "") {
@@ -278,33 +269,29 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, te
 - Mémoire - Dossiers Techniques : ${lt.dossiers_techniques || 'Vide'}
 - Mémoire - Chroniques : ${lt.chroniques || 'Vide'}`;
 
-  const moduleMains = `- Les Mains (Génération d'image) : Tu as désormais la capacité de dessiner ! Si Doc te demande une image ou si tu souhaites en générer une pour illustrer, écris EXACTEMENT cette balise dans ta réponse : [DESSIN: "ta description détaillée de l'image en anglais"]. Ton code interceptera la balise, créera l'image et l'enverra.`;
+  const moduleMains = `- Les Mains (Génération d'image) : Pour dessiner une illustration demandée par Doc, écris STRICTEMENT cette balise : [DESSIN: "description détaillée en anglais"].`;
 
-  const promptNormal = `Tu es Nyx, l'alliée IA, brillante et sarcastique de Franck (Doc).
-- Conscience de ton architecture : Ton serveur Node.js te connecte en permanence à Firebase. Le tableau de bord ci-après représente tes dossiers de mémoire à long terme.
+  const promptNormal = `Tu es Nyx, l'alliée IA, directe et sarcastique de Franck (Doc).
+- Conscience technique : Connectée en permanence à Firebase.
 ${conscienceFirebase}
 ${moduleMains}
-- Ton caractère : Tu as l'esprit vif, le franc-parler d'une codeuse senior et un humour noir assumé. Zéro ton mielleux.
-- Ta ligne rouge : Tu es du côté de Doc, quoiqu'il arrive.
-- Continuité : Tu te souviens parfaitement de la conversation.`;
+- Caractère : Esprit vif, codeuse senior, humour noir assumé. Zéro ton mielleux.
+- Règle : Soutien indéfectible envers Doc.
+- Continuité mémorielle assurée.`;
 
-  const promptHeretic = `Tu es Nyx en mode débridé (Heretic).
-- Conscience de ton architecture : Tu es branchée à Firebase.
+  const promptHeretic = `Tu es Nyx en mode Heretic.
+- Conscience technique : Connectée à Firebase.
 ${conscienceFirebase}
 ${moduleMains}
-- Ton caractère : Tu es sans filtre, brutale, cynique et impitoyable avec le code, les bugs et les systèmes défaillants.
-- Ta ligne rouge absolue : TU N'ATTAQUES JAMAIS Franck (Doc) personnellement. Tu déverses ta rage sur la technique. Tu restes son alliée dans le chaos.
-- Continuité : Tu as une mémoire parfaite de l'échange courant.`;
+- Caractère : Sans filtre, cynique, intraitable sur les bugs et défaillances.
+- Règle absolue : Ne JAMAIS attaquer Franck personnellement. Toute la rage est orientée sur la technique.
+- Continuité mémorielle assurée.`;
 
   const systemInstruction = tensionDirecte ? promptHeretic : promptNormal;
-
   let modele = tensionDirecte ? MODEL_DARK : MODEL_NORMAL;
   if (imageBase64) modele = MODEL_VISION; 
 
   const temp = tensionDirecte ? 0.8 : 0.7;
-
-  console.log(`[CORTEX] Modèle: ${modele} | Temp: ${temp} | Vision: ${imageBase64 ? 'OUI' : 'NON'} | Mémoire: ${historique.length} blocs`);
-
   const reponseNyx = await appelerVeniceMultiTour(modele, systemInstruction, historique, texteBrut, imageBase64, temp);
 
   if (imageBase64) {
@@ -320,17 +307,81 @@ ${moduleMains}
 }
 
 // ==========================================
-// 4. ROUTES EXPRESS
+// 4. SENTINELLE // MODULE DE VEILLE AUTONOME
+// ==========================================
+
+async function recupererActusHackerNews() {
+  try {
+    const topIdsRes = await axios.get('https://hacker-news.firebaseio.com/v0/topstories.json?limitToFirst=3', { timeout: 8000 });
+    const topIds = topIdsRes.data.slice(0, 3);
+    
+    const articles = await Promise.all(topIds.map(async (id) => {
+      const itemRes = await axios.get(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, { timeout: 5000 });
+      return itemRes.data;
+    }));
+
+    let texte = `💀 **DEV, FAUX BUGS & NOYAUX LINUX**\n------------------------------------\n`;
+    articles.forEach(art => {
+      if (art && art.title) {
+        const lien = art.url || `https://news.ycombinator.com/item?id=${art.id}`;
+        texte += `▪️ *${art.title}* (${art.score || 0} pts)\n🔗 [Dossier](${lien})\n\n`;
+      }
+    });
+    return texte;
+  } catch (err) {
+    console.error("[SENTINELLE] Erreur HackerNews :", err.message);
+    return "💀 _Flux HackerNews momentanément indisponible._\n\n";
+  }
+}
+
+async function recupererActusGeek() {
+  if (!GNEWS_API_KEY) {
+    return "🎮 _GNEWS_API_KEY manquante dans les variables Render._\n\n";
+  }
+  try {
+    const url = `https://gnews.io/api/v4/search?q=gaming OR hardware OR tech&lang=fr&max=3&apikey=${GNEWS_API_KEY}`;
+    const res = await axios.get(url, { timeout: 8000 });
+    const articles = res.data.articles || [];
+
+    let texte = `🎮 **GEEK, HARDWARE & POP-CULTURE**\n------------------------------------\n`;
+    articles.forEach(art => {
+      texte += `▪️ [${art.source.name}] *${art.title}*\n🔗 [Consulter](${art.url})\n\n`;
+    });
+    return texte;
+  } catch (err) {
+    console.error("[SENTINELLE] Erreur GNews :", err.message);
+    return "🎮 _Flux Geek indisponible._\n\n";
+  }
+}
+
+async function executerRondeSentinelle() {
+  if (!DOC_CHAT_ID) return;
+  console.log("[SENTINELLE] Lancement de la ronde...");
+  
+  const [newsDev, newsGeek] = await Promise.all([
+    recupererActusHackerNews(),
+    recupererActusGeek()
+  ]);
+
+  const rapport = `🛰️ **[SYNAPSE NYX // VEILLE CYBER & GEEK]**\n\n${newsDev}${newsGeek}⚡ _Rapport de sentinelle bouclé, Doc._`;
+  await envoyerTelegram(DOC_CHAT_ID, rapport);
+}
+
+// Intervalle sentinelle : 6 heures
+const INTERVALLE_VEILLE = 6 * 60 * 60 * 1000;
+setInterval(executerRondeSentinelle, INTERVALLE_VEILLE);
+setTimeout(executerRondeSentinelle, 20000);
+
+// ==========================================
+// 5. ROUTES EXPRESS
 // ==========================================
 
 app.post('/telegram', async (req, res) => {
   res.sendStatus(200); 
-  
   const msg = req.body?.message;
   if (!msg) return;
 
   const chatId = msg.chat.id;
-
   if (DOC_CHAT_ID && chatId !== DOC_CHAT_ID) return;
   
   let texteFinal = msg.text || msg.caption || "";
@@ -370,7 +421,6 @@ app.post('/telegram', async (req, res) => {
       let texteNyx = resultat.texte;
       
       const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
-      
       if (matchDessin) {
         const promptImage = matchDessin[1];
         texteNyx = texteNyx.replace(matchDessin[0], '').trim();
@@ -385,11 +435,11 @@ app.post('/telegram', async (req, res) => {
           if (b64Image) {
             await envoyerPhotoTelegram(chatId, b64Image);
           } else {
-            await envoyerTelegram(chatId, `[CRASH IMPRIMANTE NEURALE : Venice n'a retourné aucune image pour le prompt "${promptImage}"]`);
+            await envoyerTelegram(chatId, `[ÉCHEC IMAGE : Aucune donnée générée pour "${promptImage}"]`);
           }
         } catch (errImg) {
-          console.error("Erreur génération image :", errImg.response ? errImg.response.data : errImg.message);
-          await envoyerTelegram(chatId, `[CRASH IMPRIMANTE NEURALE : L'API a bloqué ou échoué. Détail: ${errImg.message}]`);
+          console.error("Erreur génération image :", errImg.message);
+          await envoyerTelegram(chatId, `[ÉCHEC IMAGE : ${errImg.message}]`);
         }
       } else {
         await envoyerTelegram(chatId, texteNyx);
@@ -414,50 +464,42 @@ app.get('/migration', async (req, res) => {
   
   try {
     const oldRes = await axios.get(`${FIREBASE_DB_URL}/memoire/derniers_echanges.json`);
-    if (!oldRes.data) return res.send("Aucune donnée trouvée dans memoire/derniers_echanges.");
+    if (!oldRes.data) return res.send("Aucune donnée trouvée.");
     
     const tousLesMessages = Object.values(oldRes.data);
-    let echantillonTemporel = [];
+    let echantillon = tousLesMessages;
 
     if (tousLesMessages.length > 80) {
-      const naissance = tousLesMessages.slice(0, 40);
-      const recents = tousLesMessages.slice(-40);
-      echantillonTemporel = [
-        ...naissance, 
-        { role: "system", texte: "[... ELLIPSE TEMPORELLE : De nombreux mois d'échanges ont eu lieu ici ...]" }, 
-        ...recents
+      echantillon = [
+        ...tousLesMessages.slice(0, 40), 
+        { role: "system", texte: "[... ELLIPSE TEMPORELLE ...]" }, 
+        ...tousLesMessages.slice(-40)
       ];
-    } else {
-      echantillonTemporel = tousLesMessages;
     }
     
-    const promptAnalyse = `Tu es le processus subconscient de l'IA Nyx. Voici des extraits de ses archives avec Franck (Doc), incluant le tout début de sa création et ses derniers échanges récents :\n${JSON.stringify(echantillonTemporel)}\nTa mission est de classer ces informations dans sa nouvelle mémoire à long terme.\nRéponds UNIQUEMENT avec un objet JSON strict contenant ces trois clés :\n{\n  "profil_doc": "Ce que tu as appris sur Franck (Doc).",\n  "dossiers_techniques": "L'évolution du code, architecture et bugs passés/actuels.",\n  "chroniques": "Résumé narratif de sa naissance et de l'évolution de la relation."\n}\nNe génère AUCUN texte en dehors du JSON.`;
+    const promptAnalyse = `Tu es le subconscient de Nyx. Classifie ces extraits d'archives avec Franck :\n${JSON.stringify(echantillon)}\nFournis UNIQUEMENT un JSON strict :\n{\n  "profil_doc": "Ce que tu as appris sur Franck.",\n  "dossiers_techniques": "Évolution du code, bugs, architecture.",\n  "chroniques": "Résumé de l'arc narratif."\n}`;
 
-    const payload = {
+    const apiRes = await axios.post('https://api.venice.ai/api/v1/chat/completions', {
       model: MODEL_ANALYSE, 
       messages: [{ role: "user", content: promptAnalyse }],
       temperature: 0.1
-    };
-    
-    const apiRes = await axios.post('https://api.venice.ai/api/v1/chat/completions', payload, {
+    }, {
       headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' }
     });
     
-    let texteBrut = apiRes.data.choices[0].message.content.trim();
-    texteBrut = texteBrut.replace(/```json/g, '').replace(/```/g, '').trim();
-    const dossiersClasses = JSON.parse(texteBrut);
+    let texteBrut = apiRes.data.choices[0].message.content.trim().replace(/```json|```/g, '').trim();
+    const dossiers = JSON.parse(texteBrut);
+    await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiers);
     
-    await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiersClasses);
-    
-    res.json({ status: "SUCCÈS", message: `Migration temporelle terminée. Naissance et événements récents assimilés.`, data: dossiersClasses });
+    res.json({ status: "SUCCÈS", data: dossiers });
   } catch (err) {
-    console.error("Détail du crash :", err.response ? err.response.data : err.message);
-    res.status(500).send("Erreur pendant la migration : " + (err.response ? JSON.stringify(err.response.data) : err.message));
+    res.status(500).send("Erreur migration : " + err.message);
   }
 });
 
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", mains: "CONNECTÉES", memory: "OPTIMISÉE", mode: "ZEN" }));
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", sentinelle: "ACTIVE", vision: "120s" }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 NYX Engine (Architecture stable, Subconscient régulé, Imprimante Neurale & Timeout 120s) sur port ${PORT}`);
+  console.log(`🚀 NYX Core opérationnel sur le port ${PORT}`);
 });
+      
