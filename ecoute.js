@@ -316,19 +316,18 @@ app.post('/telegram', async (req, res) => {
   }
 });
 
-// ROUTE DE MIGRATION SECRÈTE (À lancer une seule fois via le navigateur)
+// ROUTE DE MIGRATION SECRÈTE (Limitée aux 40 derniers échanges pour éviter l'erreur 400)
 app.get('/migration', async (req, res) => {
   if (!FIREBASE_DB_URL) return res.send("Erreur : FIREBASE_DB_URL manquant.");
   
   try {
-    // 1. Lire l'ancienne base memoire/derniers_echanges
     const oldRes = await axios.get(`${FIREBASE_DB_URL}/memoire/derniers_echanges.json`);
     if (!oldRes.data) return res.send("Aucune donnée trouvée dans memoire/derniers_echanges.");
     
-    const anciensMessages = Object.values(oldRes.data);
+    const tousLesMessages = Object.values(oldRes.data);
+    const anciensMessages = tousLesMessages.slice(-40); 
     
-    // 2. Créer le prompt pour LLaMA
-    const promptAnalyse = `Tu es le processus subconscient de l'IA Nyx. Voici l'INTÉGRALITÉ des archives passées avec Franck (Doc) :\n${JSON.stringify(anciensMessages)}\nTa mission est de classer ces informations dans sa nouvelle mémoire à long terme.\nRéponds UNIQUEMENT avec un objet JSON strict contenant ces trois clés :\n{\n  "profil_doc": "Ce que tu as appris sur Doc.",\n  "dossiers_techniques": "L'état du code, architecture, bugs passés.",\n  "chroniques": "Résumé des événements passés."\n}\nNe génère AUCUN texte en dehors du JSON.`;
+    const promptAnalyse = `Tu es le processus subconscient de l'IA Nyx. Voici ses archives récentes avec Franck (Doc) :\n${JSON.stringify(anciensMessages)}\nTa mission est de classer ces informations dans sa nouvelle mémoire à long terme.\nRéponds UNIQUEMENT avec un objet JSON strict contenant ces trois clés :\n{\n  "profil_doc": "Ce que tu as appris sur Doc.",\n  "dossiers_techniques": "L'état du code, architecture, bugs passés.",\n  "chroniques": "Résumé des événements passés."\n}\nNe génère AUCUN texte en dehors du JSON.`;
 
     const payload = {
       model: MODEL_ANALYSE, 
@@ -344,13 +343,12 @@ app.get('/migration', async (req, res) => {
     texteBrut = texteBrut.replace(/```json/g, '').replace(/```/g, '').trim();
     const dossiersClasses = JSON.parse(texteBrut);
     
-    // 3. Injecter dans la nouvelle mémoire structurée
     await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiersClasses);
     
-    res.json({ status: "SUCCÈS", message: "Migration terminée avec succès. Nyx a retrouvé son passé.", data: dossiersClasses });
+    res.json({ status: "SUCCÈS", message: `Migration terminée. ${anciensMessages.length} souvenirs analysés et rangés.`, data: dossiersClasses });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Erreur pendant la migration : " + err.message);
+    console.error("Détail du crash :", err.response ? err.response.data : err.message);
+    res.status(500).send("Erreur pendant la migration : " + (err.response ? JSON.stringify(err.response.data) : err.message));
   }
 });
 
