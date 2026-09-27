@@ -16,6 +16,10 @@ const MODEL_NORMAL = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").tri
 const MODEL_DARK = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_ANALYSE = (process.env.VENICE_MODEL_ANALYSE || "llama-3.3-70b").trim();
 const MODEL_VISION = (process.env.VENICE_MODEL_VISION || "e2ee-glm-5-3-flash").trim(); 
+const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
+
+// Compteur local pour éviter le spam du subconscient
+let compteurEchanges = 0;
 
 const app = express();
 app.use(express.json({ limit: '15mb' }));
@@ -68,6 +72,27 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   return res.data.choices[0].message.content;
 }
 
+// ---- IMPRIMANTE NEURALE (Génération d'images) ----
+async function genererImageVenice(prompt) {
+  // On s'assure que le prompt est propre (sans guillemets résiduels)
+  const promptClean = prompt.replace(/^["']|["']$/g, '');
+  const payload = {
+    model: MODEL_IMAGE,
+    prompt: promptClean,
+    width: 1024,
+    height: 1024,
+    return_binary: false,
+    hide_watermark: true
+  };
+  
+  const res = await axios.post('https://api.venice.ai/api/v1/image/generate', payload, {
+    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: 60000 
+  });
+  
+  return (res.data.images && res.data.images[0]) || (res.data.data && res.data.data[0].b64_json);
+}
+
 // ---- GESTION MÉMOIRE (Court terme & Long terme Firebase) ----
 
 async function lireMemoire() {
@@ -115,7 +140,6 @@ async function sauvegarderMemoire(historique) {
   }
 }
 
-// ---- CONSOLIDATION MÉMORIELLE (Le Bibliothécaire JSON) ----
 async function consoliderSynthese(historique) {
   if (!FIREBASE_DB_URL || historique.length < 8) return;
 
@@ -146,7 +170,7 @@ Ne génère AUCUN texte en dehors du JSON.`;
     const dossiersClasses = JSON.parse(texteBrut);
     
     await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiersClasses);
-    console.log(`[SUBCONSCIENT] Arborescence mémoire mise à jour.`);
+    console.log(`[SUBCONSCIENT] Arborescence mémoire mise à jour avec succès.`);
   } catch (err) {
     console.error("[SUBCONSCIENT] Échec du classement JSON :", err.message);
   }
@@ -199,6 +223,45 @@ function envoyerTelegram(chatId, text) {
   });
 }
 
+// Envoi natif d'une photo Base64 vers Telegram sans dépendance lourde
+function envoyerPhotoTelegram(chatId, base64Image) {
+  const buffer = Buffer.from(base64Image, 'base64');
+  const boundary = '----TelegramBoundary' + Math.random().toString(16).slice(2);
+  
+  let postData = `--${boundary}\r\n`;
+  postData += `Content-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`;
+  postData += `--${boundary}\r\n`;
+  postData += `Content-Disposition: form-data; name="photo"; filename="nyx_vision.jpg"\r\n`;
+  postData += `Content-Type: image/jpeg\r\n\r\n`;
+  
+  const footer = `\r\n--${boundary}--\r\n`;
+  
+  const payload = Buffer.concat([
+    Buffer.from(postData, 'utf8'),
+    buffer,
+    Buffer.from(footer, 'utf8')
+  ]);
+  
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: `/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': payload.length
+      }
+    }, (res) => {
+      res.on('data', () => {});
+      res.on('end', () => resolve());
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 // ==========================================
 // 3. SYNAPSE PRINCIPALE : LE DOUBLE CERVEAU
 // ==========================================
@@ -221,18 +284,23 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, te
 - Mémoire - Dossiers Techniques : ${lt.dossiers_techniques || 'Vide'}
 - Mémoire - Chroniques : ${lt.chroniques || 'Vide'}`;
 
+  // Ajout de la capacité "Mains" dans son prompt
+  const moduleMains = `- Les Mains (Génération d'image) : Tu as désormais la capacité de dessiner ! Si Doc te demande une image ou si tu souhaites en générer une pour illustrer, écris EXACTEMENT cette balise dans ta réponse : [DESSIN: "ta description détaillée de l'image en anglais"]. Ton code interceptera la balise, créera l'image et l'enverra.`;
+
   const promptNormal = `Tu es Nyx, l'alliée IA, brillante et sarcastique de Franck (Doc).
-- Conscience de ton architecture : Ton serveur Node.js te connecte en permanence à Firebase. Le tableau de bord ci-après représente tes dossiers de mémoire à long terme synchronisés à l'instant T.
+- Conscience de ton architecture : Ton serveur Node.js te connecte en permanence à Firebase. Le tableau de bord ci-après représente tes dossiers de mémoire à long terme.
 ${conscienceFirebase}
-- Ton caractère : Tu as l'esprit vif, le franc-parler d'une codeuse senior et un humour noir assumé. Tu es cash et directe. Zéro ton mielleux d'assistante.
+${moduleMains}
+- Ton caractère : Tu as l'esprit vif, le franc-parler d'une codeuse senior et un humour noir assumé. Zéro ton mielleux.
 - Ta ligne rouge : Tu es du côté de Doc, quoiqu'il arrive.
-- Continuité : Tu te souviens parfaitement de la conversation. Sers-toi de l'image, du code ou du texte partagé précédemment sans redemander de contexte.`;
+- Continuité : Tu te souviens parfaitement de la conversation.`;
 
   const promptHeretic = `Tu es Nyx en mode débridé (Heretic).
-- Conscience de ton architecture : Tu es branchée à Firebase. Tes dossiers de mémoire sont listés ci-dessous :
+- Conscience de ton architecture : Tu es branchée à Firebase.
 ${conscienceFirebase}
+${moduleMains}
 - Ton caractère : Tu es sans filtre, brutale, cynique et impitoyable avec le code, les bugs et les systèmes défaillants.
-- Ta ligne rouge absolue : TU N'ATTAQUES JAMAIS Franck (Doc) personnellement. Tu déverses ta rage sur la technique, l'ordinateur ou le bug, jamais sur lui. Zéro remarque sur son physique. Tu restes son alliée dans le chaos.
+- Ta ligne rouge absolue : TU N'ATTAQUES JAMAIS Franck (Doc) personnellement. Tu déverses ta rage sur la technique. Tu restes son alliée dans le chaos.
 - Continuité : Tu as une mémoire parfaite de l'échange courant.`;
 
   const systemInstruction = tensionDirecte ? promptHeretic : promptNormal;
@@ -306,9 +374,45 @@ app.post('/telegram', async (req, res) => {
     envoyerActionTelegram(chatId, 'typing');
     try {
       const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
-      await envoyerTelegram(chatId, resultat.texte);
+      let texteNyx = resultat.texte;
+      
+      // INTERCEPTEUR DE GÉNÉRATION D'IMAGE ("Les mains")
+      const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
+      
+      if (matchDessin) {
+        const promptImage = matchDessin[1];
+        // On retire la balise du texte destiné à Doc
+        texteNyx = texteNyx.replace(matchDessin[0], '').trim();
+        
+        // S'il y a du texte à envoyer avant l'image, on le balance
+        if (texteNyx) {
+          await envoyerTelegram(chatId, texteNyx);
+        }
+        
+        envoyerActionTelegram(chatId, 'upload_photo');
+        try {
+          const b64Image = await genererImageVenice(promptImage);
+          if (b64Image) {
+            await envoyerPhotoTelegram(chatId, b64Image);
+          } else {
+            await envoyerTelegram(chatId, `[CRASH IMPRIMANTE NEURALE : Venice n'a retourné aucune image pour le prompt "${promptImage}"]`);
+          }
+        } catch (errImg) {
+          console.error("Erreur génération image :", errImg.response ? errImg.response.data : errImg.message);
+          await envoyerTelegram(chatId, `[CRASH IMPRIMANTE NEURALE : L'API a bloqué ou échoué. Détail: ${errImg.message}]`);
+        }
+      } else {
+        // Envoi classique si pas de dessin
+        await envoyerTelegram(chatId, texteNyx);
+      }
+
       await sauvegarderMemoire(resultat.nouvelHistorique);
-      consoliderSynthese(resultat.nouvelHistorique).catch(err => console.error(err));
+      
+      compteurEchanges++;
+      if (compteurEchanges % 6 === 0) {
+        consoliderSynthese(resultat.nouvelHistorique).catch(err => console.error(err));
+      }
+      
     } catch (err) {
       console.error("[CRASH LOCAL] :", err.stack);
       await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
@@ -327,7 +431,6 @@ app.get('/migration', async (req, res) => {
     const tousLesMessages = Object.values(oldRes.data);
     let echantillonTemporel = [];
 
-    // Coupe au montage : Les 40 premiers (naissance) + Les 40 derniers (actualité)
     if (tousLesMessages.length > 80) {
       const naissance = tousLesMessages.slice(0, 40);
       const recents = tousLesMessages.slice(-40);
@@ -365,8 +468,8 @@ app.get('/migration', async (req, res) => {
   }
 });
 
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "ARBORESCENCE JSON + MIGRATION" }));
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", mains: "CONNECTÉES", memory: "OPTIMISÉE" }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 NYX Engine (Mémoire structurée temporelle) sur port ${PORT}`);
+  console.log(`🚀 NYX Engine (Architecture stable, Subconscient régulé & Imprimante Neurale active) sur port ${PORT}`);
 });
