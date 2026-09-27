@@ -74,23 +74,21 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 
 // ---- IMPRIMANTE NEURALE (Génération d'images) ----
 async function genererImageVenice(prompt) {
-  // On s'assure que le prompt est propre (sans guillemets résiduels)
   const promptClean = prompt.replace(/^["']|["']$/g, '');
   const payload = {
     model: MODEL_IMAGE,
     prompt: promptClean,
-    width: 1024,
-    height: 1024,
-    return_binary: false,
-    hide_watermark: true
+    // On demande explicitement à Venice de nous renvoyer l'image en Base64 via l'endpoint standardisé
+    response_format: "b64_json" 
   };
   
-  const res = await axios.post('https://api.venice.ai/api/v1/image/generate', payload, {
+  const res = await axios.post('https://api.venice.ai/api/v1/images/generations', payload, {
     headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
     timeout: 60000 
   });
   
-  return (res.data.images && res.data.images[0]) || (res.data.data && res.data.data[0].b64_json);
+  // Venice renvoie les données au format standard d'OpenAI
+  return res.data.data[0].b64_json;
 }
 
 // ---- GESTION MÉMOIRE (Court terme & Long terme Firebase) ----
