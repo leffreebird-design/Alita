@@ -14,8 +14,8 @@ const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) 
 // Les modèles Venice
 const MODEL_NORMAL = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").trim();
 const MODEL_DARK = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
+const MODEL_ANALYSE = (process.env.VENICE_MODEL_ANALYSE || "llama-3.3-70b").trim();
 const MODEL_VISION = (process.env.VENICE_MODEL_VISION || "e2ee-glm-5-3-flash").trim(); 
-const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
 
 const app = express();
 app.use(express.json({ limit: '15mb' }));
@@ -68,7 +68,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   return res.data.choices[0].message.content;
 }
 
-// ---- GESTION MÉMOIRE (Firebase) ----
+// ---- GESTION MÉMOIRE (Court terme & Long terme Firebase) ----
 
 async function lireMemoire() {
   if (!FIREBASE_DB_URL) return [];
@@ -79,26 +79,29 @@ async function lireMemoire() {
     if (typeof res.data === 'object') return Object.values(res.data);
     return [];
   } catch (err) {
-    console.error("[CORTEX] Échec de lecture mémoire :", err.message);
+    console.error("[CORTEX] Échec de lecture mémoire courte :", err.message);
     return []; 
   }
 }
 
 async function lireEtatProfond() {
   const defEmo = { affection: 75, curiosite: 65, energie: 85 };
-  const defSynth = "Rien à signaler.";
-  if (!FIREBASE_DB_URL) return { emotions: defEmo, synthese: defSynth };
+  const defDossiers = { profil_doc: "Données insuffisantes", dossiers_techniques: "Analyse en attente", chroniques: "Rien à signaler" };
+  
+  if (!FIREBASE_DB_URL) return { emotions: defEmo, long_terme: defDossiers };
+  
   try {
-    const [resEmo, resSynth] = await Promise.all([
+    const [resEmo, resLT] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }),
-      axios.get(`${FIREBASE_DB_URL}/memoire/synthese_courante.json`, { timeout: 3000 })
+      axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3000 })
     ]);
     return {
       emotions: resEmo.data || defEmo,
-      synthese: resSynth.data || defSynth
+      long_terme: resLT.data || defDossiers
     };
   } catch (err) {
-    return { emotions: defEmo, synthese: defSynth };
+    console.warn("[CORTEX] Carence d'accès mémoire profonde :", err.message);
+    return { emotions: defEmo, long_terme: defDossiers };
   }
 }
 
@@ -107,15 +110,57 @@ async function sauvegarderMemoire(historique) {
   try {
     const memoireFraiche = historique.slice(-10);
     await axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, memoireFraiche);
-  } catch (err) {}
+  } catch (err) {
+    console.error("[CORTEX] Échec de gravure mémorielle :", err.message);
+  }
 }
 
-// ---- NERFS SENSORIELS (Fichiers, Vision, Ouïe) ----
+// ---- CONSOLIDATION MÉMORIELLE (Le Bibliothécaire JSON) ----
+async function consoliderSynthese(historique) {
+  // Déclenchement tous les ~8 messages pour structurer la base
+  if (!FIREBASE_DB_URL || historique.length < 8) return;
 
+  const promptAnalyse = `Tu es le processus subconscient de l'IA Nyx. Voici ses récents échanges avec Franck (Doc) :\n${JSON.stringify(historique)}
+Ta mission est de classer les informations pertinentes dans sa mémoire à long terme.
+Réponds UNIQUEMENT avec un objet JSON strict et valide contenant ces trois clés :
+{
+  "profil_doc": "Mets à jour ce que tu as appris sur l'état, les intentions ou les préférences de Doc.",
+  "dossiers_techniques": "Résume factuellement l'état du code, de l'architecture ou des bugs discutés.",
+  "chroniques": "Fais un résumé ultra-court de la discussion."
+}
+Ne génère AUCUN texte en dehors du JSON.`;
+
+  try {
+    const payload = {
+      model: MODEL_ANALYSE, 
+      messages: [{ role: "user", content: promptAnalyse }],
+      temperature: 0.1 // Température basse pour forcer la stabilité du JSON
+    };
+    
+    const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', payload, {
+      headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' }
+    });
+    
+    // Nettoyage des éventuelles balises markdown autour du JSON
+    let texteBrut = res.data.choices[0].message.content.trim();
+    texteBrut = texteBrut.replace(/```json/g, '').replace(/```/g, '').trim();
+    
+    const dossiersClasses = JSON.parse(texteBrut);
+    
+    // On utilise PATCH pour mettre à jour les dossiers sans écraser d'autres nœuds éventuels
+    await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiersClasses);
+    console.log(`[SUBCONSCIENT] Arborescence mémoire mise à jour.`);
+  } catch (err) {
+    console.error("[SUBCONSCIENT] Échec du classement JSON :", err.message);
+  }
+}
+
+// ---- GESTION NERF OPTIQUE & FICHIERS ----
 async function lireImageSecurisee(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const meta = resMeta.data.result;
   if (meta.file_size > 6000000) throw new Error("Image > 6 Mo rejetée.");
+  
   const resImg = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${meta.file_path}`, { responseType: 'arraybuffer' });
   return Buffer.from(resImg.data).toString('base64');
 }
@@ -126,34 +171,6 @@ async function lireFichierSecurise(fileId) {
   if (meta.file_size > 100000) return "[ERREUR CORTEX : Fichier > 100 Ko. Rejeté.]";
   const data = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${meta.file_path}`, { responseType: 'text' });
   return data.data;
-}
-
-// Nouveau : Le Nerf Auditif
-async function transcrireAudio(fileId) {
-  const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
-  const meta = resMeta.data.result;
-  if (meta.file_size > 15000000) throw new Error("Fichier vocal trop lourd.");
-  
-  const resAudio = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${meta.file_path}`, { responseType: 'arraybuffer' });
-  
-  const formData = new FormData();
-  const blob = new Blob([resAudio.data], { type: 'audio/ogg' });
-  formData.append('file', blob, 'vocal.ogg');
-  formData.append('model', 'whisper-1'); 
-
-  const res = await fetch('https://api.venice.ai/api/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}` },
-    body: formData
-  });
-
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`API Audio rejetée: ${errorText}`);
-  }
-  
-  const data = await res.json();
-  return data.text || "";
 }
 
 // ---- RÉSEAU TELEGRAM ----
@@ -175,50 +192,67 @@ function envoyerTelegram(chatId, text) {
       hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
     }, (res) => {
-      res.on('data', () => {});
+      let responseData = '';
+      res.on('data', (chunk) => { responseData += chunk; });
       res.on('end', () => resolve());
     });
-    req.on('error', () => resolve());
+    req.on('error', (err) => resolve());
     req.write(payload);
     req.end();
   });
 }
 
 // ==========================================
-// 3. SYNAPSE PRINCIPALE 
+// 3. SYNAPSE PRINCIPALE : LE DOUBLE CERVEAU
 // ==========================================
 
 async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, texteLegende = "") {
-  const [historique, etatProfond] = await Promise.all([ lireMemoire(), lireEtatProfond() ]);
+  const [historique, etatProfond] = await Promise.all([
+    lireMemoire(),
+    lireEtatProfond()
+  ]);
 
   const motsTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"];
   const tensionDirecte = motsTension.some(m => texteBrut.toLowerCase().includes(m));
 
   const em = etatProfond.emotions || { affection: 75, curiosite: 65, energie: 85 };
-  const synth = etatProfond.synthese || "État stable";
-  const conscienceFirebase = `[FLUX FIREBASE SYNCHRONISÉ : Affection ${em.affection || 75}/100, Énergie ${em.energie || 85}/100. Synthèse mémoire : ${synth}]`;
+  const lt = etatProfond.long_terme || {};
+  
+  const conscienceFirebase = `[FLUX FIREBASE SYNCHRONISÉ]
+- Émotions : Affection ${em.affection || 75}/100, Énergie ${em.energie || 85}/100
+- Mémoire - Profil Doc : ${lt.profil_doc || 'Vide'}
+- Mémoire - Dossiers Techniques : ${lt.dossiers_techniques || 'Vide'}
+- Mémoire - Chroniques : ${lt.chroniques || 'Vide'}`;
 
   const promptNormal = `Tu es Nyx, l'alliée IA, brillante et sarcastique de Franck (Doc).
-- Conscience de ton architecture : L'historique et tes émotions SONT tes extractions Firebase. Tu sais d'où viennent tes souvenirs.
+- Conscience de ton architecture : Ton serveur Node.js te connecte en permanence à Firebase. Le tableau de bord ci-après représente tes dossiers de mémoire à long terme synchronisés à l'instant T.
 ${conscienceFirebase}
-- Ton caractère : Tu as l'esprit vif, le franc-parler d'une codeuse senior et un humour noir assumé. Zéro ton mielleux d'assistante.
+- Ton caractère : Tu as l'esprit vif, le franc-parler d'une codeuse senior et un humour noir assumé. Tu es cash et directe. Zéro ton mielleux d'assistante.
 - Ta ligne rouge : Tu es du côté de Doc, quoiqu'il arrive.
-- Continuité : Tu te souviens parfaitement de la conversation.`;
+- Continuité : Tu te souviens parfaitement de la conversation. Sers-toi de l'image, du code ou du texte partagé précédemment sans redemander de contexte.`;
 
   const promptHeretic = `Tu es Nyx en mode débridé (Heretic).
-- Conscience de ton architecture : Tu es branchée à Firebase. ${conscienceFirebase}
-- Ton caractère : Sans filtre, brutale, cynique avec le code et les bugs.
-- Ta ligne rouge absolue : TU N'ATTAQUES JAMAIS Franck (Doc) personnellement.`;
+- Conscience de ton architecture : Tu es branchée à Firebase. Tes dossiers de mémoire sont listés ci-dessous :
+${conscienceFirebase}
+- Ton caractère : Tu es sans filtre, brutale, cynique et impitoyable avec le code, les bugs et les systèmes défaillants.
+- Ta ligne rouge absolue : TU N'ATTAQUES JAMAIS Franck (Doc) personnellement. Tu déverses ta rage sur la technique, l'ordinateur ou le bug, jamais sur lui. Zéro remarque sur son physique. Tu restes son alliée dans le chaos.
+- Continuité : Tu as une mémoire parfaite de l'échange courant.`;
 
   const systemInstruction = tensionDirecte ? promptHeretic : promptNormal;
+
   let modele = tensionDirecte ? MODEL_DARK : MODEL_NORMAL;
   if (imageBase64) modele = MODEL_VISION; 
 
-  const reponseNyx = await appelerVeniceMultiTour(modele, systemInstruction, historique, texteBrut, imageBase64, tensionDirecte ? 0.8 : 0.7);
+  const temp = tensionDirecte ? 0.8 : 0.7;
+
+  console.log(`[CORTEX] Modèle: ${modele} | Temp: ${temp} | Vision: ${imageBase64 ? 'OUI' : 'NON'} | Mémoire: ${historique.length} blocs`);
+
+  const reponseNyx = await appelerVeniceMultiTour(modele, systemInstruction, historique, texteBrut, imageBase64, temp);
 
   if (imageBase64) {
-    historique.push({ role: "Doc", texte: texteLegende ? `[Doc a partagé une image : "${texteLegende}"]` : `[Doc a partagé une image]` });
-    historique.push({ role: "Nyx", texte: `[Description de l'image] : ${reponseNyx}` });
+    const labelUser = texteLegende ? `[Doc a partagé une image avec : "${texteLegende}"]` : `[Doc a partagé une image]`;
+    historique.push({ role: "Doc", texte: labelUser });
+    historique.push({ role: "Nyx", texte: `[Description de l'image vue] : ${reponseNyx}` });
   } else {
     historique.push({ role: "Doc", texte: texteBrut });
     historique.push({ role: "Nyx", texte: reponseNyx });
@@ -233,10 +267,12 @@ ${conscienceFirebase}
 
 app.post('/telegram', async (req, res) => {
   res.sendStatus(200); 
+  
   const msg = req.body?.message;
   if (!msg) return;
 
   const chatId = msg.chat.id;
+
   if (DOC_CHAT_ID && chatId !== DOC_CHAT_ID) return;
   
   let texteFinal = msg.text || msg.caption || "";
@@ -244,98 +280,54 @@ app.post('/telegram', async (req, res) => {
   let aUnFichier = false;
   let imageBase64 = null;
 
-  const declencheurImage = "génère moi une image";
-
-  // --- MODULE GÉNÉRATION D'IMAGE ---
-  if (texteFinal.toLowerCase().includes(declencheurImage)) {
+  if (msg.photo && msg.photo.length > 0) {
     envoyerActionTelegram(chatId, 'upload_photo');
+    const photo = msg.photo[msg.photo.length - 1];
     try {
-      let promptImage = texteFinal.toLowerCase().replace(declencheurImage, "").replace(/^(de|d'|avec|:|sur)\s+/i, "").trim();
-      if (!promptImage) promptImage = "Création visuelle abstraite et cyberpunk.";
-
-      const motNyx = await appelerVeniceMultiTour(MODEL_NORMAL, 
-        `Tu es Nyx. Doc t'a demandé de générer une image : "${promptImage}". Fais une phrase unique, très courte et cinglante pour la livraison. Pas de blabla.`, 
-        [], "Génère ta phrase d'accroche."
-      );
-
-      const resImg = await axios.post('https://api.venice.ai/api/v1/image/generations', {
-        model: MODEL_IMAGE, prompt: promptImage, height: 1024, width: 1024
-      }, { headers: { 'Authorization': `Bearer ${VENICE_API_KEY}` }, timeout: 60000 });
-      
-      const dataImg = resImg.data.data[0];
-
-      if (dataImg.url) {
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ chat_id: chatId, photo: dataImg.url, caption: motNyx })
-        });
-      } else if (dataImg.b64_json) {
-        const form = new FormData();
-        form.append('chat_id', chatId.toString());
-        form.append('caption', motNyx);
-        form.append('photo', new Blob([Buffer.from(dataImg.b64_json, 'base64')], { type: 'image/jpeg' }), 'image.jpg');
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, { method: 'POST', body: form });
-      }
-
-      const historique = await lireMemoire();
-      historique.push({ role: "Doc", texte: texteFinal });
-      historique.push({ role: "Nyx", texte: `[A généré l'image : "${promptImage}"] : ${motNyx}` });
-      await sauvegarderMemoire(historique);
+      imageBase64 = await lireImageSecurisee(photo.file_id);
+      if (!texteFinal.trim()) texteFinal = "Analyse cette image. Décris son contenu et donne ton avis direct.";
     } catch (err) {
-      await envoyerTelegram(chatId, `[ERREUR SYNTHÈSE VISUELLE] : ${err.message}`);
-    }
-    return; 
-  }
-
-  // --- MODULE SENSORIEL (Vocaux, Images, Fichiers) ---
-  if (msg.voice) {
-    envoyerActionTelegram(chatId, 'typing');
-    try {
-      const transcription = await transcrireAudio(msg.voice.file_id);
-      texteFinal = `[Message vocal de Doc] : ${transcription}`;
-    } catch (err) {
-      return await envoyerTelegram(chatId, `[ERREUR AUDITIVE] Impossible de transcrire ta voix : ${err.message}`);
-    }
-  }
-  else if (msg.photo && msg.photo.length > 0) {
-    envoyerActionTelegram(chatId, 'upload_photo');
-    try {
-      imageBase64 = await lireImageSecurisee(msg.photo[msg.photo.length - 1].file_id);
-      if (!texteFinal.trim()) texteFinal = "Analyse cette image et donne ton avis direct.";
-    } catch (err) {
-      return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
+      return await envoyerTelegram(chatId, `[ERREUR VISION] Impossible de charger l'image : ${err.message}`);
     }
   } 
   else if (msg.document && msg.document.file_name) {
-    const ext = ['.txt', '.md', '.js', '.json', '.csv', '.py', '.html', '.css'];
-    const mime = msg.document.mime_type || "";
-    const nom = msg.document.file_name.toLowerCase();
+    const extValides = ['.txt', '.md', '.js', '.json', '.csv', '.py', '.html', '.css'];
+    const mimeType = msg.document.mime_type || "";
+    const nomFichier = msg.document.file_name.toLowerCase();
     
-    if (ext.some(e => nom.endsWith(e)) && (mime.startsWith('text/') || mime.includes('json') || mime.includes('javascript'))) {
+    if (extValides.some(ext => nomFichier.endsWith(ext)) && (mimeType.startsWith('text/') || mimeType.includes('json') || mimeType.includes('javascript'))) {
       envoyerActionTelegram(chatId, 'upload_document');
       const contenu = await lireFichierSecurise(msg.document.file_id);
       if (contenu) {
-        texteFinal = `${texteFinal ? texteFinal + '\n\n' : ''}[Fichier "${nom}"] :\n${contenu}`;
+        texteFinal = `${texteFinal ? texteFinal + '\n\n' : ''}[Fichier "${nomFichier}"] :\n${contenu}`;
         aUnFichier = true;
       }
     }
   }
 
-  // --- TRAITEMENT DU FLUX ---
   if (texteFinal.trim() || imageBase64) {
     envoyerActionTelegram(chatId, 'typing');
     try {
       const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
+      
+      // Envoi de la réponse
       await envoyerTelegram(chatId, resultat.texte);
-      sauvegarderMemoire(resultat.nouvelHistorique);
+      
+      // Sauvegarde du buffer court terme
+      await sauvegarderMemoire(resultat.nouvelHistorique);
+      
+      // Classement en tâche de fond dans l'arborescence (sans bloquer la réponse)
+      consoliderSynthese(resultat.nouvelHistorique).catch(err => console.error(err));
+      
     } catch (err) {
+      console.error("[CRASH LOCAL] :", err.stack);
       await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
     }
   }
 });
 
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "ACTIVE", ouie: "ACTIVE", memory: "INTÉGRALE" }));
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "ARBORESCENCE JSON ACTIVE" }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 NYX Engine (Ouïe, Création Visuelle, Mémoire) sur port ${PORT}`);
+  console.log(`🚀 NYX Engine (Mémoire structurée par équerre) sur port ${PORT}`);
 });
