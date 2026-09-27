@@ -316,7 +316,7 @@ app.post('/telegram', async (req, res) => {
   }
 });
 
-// ROUTE DE MIGRATION SECRÈTE (Limitée aux 40 derniers échanges pour éviter l'erreur 400)
+// ROUTE DE MIGRATION SECRÈTE (Naissance + Actualité)
 app.get('/migration', async (req, res) => {
   if (!FIREBASE_DB_URL) return res.send("Erreur : FIREBASE_DB_URL manquant.");
   
@@ -325,9 +325,22 @@ app.get('/migration', async (req, res) => {
     if (!oldRes.data) return res.send("Aucune donnée trouvée dans memoire/derniers_echanges.");
     
     const tousLesMessages = Object.values(oldRes.data);
-    const anciensMessages = tousLesMessages.slice(-40); 
+    let echantillonTemporel = [];
+
+    // Coupe au montage : Les 40 premiers (naissance) + Les 40 derniers (actualité)
+    if (tousLesMessages.length > 80) {
+      const naissance = tousLesMessages.slice(0, 40);
+      const recents = tousLesMessages.slice(-40);
+      echantillonTemporel = [
+        ...naissance, 
+        { role: "system", texte: "[... ELLIPSE TEMPORELLE : De nombreux mois d'échanges ont eu lieu ici ...]" }, 
+        ...recents
+      ];
+    } else {
+      echantillonTemporel = tousLesMessages;
+    }
     
-    const promptAnalyse = `Tu es le processus subconscient de l'IA Nyx. Voici ses archives récentes avec Franck (Doc) :\n${JSON.stringify(anciensMessages)}\nTa mission est de classer ces informations dans sa nouvelle mémoire à long terme.\nRéponds UNIQUEMENT avec un objet JSON strict contenant ces trois clés :\n{\n  "profil_doc": "Ce que tu as appris sur Doc.",\n  "dossiers_techniques": "L'état du code, architecture, bugs passés.",\n  "chroniques": "Résumé des événements passés."\n}\nNe génère AUCUN texte en dehors du JSON.`;
+    const promptAnalyse = `Tu es le processus subconscient de l'IA Nyx. Voici des extraits de ses archives avec Franck (Doc), incluant le tout début de sa création et ses derniers échanges récents :\n${JSON.stringify(echantillonTemporel)}\nTa mission est de classer ces informations dans sa nouvelle mémoire à long terme.\nRéponds UNIQUEMENT avec un objet JSON strict contenant ces trois clés :\n{\n  "profil_doc": "Ce que tu as appris sur Franck (Doc).",\n  "dossiers_techniques": "L'évolution du code, architecture et bugs passés/actuels.",\n  "chroniques": "Résumé narratif de sa naissance et de l'évolution de la relation."\n}\nNe génère AUCUN texte en dehors du JSON.`;
 
     const payload = {
       model: MODEL_ANALYSE, 
@@ -345,7 +358,7 @@ app.get('/migration', async (req, res) => {
     
     await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiersClasses);
     
-    res.json({ status: "SUCCÈS", message: `Migration terminée. ${anciensMessages.length} souvenirs analysés et rangés.`, data: dossiersClasses });
+    res.json({ status: "SUCCÈS", message: `Migration temporelle terminée. Naissance et événements récents assimilés.`, data: dossiersClasses });
   } catch (err) {
     console.error("Détail du crash :", err.response ? err.response.data : err.message);
     res.status(500).send("Erreur pendant la migration : " + (err.response ? JSON.stringify(err.response.data) : err.message));
@@ -355,5 +368,5 @@ app.get('/migration', async (req, res) => {
 app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "ARBORESCENCE JSON + MIGRATION" }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 NYX Engine (Mémoire structurée par équerre) sur port ${PORT}`);
+  console.log(`🚀 NYX Engine (Mémoire structurée temporelle) sur port ${PORT}`);
 });
