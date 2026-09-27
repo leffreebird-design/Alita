@@ -10,7 +10,6 @@ const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
-const GNEWS_API_KEY = (process.env.GNEWS_API_KEY || "").trim();
 
 // Modèles Venice
 const MODEL_NORMAL = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").trim();
@@ -307,20 +306,20 @@ ${moduleMains}
 }
 
 // ==========================================
-// 4. SENTINELLE // MODULE DE VEILLE AUTONOME
+// 4. SENTINELLE // MODULE DE VEILLE SANS CLÉ
 // ==========================================
 
 async function recupererActusHackerNews() {
   try {
-    const topIdsRes = await axios.get('https://hacker-news.firebaseio.com/v0/topstories.json?limitToFirst=3', { timeout: 8000 });
-    const topIds = topIdsRes.data.slice(0, 3);
+    const topIdsRes = await axios.get('https://hacker-news.firebaseio.com/v0/topstories.json', { timeout: 8000 });
+    const topIds = (topIdsRes.data || []).slice(0, 3);
     
     const articles = await Promise.all(topIds.map(async (id) => {
       const itemRes = await axios.get(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, { timeout: 5000 });
       return itemRes.data;
     }));
 
-    let texte = `💀 **DEV, FAUX BUGS & NOYAUX LINUX**\n------------------------------------\n`;
+    let texte = `💀 **DEV, CYBER & LINUX**\n------------------------------------\n`;
     articles.forEach(art => {
       if (art && art.title) {
         const lien = art.url || `https://news.ycombinator.com/item?id=${art.id}`;
@@ -335,22 +334,19 @@ async function recupererActusHackerNews() {
 }
 
 async function recupererActusGeek() {
-  if (!GNEWS_API_KEY) {
-    return "🎮 _GNEWS_API_KEY manquante dans les variables Render._\n\n";
-  }
   try {
-    const url = `https://gnews.io/api/v4/search?q=gaming OR hardware OR tech&lang=fr&max=3&apikey=${GNEWS_API_KEY}`;
-    const res = await axios.get(url, { timeout: 8000 });
-    const articles = res.data.articles || [];
+    const rssUrl = encodeURIComponent('https://www.jeuxvideo.com/rss/rss.xml');
+    const res = await axios.get(`https://api.rss2json.com/v1/api.json?rss_url=${rssUrl}`, { timeout: 8000 });
+    const articles = (res.data.items || []).slice(0, 3);
 
-    let texte = `🎮 **GEEK, HARDWARE & POP-CULTURE**\n------------------------------------\n`;
+    let texte = `🎮 **GEEK, HARDWARE & GAMING**\n------------------------------------\n`;
     articles.forEach(art => {
-      texte += `▪️ [${art.source.name}] *${art.title}*\n🔗 [Consulter](${art.url})\n\n`;
+      texte += `▪️ *${art.title}*\n🔗 [Consulter](${art.link})\n\n`;
     });
     return texte;
   } catch (err) {
-    console.error("[SENTINELLE] Erreur GNews :", err.message);
-    return "🎮 _Flux Geek indisponible._\n\n";
+    console.error("[SENTINELLE] Erreur Flux Geek :", err.message);
+    return "🎮 _Flux Geek momentanément indisponible._\n\n";
   }
 }
 
@@ -370,7 +366,7 @@ async function executerRondeSentinelle() {
 // Intervalle sentinelle : 6 heures
 const INTERVALLE_VEILLE = 6 * 60 * 60 * 1000;
 setInterval(executerRondeSentinelle, INTERVALLE_VEILLE);
-setTimeout(executerRondeSentinelle, 20000);
+setTimeout(executerRondeSentinelle, 15000);
 
 // ==========================================
 // 5. ROUTES EXPRESS
@@ -435,7 +431,7 @@ app.post('/telegram', async (req, res) => {
           if (b64Image) {
             await envoyerPhotoTelegram(chatId, b64Image);
           } else {
-            await envoyerTelegram(chatId, `[ÉCHEC IMAGE : Aucune donnée générée pour "${promptImage}"]`);
+            await envoyerTelegram(chatId, `[ÉCHEC IMAGE : Aucune donnée pour "${promptImage}"]`);
           }
         } catch (errImg) {
           console.error("Erreur génération image :", errImg.message);
@@ -497,9 +493,9 @@ app.get('/migration', async (req, res) => {
   }
 });
 
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", sentinelle: "ACTIVE", vision: "120s" }));
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", sentinelle: "ACTIVE", sources: ["HackerNews", "JeuxVideo.com"] }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 NYX Core opérationnel sur le port ${PORT}`);
 });
-      
+    
