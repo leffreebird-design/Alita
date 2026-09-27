@@ -237,7 +237,6 @@ app.post('/telegram', async (req, res) => {
       imageBase64 = await lireImageSecurisee(photo.file_id);
       if (!texteFinal.trim()) texteFinal = "Analyse cette image. Décris son contenu et donne ton avis direct.";
     } catch (err) {
-      // Correction de la syntaxe ici : les backticks encadrent correctement le message
       return await envoyerTelegram(chatId, `[ERREUR VISION] Impossible de charger l'image : ${err.message}`);
     }
   } 
@@ -247,6 +246,33 @@ app.post('/telegram', async (req, res) => {
     const nomFichier = msg.document.file_name.toLowerCase();
     
     if (extValides.some(ext => nomFichier.endsWith(ext)) && (mimeType.startsWith('text/') || mimeType.includes('json') || mimeType.includes('javascript'))) {
+      envoyerActionTelegram(chatId, 'upload_document');
+      const contenu = await lireFichierSecurise(msg.document.file_id);
+      if (contenu) {
+        texteFinal = `${texteFinal ? texteFinal + '\n\n' : ''}[Fichier "${nomFichier}"] :\n${contenu}`;
+        aUnFichier = true;
+      }
+    }
+  }
+
+  if (texteFinal.trim() || imageBase64) {
+    envoyerActionTelegram(chatId, 'typing');
+    try {
+      const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
+      await envoyerTelegram(chatId, resultat.texte);
+      sauvegarderMemoire(resultat.nouvelHistorique);
+    } catch (err) {
+      console.error("[CRASH LOCAL] :", err.stack);
+      await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
+    }
+  }
+});
+
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "INTÉGRALE & SÉCURISÉE" }));
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 NYX Engine (Mémoire Sécurisée, Syntaxe Corrigée) sur port ${PORT}`);
+});json') || mimeType.includes('javascript'))) {
       envoyerActionTelegram(chatId, 'upload_document');
       const contenu = await lireFichierSecurise(msg.document.file_id);
       if (contenu) {
