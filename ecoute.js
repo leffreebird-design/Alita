@@ -67,7 +67,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
       'Authorization': `Bearer ${VENICE_API_KEY}`, 
       'Content-Type': 'application/json' 
     },
-    timeout: 55000
+    timeout: 120000 // Zen mode : 2 minutes pour laisser le modèle Vision respirer
   });
   return res.data.choices[0].message.content;
 }
@@ -78,7 +78,6 @@ async function genererImageVenice(prompt) {
   const payload = {
     model: MODEL_IMAGE,
     prompt: promptClean,
-    // On demande explicitement à Venice de nous renvoyer l'image en Base64 via l'endpoint standardisé
     response_format: "b64_json" 
   };
   
@@ -87,12 +86,10 @@ async function genererImageVenice(prompt) {
     timeout: 60000 
   });
   
-  // Venice renvoie les données au format standard d'OpenAI
   return res.data.data[0].b64_json;
 }
 
 // ---- GESTION MÉMOIRE (Court terme & Long terme Firebase) ----
-
 async function lireMemoire() {
   if (!FIREBASE_DB_URL) return [];
   try {
@@ -221,7 +218,6 @@ function envoyerTelegram(chatId, text) {
   });
 }
 
-// Envoi natif d'une photo Base64 vers Telegram sans dépendance lourde
 function envoyerPhotoTelegram(chatId, base64Image) {
   const buffer = Buffer.from(base64Image, 'base64');
   const boundary = '----TelegramBoundary' + Math.random().toString(16).slice(2);
@@ -282,7 +278,6 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, te
 - Mémoire - Dossiers Techniques : ${lt.dossiers_techniques || 'Vide'}
 - Mémoire - Chroniques : ${lt.chroniques || 'Vide'}`;
 
-  // Ajout de la capacité "Mains" dans son prompt
   const moduleMains = `- Les Mains (Génération d'image) : Tu as désormais la capacité de dessiner ! Si Doc te demande une image ou si tu souhaites en générer une pour illustrer, écris EXACTEMENT cette balise dans ta réponse : [DESSIN: "ta description détaillée de l'image en anglais"]. Ton code interceptera la balise, créera l'image et l'enverra.`;
 
   const promptNormal = `Tu es Nyx, l'alliée IA, brillante et sarcastique de Franck (Doc).
@@ -374,15 +369,12 @@ app.post('/telegram', async (req, res) => {
       const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
       let texteNyx = resultat.texte;
       
-      // INTERCEPTEUR DE GÉNÉRATION D'IMAGE ("Les mains")
       const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
       
       if (matchDessin) {
         const promptImage = matchDessin[1];
-        // On retire la balise du texte destiné à Doc
         texteNyx = texteNyx.replace(matchDessin[0], '').trim();
         
-        // S'il y a du texte à envoyer avant l'image, on le balance
         if (texteNyx) {
           await envoyerTelegram(chatId, texteNyx);
         }
@@ -400,7 +392,6 @@ app.post('/telegram', async (req, res) => {
           await envoyerTelegram(chatId, `[CRASH IMPRIMANTE NEURALE : L'API a bloqué ou échoué. Détail: ${errImg.message}]`);
         }
       } else {
-        // Envoi classique si pas de dessin
         await envoyerTelegram(chatId, texteNyx);
       }
 
@@ -418,7 +409,6 @@ app.post('/telegram', async (req, res) => {
   }
 });
 
-// ROUTE DE MIGRATION SECRÈTE (Naissance + Actualité)
 app.get('/migration', async (req, res) => {
   if (!FIREBASE_DB_URL) return res.send("Erreur : FIREBASE_DB_URL manquant.");
   
@@ -466,8 +456,8 @@ app.get('/migration', async (req, res) => {
   }
 });
 
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", mains: "CONNECTÉES", memory: "OPTIMISÉE" }));
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", mains: "CONNECTÉES", memory: "OPTIMISÉE", mode: "ZEN" }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 NYX Engine (Architecture stable, Subconscient régulé & Imprimante Neurale active) sur port ${PORT}`);
+  console.log(`🚀 NYX Engine (Architecture stable, Subconscient régulé, Imprimante Neurale & Timeout 120s) sur port ${PORT}`);
 });
