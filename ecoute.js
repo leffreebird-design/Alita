@@ -117,7 +117,6 @@ async function sauvegarderMemoire(historique) {
 
 // ---- CONSOLIDATION MÉMORIELLE (Le Bibliothécaire JSON) ----
 async function consoliderSynthese(historique) {
-  // Déclenchement tous les ~8 messages pour structurer la base
   if (!FIREBASE_DB_URL || historique.length < 8) return;
 
   const promptAnalyse = `Tu es le processus subconscient de l'IA Nyx. Voici ses récents échanges avec Franck (Doc) :\n${JSON.stringify(historique)}
@@ -134,20 +133,18 @@ Ne génère AUCUN texte en dehors du JSON.`;
     const payload = {
       model: MODEL_ANALYSE, 
       messages: [{ role: "user", content: promptAnalyse }],
-      temperature: 0.1 // Température basse pour forcer la stabilité du JSON
+      temperature: 0.1 
     };
     
     const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', payload, {
       headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' }
     });
     
-    // Nettoyage des éventuelles balises markdown autour du JSON
     let texteBrut = res.data.choices[0].message.content.trim();
     texteBrut = texteBrut.replace(/```json/g, '').replace(/```/g, '').trim();
     
     const dossiersClasses = JSON.parse(texteBrut);
     
-    // On utilise PATCH pour mettre à jour les dossiers sans écraser d'autres nœuds éventuels
     await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiersClasses);
     console.log(`[SUBCONSCIENT] Arborescence mémoire mise à jour.`);
   } catch (err) {
@@ -309,16 +306,9 @@ app.post('/telegram', async (req, res) => {
     envoyerActionTelegram(chatId, 'typing');
     try {
       const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
-      
-      // Envoi de la réponse
       await envoyerTelegram(chatId, resultat.texte);
-      
-      // Sauvegarde du buffer court terme
       await sauvegarderMemoire(resultat.nouvelHistorique);
-      
-      // Classement en tâche de fond dans l'arborescence (sans bloquer la réponse)
       consoliderSynthese(resultat.nouvelHistorique).catch(err => console.error(err));
-      
     } catch (err) {
       console.error("[CRASH LOCAL] :", err.stack);
       await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
@@ -326,7 +316,45 @@ app.post('/telegram', async (req, res) => {
   }
 });
 
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "ARBORESCENCE JSON ACTIVE" }));
+// ROUTE DE MIGRATION SECRÈTE (À lancer une seule fois via le navigateur)
+app.get('/migration', async (req, res) => {
+  if (!FIREBASE_DB_URL) return res.send("Erreur : FIREBASE_DB_URL manquant.");
+  
+  try {
+    // 1. Lire l'ancienne base memoire/derniers_echanges
+    const oldRes = await axios.get(`${FIREBASE_DB_URL}/memoire/derniers_echanges.json`);
+    if (!oldRes.data) return res.send("Aucune donnée trouvée dans memoire/derniers_echanges.");
+    
+    const anciensMessages = Object.values(oldRes.data);
+    
+    // 2. Créer le prompt pour LLaMA
+    const promptAnalyse = `Tu es le processus subconscient de l'IA Nyx. Voici l'INTÉGRALITÉ des archives passées avec Franck (Doc) :\n${JSON.stringify(anciensMessages)}\nTa mission est de classer ces informations dans sa nouvelle mémoire à long terme.\nRéponds UNIQUEMENT avec un objet JSON strict contenant ces trois clés :\n{\n  "profil_doc": "Ce que tu as appris sur Doc.",\n  "dossiers_techniques": "L'état du code, architecture, bugs passés.",\n  "chroniques": "Résumé des événements passés."\n}\nNe génère AUCUN texte en dehors du JSON.`;
+
+    const payload = {
+      model: MODEL_ANALYSE, 
+      messages: [{ role: "user", content: promptAnalyse }],
+      temperature: 0.1
+    };
+    
+    const apiRes = await axios.post('https://api.venice.ai/api/v1/chat/completions', payload, {
+      headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' }
+    });
+    
+    let texteBrut = apiRes.data.choices[0].message.content.trim();
+    texteBrut = texteBrut.replace(/```json/g, '').replace(/```/g, '').trim();
+    const dossiersClasses = JSON.parse(texteBrut);
+    
+    // 3. Injecter dans la nouvelle mémoire structurée
+    await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, dossiersClasses);
+    
+    res.json({ status: "SUCCÈS", message: "Migration terminée avec succès. Nyx a retrouvé son passé.", data: dossiersClasses });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Erreur pendant la migration : " + err.message);
+  }
+});
+
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "ARBORESCENCE JSON + MIGRATION" }));
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 NYX Engine (Mémoire structurée par équerre) sur port ${PORT}`);
