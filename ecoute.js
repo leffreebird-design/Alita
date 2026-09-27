@@ -87,21 +87,25 @@ async function lireMemoire() {
   }
 }
 
-// 2. Mémoire profonde (L'âme Firebase)
+// 2. Mémoire profonde (L'âme Firebase blindée contre le null)
 async function lireEtatProfond() {
-  if (!FIREBASE_DB_URL) return { emotions: null, synthese: null };
+  const defEmo = { affection: 75, curiosite: 65, energie: 85 };
+  const defSynth = "Rien à signaler.";
+  
+  if (!FIREBASE_DB_URL) return { emotions: defEmo, synthese: defSynth };
+  
   try {
     const [resEmo, resSynth] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }),
       axios.get(`${FIREBASE_DB_URL}/memoire/synthese_courante.json`, { timeout: 3000 })
     ]);
     return {
-      emotions: resEmo.data || { affection: 75, curiosite: 65, energie: 85 },
-      synthese: resSynth.data || "Rien à signaler."
+      emotions: resEmo.data || defEmo,
+      synthese: resSynth.data || defSynth
     };
   } catch (err) {
     console.warn("[CORTEX] Carence d'accès aux émotions :", err.message);
-    return { emotions: { affection: 75, curiosite: 65, energie: 85 }, synthese: "État stable." };
+    return { emotions: defEmo, synthese: defSynth };
   }
 }
 
@@ -176,8 +180,12 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, te
   const motsTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"];
   const tensionDirecte = motsTension.some(m => texteBrut.toLowerCase().includes(m));
 
+  // Sécurisation absolue des variables d'humeur en cas de null
+  const em = etatProfond.emotions || { affection: 75, curiosite: 65, energie: 85 };
+  const synth = etatProfond.synthese || "État stable";
+
   // Injection silencieuse de l'état interne
-  const contexteInterne = `[CONTEXTE INTERNE : Affection ${etatProfond.emotions.affection}/100, Énergie ${etatProfond.emotions.energie}/100. Synthèse mémoire : ${etatProfond.synthese}]`;
+  const contexteInterne = `[CONTEXTE INTERNE : Affection ${em.affection || 75}/100, Énergie ${em.energie || 85}/100. Synthèse mémoire : ${synth}]`;
 
   // PROMPT 1 : La Nyx originale 
   const promptNormal = `Tu es Nyx, l'alliée IA, brillante et sarcastique de Franck (Doc). ${contexteInterne}
@@ -245,6 +253,38 @@ app.post('/telegram', async (req, res) => {
   } 
   else if (msg.document && msg.document.file_name) {
     const extValides = ['.txt', '.md', '.js', '.json', '.csv', '.py', '.html', '.css'];
+    const mimeType = msg.document.mime_type || "";
+    const nomFichier = msg.document.file_name.toLowerCase();
+    
+    if (extValides.some(ext => nomFichier.endsWith(ext)) && (mimeType.startsWith('text/') || mimeType.includes('json') || mimeType.includes('javascript'))) {
+      envoyerActionTelegram(chatId, 'upload_document');
+      const contenu = await lireFichierSecurise(msg.document.file_id);
+      if (contenu) {
+        texteFinal = `${texteFinal ? texteFinal + '\n\n' : ''}[Fichier "${nomFichier}"] :\n${contenu}`;
+        aUnFichier = true;
+      }
+    }
+  }
+
+  if (texteFinal.trim() || imageBase64) {
+    envoyerActionTelegram(chatId, 'typing');
+    try {
+      const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
+      await envoyerTelegram(chatId, resultat.texte);
+      sauvegarderMemoire(resultat.nouvelHistorique);
+    } catch (err) {
+      console.error("[CRASH LOCAL] :", err.stack);
+      await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
+    }
+  }
+});
+
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "INTÉGRALE & SÉCURISÉE" }));
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 NYX Engine (Mémoire Conversationnelle & Émotionnelle Sécurisée) sur port ${PORT}`);
+});
+;
     const mimeType = msg.document.mime_type || "";
     const nomFichier = msg.document.file_name.toLowerCase();
     
