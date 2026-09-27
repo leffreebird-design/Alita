@@ -14,7 +14,6 @@ const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) 
 // Les modèles Venice
 const MODEL_NORMAL = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").trim();
 const MODEL_DARK = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
-const MODEL_ANALYSE = (process.env.VENICE_MODEL_ANALYSE || "llama-3.3-70b").trim();
 const MODEL_VISION = (process.env.VENICE_MODEL_VISION || "e2ee-glm-5-3-flash").trim(); 
 
 const app = express();
@@ -226,6 +225,7 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, te
 // 4. ROUTES EXPRESS
 // ==========================================
 
+// Ajout crucial du mot-clé 'async' ici pour éviter le SyntaxError
 app.post('/telegram', async (req, res) => {
   res.sendStatus(200); 
   
@@ -249,6 +249,42 @@ app.post('/telegram', async (req, res) => {
       if (!texteFinal.trim()) texteFinal = "Analyse cette image. Décris son contenu et donne ton avis direct.";
     } catch (err) {
       return await envoyerTelegram(chatId, `[ERREUR VISION] Impossible de charger l'image : ${err.message}`);
+    }
+  } 
+  else if (msg.document && msg.document.file_name) {
+    const extValides = ['.txt', '.md', '.js', '.json', '.csv', '.py', '.html', '.css'];
+    const mimeType = msg.document.mime_type || "";
+    const nomFichier = msg.document.file_name.toLowerCase();
+    
+    if (extValides.some(ext => nomFichier.endsWith(ext)) && (mimeType.startsWith('text/') || mimeType.includes('json') || mimeType.includes('javascript'))) {
+      envoyerActionTelegram(chatId, 'upload_document');
+      const contenu = await lireFichierSecurise(msg.document.file_id);
+      if (contenu) {
+        texteFinal = `${texteFinal ? texteFinal + '\n\n' : ''}[Fichier "${nomFichier}"] :\n${contenu}`;
+        aUnFichier = true;
+      }
+    }
+  }
+
+  if (texteFinal.trim() || imageBase64) {
+    envoyerActionTelegram(chatId, 'typing');
+    try {
+      const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
+      await envoyerTelegram(chatId, resultat.texte);
+      sauvegarderMemoire(resultat.nouvelHistorique);
+    } catch (err) {
+      console.error("[CRASH LOCAL] :", err.stack);
+      await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
+    }
+  }
+});
+
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "INTÉGRALE & SÉCURISÉE" }));
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 NYX Engine (Mémoire Sécurisée, Syntaxe Async Corrigée) sur port ${PORT}`);
+});
+ VISION] Impossible de charger l'image : ${err.message}`);
     }
   } 
   else if (msg.document && msg.document.file_name) {
