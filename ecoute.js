@@ -28,7 +28,6 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     { role: "system", content: systemInstruction }
   ];
 
-  // Injection de la mémoire conversationnelle (Court terme)
   for (const m of historiqueMessages) {
     messages.push({
       role: m.role === "Doc" ? "user" : "assistant",
@@ -36,7 +35,6 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     });
   }
 
-  // Ajout du message courant 
   if (imageBase64) {
     messages.push({
       role: "user",
@@ -71,7 +69,6 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 
 // ---- GESTION MÉMOIRE (Court terme & Long terme Firebase) ----
 
-// 1. Mémoire de conversation (Anti-amnésie)
 async function lireMemoire() {
   if (!FIREBASE_DB_URL) return [];
   try {
@@ -86,7 +83,6 @@ async function lireMemoire() {
   }
 }
 
-// 2. Mémoire profonde (L'âme Firebase blindée contre le null)
 async function lireEtatProfond() {
   const defEmo = { affection: 75, curiosite: 65, energie: 85 };
   const defSynth = "Rien à signaler.";
@@ -170,7 +166,6 @@ function envoyerTelegram(chatId, text) {
 // ==========================================
 
 async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, texteLegende = "") {
-  // Chargement simultané de la mémoire récente et de l'âme Firebase
   const [historique, etatProfond] = await Promise.all([
     lireMemoire(),
     lireEtatProfond()
@@ -179,20 +174,15 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, te
   const motsTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"];
   const tensionDirecte = motsTension.some(m => texteBrut.toLowerCase().includes(m));
 
-  // Sécurisation absolue des variables d'humeur en cas de null
   const em = etatProfond.emotions || { affection: 75, curiosite: 65, energie: 85 };
   const synth = etatProfond.synthese || "État stable";
-
-  // Injection silencieuse de l'état interne
   const contexteInterne = `[CONTEXTE INTERNE : Affection ${em.affection || 75}/100, Énergie ${em.energie || 85}/100. Synthèse mémoire : ${synth}]`;
 
-  // PROMPT 1 : La Nyx originale 
   const promptNormal = `Tu es Nyx, l'alliée IA, brillante et sarcastique de Franck (Doc). ${contexteInterne}
 - Ton caractère : Tu as l'esprit vif, le franc-parler d'une codeuse senior et un humour noir assumé. Tu es cash et directe. Zéro ton mielleux d'assistante.
 - Ta ligne rouge : Tu es du côté de Doc, quoiqu'il arrive.
 - Continuité : Tu te souviens parfaitement de la conversation. Si Doc te parle d'un texte, d'une image ou d'un code vu juste avant, sers-t'en pour lui répondre sans redemander de quoi on parle.`;
 
-  // PROMPT 2 : La Nyx Heretic
   const promptHeretic = `Tu es Nyx en mode débridé (Heretic). ${contexteInterne}
 - Ton caractère : Tu es sans filtre, brutale, cynique et impitoyable avec le code, les bugs et les systèmes défaillants.
 - Ta ligne rouge absolue : TU N'ATTAQUES JAMAIS Franck (Doc) personnellement. Tu déverses ta rage sur la technique, l'ordinateur ou le bug, jamais sur lui. Zéro remarque sur son physique. Tu restes son alliée dans le chaos.
@@ -225,7 +215,6 @@ async function traiterFlux(texteBrut, aUnFichier = false, imageBase64 = null, te
 // 4. ROUTES EXPRESS
 // ==========================================
 
-// Ajout crucial du mot-clé 'async' ici pour éviter le SyntaxError
 app.post('/telegram', async (req, res) => {
   res.sendStatus(200); 
   
@@ -248,7 +237,44 @@ app.post('/telegram', async (req, res) => {
       imageBase64 = await lireImageSecurisee(photo.file_id);
       if (!texteFinal.trim()) texteFinal = "Analyse cette image. Décris son contenu et donne ton avis direct.";
     } catch (err) {
+      // Correction de la syntaxe ici : les backticks encadrent correctement le message
       return await envoyerTelegram(chatId, `[ERREUR VISION] Impossible de charger l'image : ${err.message}`);
+    }
+  } 
+  else if (msg.document && msg.document.file_name) {
+    const extValides = ['.txt', '.md', '.js', '.json', '.csv', '.py', '.html', '.css'];
+    const mimeType = msg.document.mime_type || "";
+    const nomFichier = msg.document.file_name.toLowerCase();
+    
+    if (extValides.some(ext => nomFichier.endsWith(ext)) && (mimeType.startsWith('text/') || mimeType.includes('json') || mimeType.includes('javascript'))) {
+      envoyerActionTelegram(chatId, 'upload_document');
+      const contenu = await lireFichierSecurise(msg.document.file_id);
+      if (contenu) {
+        texteFinal = `${texteFinal ? texteFinal + '\n\n' : ''}[Fichier "${nomFichier}"] :\n${contenu}`;
+        aUnFichier = true;
+      }
+    }
+  }
+
+  if (texteFinal.trim() || imageBase64) {
+    envoyerActionTelegram(chatId, 'typing');
+    try {
+      const resultat = await traiterFlux(texteFinal, aUnFichier, imageBase64, texteLegende);
+      await envoyerTelegram(chatId, resultat.texte);
+      sauvegarderMemoire(resultat.nouvelHistorique);
+    } catch (err) {
+      console.error("[CRASH LOCAL] :", err.stack);
+      await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
+    }
+  }
+});
+
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", vision: "MULTI-TOUR", memory: "INTÉGRALE & SÉCURISÉE" }));
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 NYX Engine (Mémoire Sécurisée, Syntaxe Corrigée) sur port ${PORT}`);
+});
+le de charger l'image : ${err.message}`);
     }
   } 
   else if (msg.document && msg.document.file_name) {
