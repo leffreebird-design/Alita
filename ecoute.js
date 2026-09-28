@@ -1,7 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
-const { MsEdgeTTS, OUTPUT_FORMAT } = require('ms-edge-tts');
+const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
