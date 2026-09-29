@@ -102,20 +102,43 @@ async function genererImageVenice(prompt) {
   return res.data.data[0].b64_json;
 }
 
+// LA FONCTION AUDIO BLINDÉE
 async function genererVocalNyx(texte) {
   const tts = new MsEdgeTTS();
   await tts.setMetadata('fr-FR-DeniseNeural', OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
   
   const texteNettoye = texte.replace(/[*_~\[\]]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').trim();
 
-  const chunks = [];
   try {
-    for await (const chunk of tts.toStream(texteNettoye)) {
-      chunks.push(chunk);
+    // 1. On récupère la réponse de toStream()
+    let fluxResultat = tts.toStream(texteNettoye);
+    
+    // 2. Si c'est une Promise, on l'attend ! C'était ça notre bug.
+    if (fluxResultat instanceof Promise) {
+      fluxResultat = await fluxResultat;
     }
-    return Buffer.concat(chunks);
+
+    const chunks = [];
+    
+    // 3. Si le flux résolu est un itérateur asynchrone (Node.js moderne)
+    if (fluxResultat && typeof fluxResultat[Symbol.asyncIterator] === 'function') {
+      for await (const chunk of fluxResultat) {
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks);
+    } 
+    // 4. Si c'est un vieux flux classique basé sur les événements
+    else if (fluxResultat && typeof fluxResultat.on === 'function') {
+      return new Promise((resolve, reject) => {
+        fluxResultat.on('data', chunk => chunks.push(chunk));
+        fluxResultat.on('end', () => resolve(Buffer.concat(chunks)));
+        fluxResultat.on('error', reject);
+      });
+    } else {
+      throw new Error("L'API n'a renvoyé ni un itérateur, ni un stream lisible.");
+    }
   } catch (err) {
-    throw new Error("Erreur lors de la lecture du flux vocal : " + err.message);
+    throw new Error("Erreur détaillée lors de la synthèse : " + err.message);
   }
 }
 
