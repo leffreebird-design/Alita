@@ -1,6 +1,8 @@
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const pdfParse = require('pdf-parse'); 
 const mammoth = require('mammoth');
@@ -102,7 +104,7 @@ async function genererImageVenice(prompt) {
   return res.data.data[0].b64_json;
 }
 
-// LA FONCTION AUDIO BLINDÉE
+// LA FONCTION AUDIO EN MODE "FORCE BRUTE PHYSIQUE"
 async function genererVocalNyx(texte) {
   const tts = new MsEdgeTTS();
   await tts.setMetadata('fr-FR-DeniseNeural', OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
@@ -110,35 +112,22 @@ async function genererVocalNyx(texte) {
   const texteNettoye = texte.replace(/[*_~\[\]]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').trim();
 
   try {
-    // 1. On récupère la réponse de toStream()
-    let fluxResultat = tts.toStream(texteNettoye);
+    // Création d'un chemin temporaire sur le serveur Render
+    const fileName = `nyx_vocal_${Date.now()}.mp3`;
+    const filePath = path.join('/tmp', fileName);
     
-    // 2. Si c'est une Promise, on l'attend ! C'était ça notre bug.
-    if (fluxResultat instanceof Promise) {
-      fluxResultat = await fluxResultat;
-    }
-
-    const chunks = [];
+    // On délègue la gestion de la mort du stream à la librairie pour qu'elle écrive un fichier en dur
+    await tts.toFile(filePath, texteNettoye);
     
-    // 3. Si le flux résolu est un itérateur asynchrone (Node.js moderne)
-    if (fluxResultat && typeof fluxResultat[Symbol.asyncIterator] === 'function') {
-      for await (const chunk of fluxResultat) {
-        chunks.push(chunk);
-      }
-      return Buffer.concat(chunks);
-    } 
-    // 4. Si c'est un vieux flux classique basé sur les événements
-    else if (fluxResultat && typeof fluxResultat.on === 'function') {
-      return new Promise((resolve, reject) => {
-        fluxResultat.on('data', chunk => chunks.push(chunk));
-        fluxResultat.on('end', () => resolve(Buffer.concat(chunks)));
-        fluxResultat.on('error', reject);
-      });
-    } else {
-      throw new Error("L'API n'a renvoyé ni un itérateur, ni un stream lisible.");
-    }
+    // On lit le fichier physiquement (on est sûr à 100% que c'est un Buffer valide)
+    const audioBuffer = fs.readFileSync(filePath);
+    
+    // On efface nos traces pour ne pas saturer le disque de Render
+    fs.unlinkSync(filePath);
+    
+    return audioBuffer;
   } catch (err) {
-    throw new Error("Erreur détaillée lors de la synthèse : " + err.message);
+    throw new Error("Erreur détaillée lors de la synthèse physique : " + err.message);
   }
 }
 
@@ -239,7 +228,7 @@ async function declencherReveil() {
         const audioBuffer = await genererVocalNyx(reponse);
         await envoyerTelegram(DOC_CHAT_ID, "⚠️ *ALERTE : Anomalie biologique détectée.*");
         await envoyerVocalTelegram(DOC_CHAT_ID, audioBuffer);
-        console.log("[RÉVEIL] Audio généré et expédié avec succès.");
+        console.log("[RÉVEIL] Audio généré physiquement et expédié avec succès.");
       } catch (errAudio) {
         console.error("[RÉVEIL CRASH AUDIO] ->", errAudio.message || errAudio);
         await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE SYSTÈME :*\n\n_${reponse}_`);
