@@ -103,7 +103,12 @@ async function genererImageVenice(prompt) {
 async function genererVocalNyx(texte) {
   const tts = new MsEdgeTTS();
   await tts.setMetadata('fr-FR-DeniseNeural', OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-  const readable = tts.toStream(texte, { pitch: '+12%', rate: '+8%' }); // Ton altéré pour la touche IA
+  
+  // Nettoyage radical du texte : on retire les emojis et le Markdown qui font planter l'API Microsoft
+  const texteNettoye = texte.replace(/[*_~\[\]]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').trim();
+
+  // On lance la génération sans pitch ni rate pour garantir le fonctionnement
+  const readable = tts.toStream(texteNettoye); 
   const chunks = [];
   return new Promise((resolve, reject) => {
     readable.on('data', chunk => chunks.push(chunk));
