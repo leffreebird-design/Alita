@@ -1,9 +1,6 @@
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
-const fs = require('fs');
-const path = require('path');
-const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const pdfParse = require('pdf-parse'); 
 const mammoth = require('mammoth');
 
@@ -104,40 +101,6 @@ async function genererImageVenice(prompt) {
   return res.data.data[0].b64_json;
 }
 
-// LA FONCTION AUDIO EN MODE "FORCE BRUTE PHYSIQUE" - CORRIGÉE POUR LES DOSSIERS
-async function genererVocalNyx(texte) {
-  const tts = new MsEdgeTTS();
-  await tts.setMetadata('fr-FR-DeniseNeural', OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-  
-  const texteNettoye = texte.replace(/[*_~\[\]]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').trim();
-
-  try {
-    // Création d'un DOSSIER temporaire unique sur Render
-    const folderName = `nyx_vocal_${Date.now()}`;
-    const folderPath = path.join('/tmp', folderName);
-    
-    // On crée le dossier physiquement
-    fs.mkdirSync(folderPath, { recursive: true });
-    
-    // On passe le DOSSIER à la librairie, car elle génère son propre "audio.mp3" dedans !
-    await tts.toFile(folderPath, texteNettoye);
-    
-    // Le fichier final généré par la librairie
-    const filePath = path.join(folderPath, 'audio.mp3');
-    
-    // On lit le fichier physiquement
-    const audioBuffer = fs.readFileSync(filePath);
-    
-    // On efface nos traces
-    fs.unlinkSync(filePath);
-    fs.rmdirSync(folderPath);
-    
-    return audioBuffer;
-  } catch (err) {
-    throw new Error("Erreur détaillée lors de la synthèse physique : " + err.message);
-  }
-}
-
 function envoyerTelegram(chatId, text) {
   return new Promise((resolve) => {
     const payload = JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' });
@@ -146,25 +109,6 @@ function envoyerTelegram(chatId, text) {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
     }, () => resolve());
     req.on('error', () => resolve());
-    req.write(payload);
-    req.end();
-  });
-}
-
-function envoyerVocalTelegram(chatId, audioBuffer) {
-  const boundary = '----TelegramBoundary' + Math.random().toString(16).slice(2);
-  let postData = `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`;
-  postData += `--${boundary}\r\nContent-Disposition: form-data; name="voice"; filename="nyx_vocal.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n`;
-  const footer = `\r\n--${boundary}--\r\n`;
-  const payload = Buffer.concat([Buffer.from(postData, 'utf8'), audioBuffer, Buffer.from(footer, 'utf8')]);
-
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'api.telegram.org', port: 443, path: `/bot${TELEGRAM_BOT_TOKEN}/sendVoice`,
-      method: 'POST',
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': payload.length }
-    }, () => resolve());
-    req.on('error', reject);
     req.write(payload);
     req.end();
   });
@@ -210,7 +154,7 @@ async function lireDocxSecurise(fileId) {
 }
 
 // ==========================================
-// 4. PROTOCOLE WAKEY WAKEY (Cron & Arbitrage)
+// 4. PROTOCOLE WAKEY WAKEY (100% Texte)
 // ==========================================
 
 async function declencherReveil() {
@@ -231,15 +175,10 @@ async function declencherReveil() {
       const reponse = await appelerVeniceMultiTour(MODEL_NORMAL, "Tu es Nyx.", [], promptAlarme);
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME DÉCLENCHÉE À ${h}:${m}] : ${reponse}` });
       
-      try {
-        const audioBuffer = await genererVocalNyx(reponse);
-        await envoyerTelegram(DOC_CHAT_ID, "⚠️ *ALERTE : Anomalie biologique détectée.*");
-        await envoyerVocalTelegram(DOC_CHAT_ID, audioBuffer);
-        console.log("[RÉVEIL] Audio généré physiquement et expédié avec succès.");
-      } catch (errAudio) {
-        console.error("[RÉVEIL CRASH AUDIO] ->", errAudio.message || errAudio);
-        await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE SYSTÈME :*\n\n_${reponse}_`);
-      }
+      // Envoi du texte simple, léger et infaillible
+      await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
+      console.log("[RÉVEIL] Message textuel de réveil expédié avec succès.");
+
     } catch (err) {
       console.error("[RÉVEIL CRASH GLOBAL] ->", err.message);
       await envoyerTelegram(DOC_CHAT_ID, "⚠️ *WAKEY WAKEY. LE SYSTÈME NEURAL EST EN PANNE MAIS TU DOIS TE LEVER. DEBOUT.*");
