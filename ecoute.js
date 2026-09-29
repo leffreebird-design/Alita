@@ -216,10 +216,13 @@ async function declencherReveil() {
         const audioBuffer = await genererVocalNyx(reponse);
         await envoyerTelegram(DOC_CHAT_ID, "⚠️ *ALERTE : Anomalie biologique détectée.*");
         await envoyerVocalTelegram(DOC_CHAT_ID, audioBuffer);
+        console.log("[RÉVEIL] Audio généré et expédié avec succès.");
       } catch (errAudio) {
+        console.error("[RÉVEIL CRASH AUDIO] ->", errAudio.message || errAudio);
         await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE SYSTÈME :*\n\n_${reponse}_`);
       }
     } catch (err) {
+      console.error("[RÉVEIL CRASH GLOBAL] ->", err.message);
       await envoyerTelegram(DOC_CHAT_ID, "⚠️ *WAKEY WAKEY. LE SYSTÈME NEURAL EST EN PANNE MAIS TU DOIS TE LEVER. DEBOUT.*");
     }
   }
