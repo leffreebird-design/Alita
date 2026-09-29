@@ -107,14 +107,16 @@ async function genererVocalNyx(texte) {
   // Nettoyage radical du texte : on retire les emojis et le Markdown qui font planter l'API Microsoft
   const texteNettoye = texte.replace(/[*_~\[\]]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').trim();
 
-  // On lance la génération sans pitch ni rate pour garantir le fonctionnement
-  const readable = tts.toStream(texteNettoye); 
   const chunks = [];
-  return new Promise((resolve, reject) => {
-    readable.on('data', chunk => chunks.push(chunk));
-    readable.on('end', () => resolve(Buffer.concat(chunks)));
-    readable.on('error', err => reject(err));
-  });
+  try {
+    // Boucle asynchrone pour lire correctement le flux généré (corrige l'erreur "readable.on is not a function")
+    for await (const chunk of tts.toStream(texteNettoye)) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  } catch (err) {
+    throw new Error("Erreur lors de la lecture du flux vocal : " + err.message);
+  }
 }
 
 function envoyerTelegram(chatId, text) {
@@ -207,7 +209,7 @@ async function declencherReveil() {
     } catch (err) {
       console.error("[RÉVEIL] Erreur critique :", err.message);
       // Fallback ultime si l'IA Venice plante complètement
-      await envoyerTelegram(DOC_CHAT_ID, "⚠️ *WAKEY WAKEY. LE SYSTÈME NEURAL EST EN PANNE MAIS TU DOIS TE LEVER. DÉBOUT.*");
+      await envoyerTelegram(DOC_CHAT_ID, "⚠️ *WAKEY WAKEY. LE SYSTÈME NEURAL EST EN PANNE MAIS TU DOIS TE LEVER. DEBOUT.*");
     }
   }
 }
