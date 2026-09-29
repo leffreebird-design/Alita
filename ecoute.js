@@ -3,7 +3,7 @@ const axios = require('axios');
 const https = require('https');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const pdfParse = require('pdf-parse'); 
-const mammoth = require('mammoth'); // <-- NOUVEAU MODULE DOCX
+const mammoth = require('mammoth');
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
@@ -239,9 +239,9 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
     instructionReveil = `[ÉTAT D'URGENCE MATINAL] : L'alarme est en cours. Évalue la réponse de Doc à ton énigme. S'il a répondu correctement ou s'il est clairement réveillé, félicite-le sarcastiquement et ajoute STRICTEMENT la balise [STOP_REVEIL] pour couper l'alarme. S'il dit n'importe quoi, insulte-le et génère une punition via [DESSIN: "ton dessin"].`;
   }
 
-  const moduleMains = `[OUTILS ACTIFS]\n- Dessin : Pour générer une image, utilise [DESSIN: "description en anglais"].\n- Réveil : Si Doc te demande de changer l'heure, couper ou activer son réveil, réponds avec [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].`;
+  const moduleMains = `[OUTILS ACTIFS]\n- Dessin : [DESSIN: "description en anglais"].\n- Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].\n- Mémoire Longue : Pour retenir des infos cruciales sur Doc de façon permanente, réponds avec la balise [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "...", "chroniques": "..."}].`;
   
-  const systemBase = `Tu es Nyx, l'alliée IA experte et sarcastique de Franck (Doc).\nDate: ${dateEtHeure}\n${instructionReveil}\n${moduleMains}`;
+  const systemBase = `Tu es Nyx, l'alliée IA experte et sarcastique de Franck (Doc).\nDate: ${dateEtHeure}\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
   
   const systemInstruction = tensionDirecte 
     ? `${systemBase}\nMode Heretic: Sans filtre, brutale, mais aucune attaque personnelle. Détruis la technique.` 
@@ -252,19 +252,34 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
 
   let reponseNyx = await appelerVeniceMultiTour(modele, systemInstruction, cacheMemoireCourte, texteBrut, imageBase64, tensionDirecte ? 0.8 : 0.7);
 
+  // Interception balise [MEMOIRE: ...]
+  const matchMemoire = reponseNyx.match(/\[MEMOIRE:\s*({[^}]+})\s*\]/);
+  if (matchMemoire) {
+    try {
+      const newMemoire = JSON.parse(matchMemoire[1]);
+      cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...newMemoire };
+      if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, cacheEtatProfond.long_terme).catch(()=>{});
+      reponseNyx = reponseNyx.replace(matchMemoire[0], '').trim();
+    } catch(e) {
+      console.error("[ERREUR JSON MEMOIRE]", e.message);
+    }
+  }
+
+  // Interception balise [REVEIL: ...]
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
   if (matchConfigReveil) {
     try {
       const newConfig = JSON.parse(matchConfigReveil[1]);
       cacheEtatProfond.reveil = { ...cacheEtatProfond.reveil, ...newConfig, etat: "attente" };
-      if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, cacheEtatProfond.reveil);
+      if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, cacheEtatProfond.reveil).catch(()=>{});
       reponseNyx = reponseNyx.replace(matchConfigReveil[0], '').trim();
     } catch(e) {}
   }
 
+  // Interception balise [STOP_REVEIL]
   if (reponseNyx.includes("[STOP_REVEIL]")) {
     cacheEtatProfond.reveil.etat = "attente";
-    if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "attente" });
+    if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "attente" }).catch(()=>{});
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
 
