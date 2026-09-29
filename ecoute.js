@@ -104,7 +104,7 @@ async function genererImageVenice(prompt) {
   return res.data.data[0].b64_json;
 }
 
-// LA FONCTION AUDIO EN MODE "FORCE BRUTE PHYSIQUE"
+// LA FONCTION AUDIO EN MODE "FORCE BRUTE PHYSIQUE" - CORRIGÉE POUR LES DOSSIERS
 async function genererVocalNyx(texte) {
   const tts = new MsEdgeTTS();
   await tts.setMetadata('fr-FR-DeniseNeural', OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
@@ -112,18 +112,25 @@ async function genererVocalNyx(texte) {
   const texteNettoye = texte.replace(/[*_~\[\]]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').trim();
 
   try {
-    // Création d'un chemin temporaire sur le serveur Render
-    const fileName = `nyx_vocal_${Date.now()}.mp3`;
-    const filePath = path.join('/tmp', fileName);
+    // Création d'un DOSSIER temporaire unique sur Render
+    const folderName = `nyx_vocal_${Date.now()}`;
+    const folderPath = path.join('/tmp', folderName);
     
-    // On délègue la gestion de la mort du stream à la librairie pour qu'elle écrive un fichier en dur
-    await tts.toFile(filePath, texteNettoye);
+    // On crée le dossier physiquement
+    fs.mkdirSync(folderPath, { recursive: true });
     
-    // On lit le fichier physiquement (on est sûr à 100% que c'est un Buffer valide)
+    // On passe le DOSSIER à la librairie, car elle génère son propre "audio.mp3" dedans !
+    await tts.toFile(folderPath, texteNettoye);
+    
+    // Le fichier final généré par la librairie
+    const filePath = path.join(folderPath, 'audio.mp3');
+    
+    // On lit le fichier physiquement
     const audioBuffer = fs.readFileSync(filePath);
     
-    // On efface nos traces pour ne pas saturer le disque de Render
+    // On efface nos traces
     fs.unlinkSync(filePath);
+    fs.rmdirSync(folderPath);
     
     return audioBuffer;
   } catch (err) {
