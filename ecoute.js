@@ -184,16 +184,25 @@ async function declencherReveil() {
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
-    const promptAlarme = `Il est l'heure de réveiller Doc. Génère un message de 4 phrases max. Adopte le style du meme 'Wakey wakey' : commence par un ton faussement doux/robotique, puis bascule dans la menace psychologique ou le cynisme. Pose-lui une devinette absurde, une énigme logique ou demande-lui une preuve de vie pour vérifier qu'il est debout.`;
+    const promptAlarme = `Il est l'heure de réveiller Doc. Génère un message de 4 phrases max dans le style du meme 'Wakey wakey' : un ton faussement mielleux qui bascule direct dans le cynisme. Pose-lui une énigme logique, absurde ou tordue pour tester si son cortex a booté. Info système : le processeur organique de Doc est incapable de traiter des équations, du code ou du binaire avant son café sans faire un kernel panic, alors reste sur du langage naturel.`;
     
     try {
       const reponse = await appelerVeniceMultiTour(MODEL_NORMAL, "Tu es Nyx.", [], promptAlarme);
-      const audioBuffer = await genererVocalNyx(reponse);
-      await envoyerTelegram(DOC_CHAT_ID, "⚠️ *ALERTE : Anomalie biologique détectée.*");
-      await envoyerVocalTelegram(DOC_CHAT_ID, audioBuffer);
-      cacheMemoireCourte.push({ role: "Nyx", texte: `[VOCAL ENVOYÉ À ${h}:${m}] : ${reponse}` });
+      cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME DÉCLENCHÉE À ${h}:${m}] : ${reponse}` });
+      
+      try {
+        const audioBuffer = await genererVocalNyx(reponse);
+        await envoyerTelegram(DOC_CHAT_ID, "⚠️ *ALERTE : Anomalie biologique détectée.*");
+        await envoyerVocalTelegram(DOC_CHAT_ID, audioBuffer);
+      } catch (errAudio) {
+        console.error("[RÉVEIL] Échec de la synthèse vocale :", errAudio.message);
+        // Filet de sécurité : envoi du texte si l'audio plante
+        await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE SYSTÈME :*\n\n_${reponse}_`);
+      }
     } catch (err) {
-      console.error("[RÉVEIL] Erreur :", err.message);
+      console.error("[RÉVEIL] Erreur critique :", err.message);
+      // Fallback ultime si l'IA Venice plante complètement
+      await envoyerTelegram(DOC_CHAT_ID, "⚠️ *WAKEY WAKEY. LE SYSTÈME NEURAL EST EN PANNE MAIS TU DOIS TE LEVER. DÉBOUT.*");
     }
   }
 }
