@@ -9,7 +9,7 @@ const mammoth = require('mammoth');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
-const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || "").trim(); // Clé Google officielle
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || "").trim(); 
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
@@ -18,8 +18,6 @@ const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) 
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2"; // Le parachute de sécurité
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
-
-let compteurEchanges = 0;
 
 // Cache mémoire local ultra-rapide
 let cacheMemoireCourte = [];
@@ -65,7 +63,7 @@ async function initialiserCache() {
 // 3. NOYAU COGNITIF : DOUBLE CERVEAU
 // ==========================================
 
-// CERVEAU 1 : Google Gemini en direct (Ultra-rapide)
+// CERVEAU 1 : Google Gemini en direct (Ultra-rapide) - CORRIGÉ
 async function appelerGeminiMultiTour(systemInstruction, historiqueMessages, promptActuel, imageBase64 = null) {
   if (!GEMINI_API_KEY) throw new Error("Clé GEMINI manquante dans Render.");
   
@@ -89,7 +87,8 @@ async function appelerGeminiMultiTour(systemInstruction, historiqueMessages, pro
     generationConfig: { temperature: 0.7 }
   };
 
-  const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`, payload, {
+  // URL corrigée : gemini-1.5-flash sans le -latest
+  const res = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, payload, {
     headers: { 'Content-Type': 'application/json' },
     timeout: 30000
   });
