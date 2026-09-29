@@ -2,6 +2,8 @@ const express = require('express');
 const axios = require('axios');
 const https = require('https');
 const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
+const pdfParse = require('pdf-parse'); 
+const mammoth = require('mammoth'); // <-- NOUVEAU MODULE DOCX
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
@@ -26,7 +28,7 @@ let cacheMemoireCourte = [];
 let cacheEtatProfond = {
   emotions: { affection: 75, curiosite: 65, energie: 85 },
   long_terme: { profil_doc: "Initialisation", dossiers_techniques: "Prêt", chroniques: "Démarrage" },
-  reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" } // Config par défaut
+  reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" } 
 };
 
 const app = express();
@@ -104,12 +106,10 @@ async function genererVocalNyx(texte) {
   const tts = new MsEdgeTTS();
   await tts.setMetadata('fr-FR-DeniseNeural', OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
   
-  // Nettoyage radical du texte : on retire les emojis et le Markdown qui font planter l'API Microsoft
   const texteNettoye = texte.replace(/[*_~\[\]]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '').trim();
 
   const chunks = [];
   try {
-    // Boucle asynchrone pour lire correctement le flux généré (corrige l'erreur "readable.on is not a function")
     for await (const chunk of tts.toStream(texteNettoye)) {
       chunks.push(chunk);
     }
@@ -174,6 +174,22 @@ async function lireImageSecurisee(fileId) {
   return Buffer.from(resImg.data).toString('base64');
 }
 
+// Extraction PDF
+async function lirePdfSecurise(fileId) {
+  const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const data = await pdfParse(Buffer.from(resDoc.data));
+  return data.text;
+}
+
+// Extraction DOCX
+async function lireDocxSecurise(fileId) {
+  const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const data = await mammoth.extractRawText({ buffer: Buffer.from(resDoc.data) });
+  return data.value;
+}
+
 // ==========================================
 // 4. PROTOCOLE WAKEY WAKEY (Cron & Arbitrage)
 // ==========================================
@@ -187,7 +203,6 @@ async function declencherReveil() {
 
   const rev = cacheEtatProfond.reveil;
   if (rev.actif && rev.heure === h && rev.minute === m && rev.jours.includes(d) && rev.etat === "attente") {
-    console.log("[RÉVEIL] Déclenchement du protocole Wakey Wakey...");
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
@@ -202,18 +217,14 @@ async function declencherReveil() {
         await envoyerTelegram(DOC_CHAT_ID, "⚠️ *ALERTE : Anomalie biologique détectée.*");
         await envoyerVocalTelegram(DOC_CHAT_ID, audioBuffer);
       } catch (errAudio) {
-        console.error("[RÉVEIL] Échec de la synthèse vocale :", errAudio.message);
-        // Filet de sécurité : envoi du texte si l'audio plante
         await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE SYSTÈME :*\n\n_${reponse}_`);
       }
     } catch (err) {
-      console.error("[RÉVEIL] Erreur critique :", err.message);
-      // Fallback ultime si l'IA Venice plante complètement
       await envoyerTelegram(DOC_CHAT_ID, "⚠️ *WAKEY WAKEY. LE SYSTÈME NEURAL EST EN PANNE MAIS TU DOIS TE LEVER. DEBOUT.*");
     }
   }
 }
-setInterval(declencherReveil, 60000); // Check chaque minute
+setInterval(declencherReveil, 60000); 
 
 // ==========================================
 // 5. SYNAPSE DU DOUBLE CERVEAU (Intercepteur)
@@ -241,7 +252,6 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
 
   let reponseNyx = await appelerVeniceMultiTour(modele, systemInstruction, cacheMemoireCourte, texteBrut, imageBase64, tensionDirecte ? 0.8 : 0.7);
 
-  // Interception balise [REVEIL: ...]
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
   if (matchConfigReveil) {
     try {
@@ -252,7 +262,6 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
     } catch(e) {}
   }
 
-  // Interception balise [STOP_REVEIL]
   if (reponseNyx.includes("[STOP_REVEIL]")) {
     cacheEtatProfond.reveil.etat = "attente";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "attente" });
@@ -268,7 +277,6 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
   
   if (cacheMemoireCourte.length > 8) cacheMemoireCourte = cacheMemoireCourte.slice(-8);
 
-  // Sauvegarde Firebase asynchrone
   if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
 
   return reponseNyx;
@@ -312,6 +320,32 @@ app.post('/telegram', async (req, res) => {
       if (!texteFinal.trim()) texteFinal = "Analyse cette image et donne ton avis direct.";
     } catch (err) {
       return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
+    }
+  } 
+  else if (msg.document) {
+    const mime = msg.document.mime_type;
+    const fileName = msg.document.file_name || "";
+    
+    if (mime === 'application/pdf' || fileName.endsWith('.pdf')) {
+      try {
+        await envoyerTelegram(chatId, "⏳ _Ingestion du PDF en cours..._");
+        const pdfText = await lirePdfSecurise(msg.document.file_id);
+        texteFinal = `[CONTENU DU DOCUMENT PDF "${fileName}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+      } catch (err) {
+        return await envoyerTelegram(chatId, `[ERREUR LECTURE PDF] : Impossible de parser le document. ${err.message}`);
+      }
+    } 
+    else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
+      try {
+        await envoyerTelegram(chatId, "⏳ _Déchiquetage du DOCX en cours..._");
+        const docxText = await lireDocxSecurise(msg.document.file_id);
+        texteFinal = `[CONTENU DU DOCUMENT DOCX "${fileName}"]\n\n${docxText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+      } catch (err) {
+        return await envoyerTelegram(chatId, `[ERREUR LECTURE DOCX] : Impossible de parser le document. ${err.message}`);
+      }
+    } 
+    else {
+      return await envoyerTelegram(chatId, `[SYSTÈME] : Format non supporté (${mime}). Seuls les PDF et DOCX sont autorisés.`);
     }
   }
 
