@@ -17,7 +17,7 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
 // Modèles
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
