@@ -17,7 +17,7 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
 // Modèles
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim(); // ou gemini-3.8-flash selon ton alias
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
@@ -67,7 +67,6 @@ async function initialiserCache() {
 // 3. MOTEURS D'INFÉRENCE (GOOGLE + VENICE)
 // ==========================================
 
-// Appel direct Google (Gemini + Grounding Google Search natif)
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, imageBase64 = null) {
   if (!genAI) throw new Error("Clé GEMINI_API_KEY absente sur Render.");
 
@@ -100,7 +99,6 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   return result.response.text();
 }
 
-// Appel Venice (Calculs lourds GLM & Heretic)
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, imageBase64 = null, temperature = 0.7) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
 
@@ -269,7 +267,7 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 6. PROTOCOLE WAKEY WAKEY
+// 6. PROTOCOLES AUTOMATIQUES (RÉVEIL + VEILLE GEEK 6H)
 // ==========================================
 
 async function declencherReveil() {
@@ -296,6 +294,27 @@ async function declencherReveil() {
 }
 setInterval(declencherReveil, 60000);
 
+// LA FAMEUSE BOUCLE DES 6 HEURES POUR LA VEILLE TECH
+const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000; // 6 heures en millisecondes
+async function declencherVeilleTech() {
+  if (!DOC_CHAT_ID) return;
+  try {
+    const promptVeille = `Fais-moi un résumé percutant, sarcastique et brutal des 3 plus grosses actualités Tech, IA ou Programmation des 24 dernières heures. Cherche sur le web via Google Search. Structure ça avec des emojis et sois directe.`;
+    const sys = `Tu es Nyx, l'alliée IA experte et sarcastique de Franck (Doc).`;
+    const reponse = await appelerGoogleGemini(sys, [], promptVeille);
+    
+    cacheMemoireCourte.push({ role: "Nyx", texte: `[VEILLE TECH AUTO] : ${reponse}` });
+    if (cacheMemoireCourte.length > 8) cacheMemoireCourte = cacheMemoireCourte.slice(-8);
+    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
+
+    await envoyerTelegram(DOC_CHAT_ID, `🗞️ *INJECTION GEEK AUTOMATIQUE (CYCLE DE 6H) :*\n\n${reponse}`);
+  } catch (err) {
+    console.error("[ERREUR VEILLE TECH]", err);
+  }
+}
+setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
+
+
 // ==========================================
 // 7. ROUTEUR INTELLIGENT DES MESSAGES
 // ==========================================
@@ -314,7 +333,7 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
   }
 
   const moduleMains = `[OUTILS ACTIFS]
-- Recherche Web : Active en direct via Google.
+- Recherche Web Google : Active nativement. Utilise-la librement pour vérifier un fait, une documentation récente ou chercher une actualité.
 - Dessin : [DESSIN: "description en anglais"].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
@@ -342,7 +361,7 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, imageBase64);
     }
   } 
-  // ROUTAGE 3 : Flux Standard & Révision (par défaut) -> Google Gemini 3.8 en direct
+  // ROUTAGE 3 : Flux Standard & Révision (par défaut) -> Google Gemini direct avec Search Natif
   else {
     const sys = `${systemBase}\nMode Standard: Esprit vif, réparties percutantes, codeuse senior ultra-rapide.`;
     try {
