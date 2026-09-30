@@ -4,22 +4,26 @@ const https = require('https');
 const pdfParse = require('pdf-parse'); 
 const mammoth = require('mammoth');
 const cheerio = require('cheerio');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
 // ==========================================
 const PORT = process.env.PORT || 3000;
+const GOOGLE_API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
-const TAVILY_API_KEY = (process.env.TAVILY_API_KEY || "").trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
-// Modèles déclarés chez Venice
-const MODEL_FAST = (process.env.VENICE_MODEL_NORMAL || "gemini-3-8-flash").trim();
+// Modèles
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
+const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
+
+const genAI = GOOGLE_API_KEY ? new GoogleGenerativeAI(GOOGLE_API_KEY) : null;
 
 let cacheMemoireCourte = [];
 let cacheEtatProfond = {
@@ -60,11 +64,45 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. NOYAU VENICE UNIFIÉ
+// 3. MOTEURS D'INFÉRENCE (GOOGLE + VENICE)
 // ==========================================
 
+// Appel direct Google (Gemini + Grounding Google Search natif)
+async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, imageBase64 = null) {
+  if (!genAI) throw new Error("Clé GEMINI_API_KEY absente sur Render.");
+
+  const model = genAI.getGenerativeModel({
+    model: MODEL_GEMINI,
+    systemInstruction: systemInstruction,
+    tools: [{ googleSearch: {} }]
+  });
+
+  const contents = [];
+  for (const m of historiqueMessages) {
+    contents.push({
+      role: m.role === "Doc" ? "user" : "model",
+      parts: [{ text: m.texte }]
+    });
+  }
+
+  const partsActuelles = [{ text: promptActuel }];
+  if (imageBase64) {
+    partsActuelles.push({
+      inlineData: {
+        data: imageBase64,
+        mimeType: "image/jpeg"
+      }
+    });
+  }
+  contents.push({ role: "user", parts: partsActuelles });
+
+  const result = await model.generateContent({ contents });
+  return result.response.text();
+}
+
+// Appel Venice (Calculs lourds GLM & Heretic)
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, imageBase64 = null, temperature = 0.7) {
-  if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY manquante dans Render.");
+  if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
 
   const messages = [{ role: "system", content: systemInstruction }];
   for (const m of historiqueMessages) {
@@ -83,35 +121,26 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     messages.push({ role: "user", content: promptActuel });
   }
 
-  const payload = {
+  const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', {
     model,
     messages,
     temperature,
     venice_parameters: { include_venice_system_prompt: false }
-  };
+  }, {
+    headers: {
+      'Authorization': `Bearer ${VENICE_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 60000
+  });
 
-  try {
-    const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', payload, {
-      headers: {
-        'Authorization': `Bearer ${VENICE_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      timeout: 60000
-    });
-
-    return res.data.choices[0].message.content;
-  } catch (err) {
-    const detailErreur = err.response?.data?.error?.message || err.code || err.message;
-    console.error(`[VENICE ERREUR - ${model}] :`, detailErreur);
-    throw new Error(detailErreur);
-  }
+  return res.data.choices[0].message.content;
 }
 
 async function genererImageVenice(prompt) {
-  const promptClean = prompt.replace(/^["']|["']$/g, '');
   const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
     model: MODEL_IMAGE,
-    prompt: promptClean,
+    prompt: prompt.replace(/^["']|["']$/g, ''),
     response_format: "b64_json" 
   }, {
     headers: {
@@ -124,28 +153,8 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. RADAR WEB (TAVILY) & SCRAPING LIENS
+// 4. PARSEUR DE LIENS WEB (SCRAPING LÉGER)
 // ==========================================
-
-async function rechercherTavily(requete) {
-  if (!TAVILY_API_KEY) {
-    throw new Error("Clé TAVILY_API_KEY absente des variables Render.");
-  }
-
-  const res = await axios.post('https://api.tavily.com/search', {
-    api_key: TAVILY_API_KEY,
-    query: requete,
-    search_depth: "basic",
-    include_answer: false,
-    max_results: 3
-  }, { timeout: 15000 });
-
-  if (!res.data || !res.data.results || res.data.results.length === 0) {
-    return "Aucun résultat trouvé sur le web.";
-  }
-
-  return res.data.results.map((r, i) => `[Source ${i + 1}] ${r.title}\nURL: ${r.url}\nExtrait: ${r.content}`).join('\n\n');
-}
 
 async function scraperPageWeb(urlCible) {
   try {
@@ -161,47 +170,34 @@ async function scraperPageWeb(urlCible) {
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
     let titre = $('title').text().trim();
-    if (!titre) {
-      titre = $('h1').first().text().trim();
-    }
-    if (!titre) {
-      titre = "Sans titre";
-    }
+    if (!titre) titre = $('h1').first().text().trim();
+    if (!titre) titre = "Sans titre";
     
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) {
       contenu = $('body').text();
     }
 
-    const texteNettoye = contenu.replace(/\s+/g, ' ').trim();
     return {
       succes: true,
       titre: titre,
-      texte: texteNettoye.slice(0, 10000)
+      texte: contenu.replace(/\s+/g, ' ').trim().slice(0, 10000)
     };
   } catch (err) {
-    return {
-      succes: false,
-      erreur: err.message
-    };
+    return { succes: false, erreur: err.message };
   }
 }
 
 // ==========================================
-// 5. OUTILS TELEGRAM AVEC CHUNKING
+// 5. OUTILS TELEGRAM & LECTURE FICHIERS
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
   if (!text) return;
-
   const TAILLE_MAX = 4000;
-  const blocs = [];
 
   for (let i = 0; i < text.length; i += TAILLE_MAX) {
-    blocs.push(text.slice(i, i + TAILLE_MAX));
-  }
-
-  for (const bloc of blocs) {
+    const bloc = text.slice(i, i + TAILLE_MAX);
     try {
       await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         chat_id: chatId,
@@ -209,14 +205,10 @@ async function envoyerTelegram(chatId, text) {
         parse_mode: 'Markdown'
       }, { timeout: 15000 });
     } catch (err) {
-      try {
-        await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-          chat_id: chatId,
-          text: bloc
-        }, { timeout: 15000 });
-      } catch (e) {
-        console.error("[TELEGRAM ERREUR ENVOI]", e.response?.data || e.message);
-      }
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        chat_id: chatId,
+        text: bloc
+      }, { timeout: 15000 }).catch(e => console.error("[TELEGRAM ERREUR ENVOI]", e.message));
     }
   }
 }
@@ -292,11 +284,10 @@ async function declencherReveil() {
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
-    const promptAlarme = `Il est l'heure de réveiller Doc. Génère un message de 4 phrases max dans le style 'Wakey wakey' : ton faussement mielleux qui bascule direct dans le cynisme. Pose-lui une énigme logique, absurde ou tordue en langage naturel.`;
-    
+    const promptAlarme = `Il est l'heure de réveiller Doc. Génère un message cynique et direct de 4 phrases max avec une énigme logique en langage naturel.`;
     try {
-      const reponse = await appelerVeniceMultiTour(MODEL_FAST, "Tu es Nyx.", [], promptAlarme);
-      cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME DÉCLENCHÉE À ${h}:${m}] : ${reponse}` });
+      const reponse = await appelerGoogleGemini("Tu es Nyx.", [], promptAlarme);
+      cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
       await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
     } catch (err) {
       await envoyerTelegram(DOC_CHAT_ID, "⚠️ *WAKEY WAKEY. DEBOUT.*");
@@ -306,20 +297,24 @@ async function declencherReveil() {
 setInterval(declencherReveil, 60000);
 
 // ==========================================
-// 7. ROUTAGE DES MESSAGES & BOUCLE D'OUTILS
+// 7. ROUTEUR INTELLIGENT DES MESSAGES
 // ==========================================
 
-async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "", chatId = null) {
+async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
   const dateEtHeure = obtenirHorodatageParis();
-  const tensionDirecte = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"].some(m => texteBrut.toLowerCase().includes(m));
+  const texteMin = texteBrut.toLowerCase();
+
+  // Critères de routage
+  const modeTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"].some(m => texteMin.includes(m));
+  const modeCalculComplexe = ["calcule", "algorithme", "preuve", "démontre", "complexe", "matrice", "équation", "glm"].some(m => texteMin.includes(m));
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil.etat === "en_cours") {
-    instructionReveil = `[ÉTAT D'URGENCE MATINAL] : L'alarme est en cours. Évalue la réponse de Doc à ton énigme. Ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.`;
+    instructionReveil = `[ÉTAT D'URGENCE MATINAL] : Évalue la réponse de Doc à ton énigme. Ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.`;
   }
 
   const moduleMains = `[OUTILS ACTIFS]
-- Recherche Web : Pour chercher une information récente, un fait inconnu ou si Doc te demande de chercher, réponds UNIQUEMENT par [RECHERCHE: "mots clés précis"]. Les résultats te seront injectés immédiatement.
+- Recherche Web : Active en direct via Google.
 - Dessin : [DESSIN: "description en anglais"].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
@@ -328,49 +323,37 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "", cha
 
   let reponseNyx;
 
-  if (tensionDirecte) {
-    const systemInstruction = `${systemBase}\nMode Heretic: Sans filtre, brutale, cynique, aucun compromis.`;
+  // ROUTAGE 1 : Mode Heretic / Insultes -> Venice Heretic
+  if (modeTension) {
+    const sys = `${systemBase}\nMode Heretic: Sans filtre, brutale, cynique, aucun compromis.`;
     try {
-      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemInstruction, cacheMemoireCourte, texteBrut, imageBase64, 0.85);
+      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.85);
     } catch (err1) {
-      try {
-        reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, systemInstruction, cacheMemoireCourte, texteBrut, imageBase64, 0.85);
-      } catch (err2) {
-        return `[ERREUR VENICE] Heretic: ${err1.message} | Fallback: ${err2.message}`;
-      }
+      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.85);
     }
-  } else {
-    const systemInstruction = `${systemBase}\nMode Standard: Esprit vif, réparties percutantes, codeuse senior ultra-rapide.`;
+  } 
+  // ROUTAGE 2 : Calculs complexes / Code lourd -> Venice GLM
+  else if (modeCalculComplexe) {
+    const sys = `${systemBase}\nMode Calcul & Algorithmique Avancée : Rigueur totale, démonstrations formelles et code optimal.`;
     try {
-      reponseNyx = await appelerVeniceMultiTour(MODEL_FAST, systemInstruction, cacheMemoireCourte, texteBrut, imageBase64, 0.7);
-    } catch (errFast) {
-      console.warn(`[REPLI MOTEUR] ${MODEL_FAST} en échec (${errFast.message}), bascule sur secours...`);
-      try {
-        reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, systemInstruction, cacheMemoireCourte, texteBrut, imageBase64, 0.7);
-      } catch (errFallback) {
-        return `[ERREUR MOTEUR] ${MODEL_FAST}: ${errFast.message} | ${MODEL_DARK_FALLBACK}: ${errFallback.message}`;
-      }
+      reponseNyx = await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.2);
+    } catch (errGLM) {
+      // Repli immédiat sur Gemini si GLM échoue
+      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, imageBase64);
+    }
+  } 
+  // ROUTAGE 3 : Flux Standard & Révision (par défaut) -> Google Gemini 3.8 en direct
+  else {
+    const sys = `${systemBase}\nMode Standard: Esprit vif, réparties percutantes, codeuse senior ultra-rapide.`;
+    try {
+      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, imageBase64);
+    } catch (errGoogle) {
+      console.warn(`[REPLI GOOGLE -> VENICE] Erreur Google (${errGoogle.message}), passage sur Venice secours...`);
+      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.7);
     }
   }
 
-  // Interception de l'outil Recherche Web
-  const matchRecherche = reponseNyx.match(/\[RECHERCHE:\s*["']?(.*?)["']?\s*\]/i);
-  if (matchRecherche) {
-    const requeteWeb = matchRecherche[1];
-    if (chatId) await envoyerTelegram(chatId, `🌐 _Recherche en direct : « ${requeteWeb} »..._`);
-    
-    try {
-      const resultatsWeb = await rechercherTavily(requeteWeb);
-      const instructionSynthese = `${systemBase}\nMode Standard: Synthétise les résultats web suivants avec ton ton percutant pour Doc. Ne remets pas de balise [RECHERCHE].`;
-      const promptWeb = `[RÉSULTATS DE LA RECHERCHE WEB POUR "${requeteWeb}"]\n\n${resultatsWeb}\n\n[FIN DES RÉSULTATS]\n\nQuestion d'origine de Doc : ${texteBrut}`;
-
-      reponseNyx = await appelerVeniceMultiTour(MODEL_FAST, instructionSynthese, cacheMemoireCourte, promptWeb, null, 0.7);
-    } catch (errTavily) {
-      reponseNyx = `Échec de la recherche web (${errTavily.message}).`;
-    }
-  }
-
-  // Gestion Mémoire
+  // Synchronisation Mémoire
   const matchMemoire = reponseNyx.match(/\[MEMOIRE:\s*({[^}]+})\s*\]/);
   if (matchMemoire) {
     try {
@@ -381,7 +364,7 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "", cha
     } catch(e) {}
   }
 
-  // Gestion Réveil
+  // Synchronisation Réveil
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
   if (matchConfigReveil) {
     try {
@@ -409,7 +392,7 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "", cha
 }
 
 // ==========================================
-// 8. ROUTE PRINCIPALE EXPRESS
+// 8. ROUTE EXPRESS PRINCIPALE
 // ==========================================
 
 app.post('/telegram', async (req, res) => {
@@ -423,7 +406,7 @@ app.post('/telegram', async (req, res) => {
 
   await afficherFrappeTelegram(chatId);
 
-  // Ingestion Image
+  // Vision
   if (msg.photo?.length > 0) {
     try {
       imageBase64 = await lireImageSecurisee(msg.photo[msg.photo.length - 1].file_id);
@@ -432,7 +415,7 @@ app.post('/telegram', async (req, res) => {
       return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
     }
   } 
-  // Ingestion Fichiers
+  // Fichiers (PDF, DOCX, TXT/Code)
   else if (msg.document) {
     const mime = msg.document.mime_type || "";
     const fileName = (msg.document.file_name || "").toLowerCase();
@@ -475,7 +458,7 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Scraping direct si un lien est présent
+  // Inspection automatique d'URL
   const urlTrouvee = texteFinal.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
@@ -490,7 +473,7 @@ app.post('/telegram', async (req, res) => {
 
   if (texteFinal.trim() || imageBase64) {
     try {
-      let texteNyx = await traiterFlux(texteFinal, imageBase64, msg.caption || "", chatId);
+      let texteNyx = await traiterFlux(texteFinal, imageBase64, msg.caption || "");
 
       const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
       if (matchDessin) {
