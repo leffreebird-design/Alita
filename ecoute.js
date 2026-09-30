@@ -58,7 +58,7 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. NOYAU VENICE UNIFIÉ (CALIBRÉ POUR GROS FICHIERS)
+// 3. NOYAU VENICE UNIFIÉ
 // ==========================================
 
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, imageBase64 = null, temperature = 0.7) {
@@ -94,7 +94,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
         'Authorization': `Bearer ${VENICE_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 60000 // 60s pour laisser le temps de traiter les documents lourds
+      timeout: 60000
     });
 
     return res.data.choices[0].message.content;
@@ -122,25 +122,36 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. OUTILS TELEGRAM & LECTURE FICHIERS
+// 4. OUTILS TELEGRAM AVEC CHUNKING (ANTI-400)
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
   if (!text) return;
-  try {
-    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      chat_id: chatId,
-      text: text,
-      parse_mode: 'Markdown'
-    }, { timeout: 15000 });
-  } catch (err) {
+
+  // Découpage automatique si le texte dépasse 4 000 caractères
+  const TAILLE_MAX = 4000;
+  const blocs = [];
+
+  for (let i = 0; i < text.length; i += TAILLE_MAX) {
+    blocs.push(text.slice(i, i + TAILLE_MAX));
+  }
+
+  for (const bloc of blocs) {
     try {
       await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         chat_id: chatId,
-        text: text
+        text: bloc,
+        parse_mode: 'Markdown'
       }, { timeout: 15000 });
-    } catch (e) {
-      console.error("[TELEGRAM ERREUR ENVOI]", e.response?.data || e.message);
+    } catch (err) {
+      try {
+        await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          chat_id: chatId,
+          text: bloc
+        }, { timeout: 15000 });
+      } catch (e) {
+        console.error("[TELEGRAM ERREUR ENVOI]", e.response?.data || e.message);
+      }
     }
   }
 }
