@@ -58,7 +58,7 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. NOYAU VENICE UNIFIÉ
+// 3. NOYAU VENICE UNIFIÉ (AVEC TIMEOUT RÉDUIT)
 // ==========================================
 
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, imageBase64 = null, temperature = 0.7) {
@@ -93,7 +93,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
       'Authorization': `Bearer ${VENICE_API_KEY}`,
       'Content-Type': 'application/json'
     },
-    timeout: 60000
+    timeout: 20000 // 20s max pour éliminer les temps d'attente morts
   });
 
   return res.data.choices[0].message.content;
@@ -116,39 +116,38 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. OUTILS TELEGRAM & LECTURE
+// 4. OUTILS TELEGRAM & SÉCURISATION ENVOI
 // ==========================================
 
-function envoyerTelegram(chatId, text) {
-  return new Promise((resolve) => {
-    const payload = JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown' });
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      port: 443,
-      path: `/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-    }, () => resolve());
-    req.on('error', () => resolve());
-    req.write(payload);
-    req.end();
-  });
+async function envoyerTelegram(chatId, text) {
+  if (!text) return;
+  try {
+    // 1. Envoi prioritaire avec Markdown
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      chat_id: chatId,
+      text: text,
+      parse_mode: 'Markdown'
+    }, { timeout: 10000 });
+  } catch (err) {
+    // 2. Repli instantané en texte brut si Telegram bloque sur la syntaxe Markdown
+    try {
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        chat_id: chatId,
+        text: text
+      }, { timeout: 10000 });
+    } catch (e) {
+      console.error("[TELEGRAM ERREUR ENVOI]", e.response?.data || e.message);
+    }
+  }
 }
 
-function afficherFrappeTelegram(chatId) {
-  return new Promise((resolve) => {
-    const payload = JSON.stringify({ chat_id: chatId, action: 'typing' });
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      port: 443,
-      path: `/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-    }, () => resolve());
-    req.on('error', () => resolve());
-    req.write(payload);
-    req.end();
-  });
+async function afficherFrappeTelegram(chatId) {
+  try {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+      chat_id: chatId,
+      action: 'typing'
+    }, { timeout: 5000 });
+  } catch (e) {}
 }
 
 function envoyerPhotoTelegram(chatId, base64Image) {
@@ -372,4 +371,15 @@ app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
   await initialiserCache();
+
+  // Reconnexion automatique du webhook Telegram au boot
+  if (TELEGRAM_BOT_TOKEN) {
+    const webhookUrl = `https://alita-gsoe.onrender.com/telegram`;
+    try {
+      const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+      console.log(`🔗 Webhook Telegram configuré :`, res.data);
+    } catch (err) {
+      console.error(`❌ Échec Webhook :`, err.response?.data || err.message);
+    }
+  }
 });
