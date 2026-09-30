@@ -58,7 +58,7 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. NOYAU VENICE UNIFIÉ
+// 3. NOYAU VENICE UNIFIÉ (CALIBRÉ POUR GROS FICHIERS)
 // ==========================================
 
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, imageBase64 = null, temperature = 0.7) {
@@ -88,15 +88,21 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     venice_parameters: { include_venice_system_prompt: false }
   };
 
-  const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', payload, {
-    headers: {
-      'Authorization': `Bearer ${VENICE_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 20000
-  });
+  try {
+    const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', payload, {
+      headers: {
+        'Authorization': `Bearer ${VENICE_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 60000 // 60s pour laisser le temps de traiter les documents lourds
+    });
 
-  return res.data.choices[0].message.content;
+    return res.data.choices[0].message.content;
+  } catch (err) {
+    const detailErreur = err.response?.data?.error?.message || err.code || err.message;
+    console.error(`[VENICE ERREUR - ${model}] :`, detailErreur);
+    throw new Error(detailErreur);
+  }
 }
 
 async function genererImageVenice(prompt) {
@@ -126,13 +132,13 @@ async function envoyerTelegram(chatId, text) {
       chat_id: chatId,
       text: text,
       parse_mode: 'Markdown'
-    }, { timeout: 10000 });
+    }, { timeout: 15000 });
   } catch (err) {
     try {
       await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         chat_id: chatId,
         text: text
-      }, { timeout: 10000 });
+      }, { timeout: 15000 });
     } catch (e) {
       console.error("[TELEGRAM ERREUR ENVOI]", e.response?.data || e.message);
     }
@@ -188,7 +194,6 @@ async function lireDocxSecurise(fileId) {
   return data.value;
 }
 
-// Lecteur générique pour texte brut et code
 async function lireTexteSecurise(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
@@ -258,6 +263,7 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
     try {
       reponseNyx = await appelerVeniceMultiTour(MODEL_FAST, systemInstruction, cacheMemoireCourte, texteBrut, imageBase64, 0.7);
     } catch (errFast) {
+      console.warn(`[REPLI MOTEUR] ${MODEL_FAST} en échec (${errFast.message}), bascule sur secours...`);
       try {
         reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, systemInstruction, cacheMemoireCourte, texteBrut, imageBase64, 0.7);
       } catch (errFallback) {
@@ -347,7 +353,6 @@ app.post('/telegram', async (req, res) => {
         return await envoyerTelegram(chatId, `[ERREUR DOCX] : ${err.message}`);
       }
     }
-    // Prise en charge des fichiers textes, logs, scripts et codes sources
     else if (
       mime.startsWith('text/') || 
       fileName.endsWith('.txt') || 
