@@ -1,3 +1,4 @@
+
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
@@ -459,4 +460,89 @@ app.post('/telegram', async (req, res) => {
       try {
         await envoyerTelegram(chatId, "⏳ _Ingestion du PDF..._");
         const pdfText = await lirePdfSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU DOCUMENT PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${text
+        texteFinal = `[CONTENU DU DOCUMENT PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+      } catch (err) {
+        return await envoyerTelegram(chatId, `[ERREUR PDF] : ${err.message}`);
+      }
+    } 
+    else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
+      try {
+        await envoyerTelegram(chatId, "⏳ _Déchiquetage du DOCX..._");
+        const docxText = await lireDocxSecurise(msg.document.file_id);
+        texteFinal = `[CONTENU DU DOCUMENT DOCX "${msg.document.file_name}"]\n\n${docxText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+      } catch (err) {
+        return await envoyerTelegram(chatId, `[ERREUR DOCX] : ${err.message}`);
+      }
+    }
+    else if (
+      mime.startsWith('text/') || 
+      fileName.endsWith('.txt') || 
+      fileName.endsWith('.js') || 
+      fileName.endsWith('.json') || 
+      fileName.endsWith('.py') || 
+      fileName.endsWith('.md') ||
+      fileName.endsWith('.html') ||
+      fileName.endsWith('.css')
+    ) {
+      try {
+        await envoyerTelegram(chatId, "⏳ _Lecture du fichier texte..._");
+        const texteFichier = await lireTexteSecurise(msg.document.file_id);
+        texteFinal = `[CONTENU DU FICHIER "${msg.document.file_name}"]\n\n${texteFichier}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+      } catch (err) {
+        return await envoyerTelegram(chatId, `[ERREUR TEXTE] : ${err.message}`);
+      }
+    }
+  }
+
+  // Inspection automatique d'URL
+  const urlTrouvee = texteFinal.match(/https?:\/\/[^\s]+/i);
+  if (urlTrouvee) {
+    const urlCible = urlTrouvee[0];
+    await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
+    const extraction = await scraperPageWeb(urlCible);
+    if (extraction.succes) {
+      texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN DE LA PAGE]\n\nInstruction de Doc : ${texteFinal}`;
+    } else {
+      await envoyerTelegram(chatId, `⚠️ _Impossible de lire la page (${extraction.erreur})_`);
+    }
+  }
+
+  if (texteFinal.trim() || imageBase64) {
+    try {
+      let texteNyx = await traiterFlux(texteFinal, imageBase64, msg.caption || "");
+
+      const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
+      if (matchDessin) {
+        texteNyx = texteNyx.replace(matchDessin[0], '').trim();
+        if (texteNyx) await envoyerTelegram(chatId, texteNyx);
+        try {
+          const b64Image = await genererImageVenice(matchDessin[1]);
+          await envoyerPhotoTelegram(chatId, b64Image);
+        } catch (errImg) {
+          await envoyerTelegram(chatId, `[ÉCHEC IMAGE]`);
+        }
+      } else {
+        await envoyerTelegram(chatId, texteNyx);
+      }
+    } catch (err) {
+      await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
+    }
+  }
+});
+
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
+
+app.listen(PORT, '0.0.0.0', async () => {
+  console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
+  await initialiserCache();
+
+  if (TELEGRAM_BOT_TOKEN) {
+    const webhookUrl = `https://alita-gsoe.onrender.com/telegram`;
+    try {
+      const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+      console.log(`🔗 Webhook Telegram configuré :`, res.data);
+    } catch (err) {
+      console.error(`❌ Échec Webhook :`, err.response?.data || err.message);
+    }
+  }
+});
