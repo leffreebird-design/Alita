@@ -58,7 +58,7 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. NOYAU VENICE UNIFIÉ (AVEC TIMEOUT RÉDUIT)
+// 3. NOYAU VENICE UNIFIÉ
 // ==========================================
 
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, imageBase64 = null, temperature = 0.7) {
@@ -93,7 +93,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
       'Authorization': `Bearer ${VENICE_API_KEY}`,
       'Content-Type': 'application/json'
     },
-    timeout: 20000 // 20s max pour éliminer les temps d'attente morts
+    timeout: 20000
   });
 
   return res.data.choices[0].message.content;
@@ -116,20 +116,18 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. OUTILS TELEGRAM & SÉCURISATION ENVOI
+// 4. OUTILS TELEGRAM & LECTURE FICHIERS
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
   if (!text) return;
   try {
-    // 1. Envoi prioritaire avec Markdown
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       chat_id: chatId,
       text: text,
       parse_mode: 'Markdown'
     }, { timeout: 10000 });
   } catch (err) {
-    // 2. Repli instantané en texte brut si Telegram bloque sur la syntaxe Markdown
     try {
       await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         chat_id: chatId,
@@ -188,6 +186,13 @@ async function lireDocxSecurise(fileId) {
   const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
   const data = await mammoth.extractRawText({ buffer: Buffer.from(resDoc.data) });
   return data.value;
+}
+
+// Lecteur générique pour texte brut et code
+async function lireTexteSecurise(fileId) {
+  const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  return Buffer.from(resDoc.data).toString('utf-8');
 }
 
 // ==========================================
@@ -321,13 +326,14 @@ app.post('/telegram', async (req, res) => {
     }
   } 
   else if (msg.document) {
-    const mime = msg.document.mime_type;
-    const fileName = msg.document.file_name || "";
+    const mime = msg.document.mime_type || "";
+    const fileName = (msg.document.file_name || "").toLowerCase();
+
     if (mime === 'application/pdf' || fileName.endsWith('.pdf')) {
       try {
         await envoyerTelegram(chatId, "⏳ _Ingestion du PDF..._");
         const pdfText = await lirePdfSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU DOCUMENT PDF "${fileName}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+        texteFinal = `[CONTENU DU DOCUMENT PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
       } catch (err) {
         return await envoyerTelegram(chatId, `[ERREUR PDF] : ${err.message}`);
       }
@@ -336,9 +342,28 @@ app.post('/telegram', async (req, res) => {
       try {
         await envoyerTelegram(chatId, "⏳ _Déchiquetage du DOCX..._");
         const docxText = await lireDocxSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU DOCUMENT DOCX "${fileName}"]\n\n${docxText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+        texteFinal = `[CONTENU DU DOCUMENT DOCX "${msg.document.file_name}"]\n\n${docxText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
       } catch (err) {
         return await envoyerTelegram(chatId, `[ERREUR DOCX] : ${err.message}`);
+      }
+    }
+    // Prise en charge des fichiers textes, logs, scripts et codes sources
+    else if (
+      mime.startsWith('text/') || 
+      fileName.endsWith('.txt') || 
+      fileName.endsWith('.js') || 
+      fileName.endsWith('.json') || 
+      fileName.endsWith('.py') || 
+      fileName.endsWith('.md') ||
+      fileName.endsWith('.html') ||
+      fileName.endsWith('.css')
+    ) {
+      try {
+        await envoyerTelegram(chatId, "⏳ _Lecture du fichier texte..._");
+        const texteFichier = await lireTexteSecurise(msg.document.file_id);
+        texteFinal = `[CONTENU DU FICHIER "${msg.document.file_name}"]\n\n${texteFichier}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+      } catch (err) {
+        return await envoyerTelegram(chatId, `[ERREUR TEXTE] : ${err.message}`);
       }
     }
   }
@@ -372,7 +397,6 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
   await initialiserCache();
 
-  // Reconnexion automatique du webhook Telegram au boot
   if (TELEGRAM_BOT_TOKEN) {
     const webhookUrl = `https://alita-gsoe.onrender.com/telegram`;
     try {
