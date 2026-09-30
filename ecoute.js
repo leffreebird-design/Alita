@@ -3,6 +3,7 @@ const axios = require('axios');
 const https = require('https');
 const pdfParse = require('pdf-parse'); 
 const mammoth = require('mammoth');
+const cheerio = require('cheerio');
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
@@ -122,13 +123,57 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. OUTILS TELEGRAM AVEC CHUNKING (ANTI-400)
+// 4. PARSEUR DE LIENS WEB (SCRAPING LÉGER)
+// ==========================================
+
+async function scraperPageWeb(urlCible) {
+  try {
+    const res = await axios.get(urlCible, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+      },
+      timeout: 15000
+    });
+
+    const $ = cheerio.load(res.data);
+
+    // Suppression des éléments parasites
+    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+
+    const titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
+    
+    // Extraction prioritaire sur les zones de contenu, repli sur le body
+    let contenu = $('article, main, .content, #content, .post').text();
+    if (!contenu || contenu.trim().length < 150) {
+      contenu = $('body').text();
+    }
+
+    // Nettoyage des espaces et sauts de ligne excessifs
+    const texteNettoye = contenu.replace(/\s+/g, ' ').trim();
+    const texteTronque = texteNettoye.slice(0, 10000); // 10 000 caractères max pour éviter la saturation
+
+    return {
+      succes: true,
+      titre: titre,
+      texte: texteTronque
+    };
+  } catch (err) {
+    return {
+      succes: false,
+      erreur: err.message
+    };
+  }
+}
+
+// ==========================================
+// 5. OUTILS TELEGRAM AVEC CHUNKING
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
   if (!text) return;
 
-  // Découpage automatique si le texte dépasse 4 000 caractères
   const TAILLE_MAX = 4000;
   const blocs = [];
 
@@ -212,7 +257,7 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 5. PROTOCOLE WAKEY WAKEY
+// 6. PROTOCOLE WAKEY WAKEY
 // ==========================================
 
 async function declencherReveil() {
@@ -241,7 +286,7 @@ async function declencherReveil() {
 setInterval(declencherReveil, 60000);
 
 // ==========================================
-// 6. ROUTAGE DES MESSAGES
+// 7. ROUTAGE DES MESSAGES
 // ==========================================
 
 async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
@@ -320,7 +365,7 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
 }
 
 // ==========================================
-// 7. ROUTE EXPRESS
+// 8. ROUTE PRINCIPALE EXPRESS
 // ==========================================
 
 app.post('/telegram', async (req, res) => {
@@ -334,6 +379,7 @@ app.post('/telegram', async (req, res) => {
 
   await afficherFrappeTelegram(chatId);
 
+  // Ingestion Image
   if (msg.photo?.length > 0) {
     try {
       imageBase64 = await lireImageSecurisee(msg.photo[msg.photo.length - 1].file_id);
@@ -342,6 +388,7 @@ app.post('/telegram', async (req, res) => {
       return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
     }
   } 
+  // Ingestion Fichiers
   else if (msg.document) {
     const mime = msg.document.mime_type || "";
     const fileName = (msg.document.file_name || "").toLowerCase();
@@ -381,6 +428,19 @@ app.post('/telegram', async (req, res) => {
       } catch (err) {
         return await envoyerTelegram(chatId, `[ERREUR TEXTE] : ${err.message}`);
       }
+    }
+  }
+
+  // Détection et scraping automatique des URL dans le texte
+  const urlTrouvee = texteFinal.match(/https?:\/\/[^\s]+/i);
+  if (urlTrouvee) {
+    const urlCible = urlTrouvee[0];
+    await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
+    const extraction = await scraperPageWeb(urlCible);
+    if (extraction.succes) {
+      texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN DE LA PAGE]\n\nInstruction de Doc : ${texteFinal}`;
+    } else {
+      await envoyerTelegram(chatId, `⚠️ _Impossible de lire la page (${extraction.erreur})_`);
     }
   }
 
