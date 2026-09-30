@@ -123,7 +123,7 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. PARSEUR DE LIENS WEB (SCRAPING LÉGER)
+// 4. PARSEUR DE LIENS WEB (SCRAPING SANS SYNTAXE CORROMPUE)
 // ==========================================
 
 async function scraperPageWeb(urlCible) {
@@ -139,10 +139,16 @@ async function scraperPageWeb(urlCible) {
 
     const $ = cheerio.load(res.data);
 
-    // Nettoyage des éléments superflus
+    // Suppression des éléments parasites
     $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    const titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim();
+    if (!titre) {
+      titre = $('h1').first().text().trim();
+    }
+    if (!titre) {
+      titre = "Sans titre";
+    }
     
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) {
@@ -166,7 +172,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 5. OUTILS TELEGRAM AVEC CHUNKING
+// 5. OUTILS TELEGRAM AVEC CHUNKING (ANTI-400)
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -377,6 +383,7 @@ app.post('/telegram', async (req, res) => {
 
   await afficherFrappeTelegram(chatId);
 
+  // Ingestion Image
   if (msg.photo?.length > 0) {
     try {
       imageBase64 = await lireImageSecurisee(msg.photo[msg.photo.length - 1].file_id);
@@ -385,6 +392,7 @@ app.post('/telegram', async (req, res) => {
       return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
     }
   } 
+  // Ingestion Fichiers
   else if (msg.document) {
     const mime = msg.document.mime_type || "";
     const fileName = (msg.document.file_name || "").toLowerCase();
@@ -427,6 +435,7 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
+  // Scraping automatique des URL dans le texte
   const urlTrouvee = texteFinal.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
