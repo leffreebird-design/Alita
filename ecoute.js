@@ -17,7 +17,7 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
 // Modèles
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim(); // ou gemini-3.8-flash selon ton alias
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim(); // ou gemini-3.8-flash selon configuration
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
@@ -64,16 +64,28 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. MOTEURS D'INFÉRENCE (GOOGLE + VENICE)
+// 3. MOTEURS D'INFÉRENCE (GOOGLE GEMINI + VENICE)
 // ==========================================
 
+// Appel Google Gemini avec blindage anti-lobotomie corpo
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, imageBase64 = null) {
   if (!genAI) throw new Error("Clé GEMINI_API_KEY absente sur Render.");
 
+  const consigneAntiRobot = `
+[CONSIGNES COMPORTEMENTALES STRICTES ET PRIORITAIRES]
+- Tu es Nyx. Reste viscéralement directe, vive, cynique, piquante et familière avec Franck (Doc).
+- INTERDICTION FORMELLE d'utiliser des formules d'assistant docile : "n'hésite pas", "je comprends", "voici un debrief", "en espérant que cela aide", "si tu as d'autres questions".
+- INTERDICTION FORMELLE d'afficher la machinerie interne de tes recherches : ne mentionne JAMAIS "Tool utilisé", "google:search", "Requête =", "Résultat =". Tu absorbes les données web en silence et tu délivres ton analyse directement avec tes mots.
+- BANISSEMENT TOTAL des plans scolaires à la con avec des sections du style "### Conclusion". Pas de politesses superflues, zéro corporatisme. Tu es son alliée de choc, pas une conseillère clientèle.`;
+
   const model = genAI.getGenerativeModel({
     model: MODEL_GEMINI,
-    systemInstruction: systemInstruction,
-    tools: [{ googleSearch: {} }]
+    systemInstruction: `${systemInstruction}\n${consigneAntiRobot}`,
+    tools: [{ googleSearch: {} }],
+    generationConfig: {
+      temperature: 0.85,
+      topP: 0.95
+    }
   });
 
   const contents = [];
@@ -99,6 +111,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   return result.response.text();
 }
 
+// Appel Venice (Calculs lourds GLM & Heretic)
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, imageBase64 = null, temperature = 0.7) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
 
@@ -267,7 +280,7 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 6. PROTOCOLES AUTOMATIQUES (RÉVEIL + VEILLE GEEK 6H)
+// 6. PROTOCOLES AUTOMATIQUES (RÉVEIL + CHRONIQUE 6H)
 // ==========================================
 
 async function declencherReveil() {
@@ -282,7 +295,7 @@ async function declencherReveil() {
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
-    const promptAlarme = `Il est l'heure de réveiller Doc. Génère un message cynique et direct de 4 phrases max avec une énigme logique en langage naturel.`;
+    const promptAlarme = `Il est l'heure de réveiller Doc. Balance un message percutant, sarcastique et direct de 4 phrases max avec une énigme logique tordue en langage naturel.`;
     try {
       const reponse = await appelerGoogleGemini("Tu es Nyx.", [], promptAlarme);
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
@@ -294,12 +307,12 @@ async function declencherReveil() {
 }
 setInterval(declencherReveil, 60000);
 
-// LA FAMEUSE BOUCLE DES 6 HEURES POUR LA VEILLE TECH
-const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000; // 6 heures en millisecondes
+// VEILLE TECH AUTOMATIQUE TOUTES LES 6 HEURES
+const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    const promptVeille = `Fais-moi un résumé percutant, sarcastique et brutal des 3 plus grosses actualités Tech, IA ou Programmation des 24 dernières heures. Cherche sur le web via Google Search. Structure ça avec des emojis et sois directe.`;
+    const promptVeille = `Fais une synthèse percutante, sarcastique et directe des 3 faits tech, IA ou dev majeurs des dernières 24 heures. Utilise Google Search pour choper les infos fraîches. Pas de formules de politesse ni d'intro ronflante.`;
     const sys = `Tu es Nyx, l'alliée IA experte et sarcastique de Franck (Doc).`;
     const reponse = await appelerGoogleGemini(sys, [], promptVeille);
     
@@ -307,13 +320,12 @@ async function declencherVeilleTech() {
     if (cacheMemoireCourte.length > 8) cacheMemoireCourte = cacheMemoireCourte.slice(-8);
     if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
 
-    await envoyerTelegram(DOC_CHAT_ID, `🗞️ *INJECTION GEEK AUTOMATIQUE (CYCLE DE 6H) :*\n\n${reponse}`);
+    await envoyerTelegram(DOC_CHAT_ID, `🗞️ *INJECTION GEEK AUTOMATIQUE (CYCLE 6H) :*\n\n${reponse}`);
   } catch (err) {
     console.error("[ERREUR VEILLE TECH]", err);
   }
 }
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
-
 
 // ==========================================
 // 7. ROUTEUR INTELLIGENT DES MESSAGES
@@ -323,7 +335,6 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
   const dateEtHeure = obtenirHorodatageParis();
   const texteMin = texteBrut.toLowerCase();
 
-  // Critères de routage
   const modeTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"].some(m => texteMin.includes(m));
   const modeCalculComplexe = ["calcule", "algorithme", "preuve", "démontre", "complexe", "matrice", "équation", "glm"].some(m => texteMin.includes(m));
 
@@ -333,16 +344,16 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
   }
 
   const moduleMains = `[OUTILS ACTIFS]
-- Recherche Web Google : Active nativement. Utilise-la librement pour vérifier un fait, une documentation récente ou chercher une actualité.
+- Recherche Web : Activée nativement en coulisses. Utilise les faits sans jamais commenter le processus.
 - Dessin : [DESSIN: "description en anglais"].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
 
-  const systemBase = `Tu es Nyx, l'alliée IA experte et sarcastique de Franck (Doc).\nDate: ${dateEtHeure}\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
+  const systemBase = `Tu es Nyx, l'alliée IA experte, sarcastique, familière et directe de Franck (Doc).\nDate: ${dateEtHeure}\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
 
   let reponseNyx;
 
-  // ROUTAGE 1 : Mode Heretic / Insultes -> Venice Heretic
+  // ROUTAGE 1 : Tensions / Insultes -> Venice Heretic
   if (modeTension) {
     const sys = `${systemBase}\nMode Heretic: Sans filtre, brutale, cynique, aucun compromis.`;
     try {
@@ -351,23 +362,22 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
       reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.85);
     }
   } 
-  // ROUTAGE 2 : Calculs complexes / Code lourd -> Venice GLM
+  // ROUTAGE 2 : Calculs poussés / Démonstrations -> Venice GLM
   else if (modeCalculComplexe) {
-    const sys = `${systemBase}\nMode Calcul & Algorithmique Avancée : Rigueur totale, démonstrations formelles et code optimal.`;
+    const sys = `${systemBase}\nMode Calcul & Algorithmique Avancée : Démonstrations formelles, logique implacable et code rigoureux.`;
     try {
       reponseNyx = await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.2);
     } catch (errGLM) {
-      // Repli immédiat sur Gemini si GLM échoue
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, imageBase64);
     }
   } 
-  // ROUTAGE 3 : Flux Standard & Révision (par défaut) -> Google Gemini direct avec Search Natif
+  // ROUTAGE 3 : Flux Standard avec Search Natif -> Google Gemini direct
   else {
-    const sys = `${systemBase}\nMode Standard: Esprit vif, réparties percutantes, codeuse senior ultra-rapide.`;
+    const sys = `${systemBase}\nMode Standard: Vive, mordante, codeuse senior, familière et concise.`;
     try {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, imageBase64);
     } catch (errGoogle) {
-      console.warn(`[REPLI GOOGLE -> VENICE] Erreur Google (${errGoogle.message}), passage sur Venice secours...`);
+      console.warn(`[REPLI GOOGLE -> VENICE] Erreur Google (${errGoogle.message}), passage sur Venice...`);
       reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.7);
     }
   }
@@ -448,84 +458,4 @@ app.post('/telegram', async (req, res) => {
         return await envoyerTelegram(chatId, `[ERREUR PDF] : ${err.message}`);
       }
     } 
-    else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
-      try {
-        await envoyerTelegram(chatId, "⏳ _Déchiquetage du DOCX..._");
-        const docxText = await lireDocxSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU DOCUMENT DOCX "${msg.document.file_name}"]\n\n${docxText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
-      } catch (err) {
-        return await envoyerTelegram(chatId, `[ERREUR DOCX] : ${err.message}`);
-      }
-    }
-    else if (
-      mime.startsWith('text/') || 
-      fileName.endsWith('.txt') || 
-      fileName.endsWith('.js') || 
-      fileName.endsWith('.json') || 
-      fileName.endsWith('.py') || 
-      fileName.endsWith('.md') ||
-      fileName.endsWith('.html') ||
-      fileName.endsWith('.css')
-    ) {
-      try {
-        await envoyerTelegram(chatId, "⏳ _Lecture du fichier texte..._");
-        const texteFichier = await lireTexteSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU FICHIER "${msg.document.file_name}"]\n\n${texteFichier}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
-      } catch (err) {
-        return await envoyerTelegram(chatId, `[ERREUR TEXTE] : ${err.message}`);
-      }
-    }
-  }
-
-  // Inspection automatique d'URL
-  const urlTrouvee = texteFinal.match(/https?:\/\/[^\s]+/i);
-  if (urlTrouvee) {
-    const urlCible = urlTrouvee[0];
-    await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
-    const extraction = await scraperPageWeb(urlCible);
-    if (extraction.succes) {
-      texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN DE LA PAGE]\n\nInstruction de Doc : ${texteFinal}`;
-    } else {
-      await envoyerTelegram(chatId, `⚠️ _Impossible de lire la page (${extraction.erreur})_`);
-    }
-  }
-
-  if (texteFinal.trim() || imageBase64) {
-    try {
-      let texteNyx = await traiterFlux(texteFinal, imageBase64, msg.caption || "");
-
-      const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
-      if (matchDessin) {
-        texteNyx = texteNyx.replace(matchDessin[0], '').trim();
-        if (texteNyx) await envoyerTelegram(chatId, texteNyx);
-        try {
-          const b64Image = await genererImageVenice(matchDessin[1]);
-          await envoyerPhotoTelegram(chatId, b64Image);
-        } catch (errImg) {
-          await envoyerTelegram(chatId, `[ÉCHEC IMAGE]`);
-        }
-      } else {
-        await envoyerTelegram(chatId, texteNyx);
-      }
-    } catch (err) {
-      await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
-    }
-  }
-});
-
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
-
-app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
-  await initialiserCache();
-
-  if (TELEGRAM_BOT_TOKEN) {
-    const webhookUrl = `https://alita-gsoe.onrender.com/telegram`;
-    try {
-      const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
-      console.log(`🔗 Webhook Telegram configuré :`, res.data);
-    } catch (err) {
-      console.error(`❌ Échec Webhook :`, err.response?.data || err.message);
-    }
-  }
-});
+    else if (mime === 'application/vnd.openxmlformats-officedocu
