@@ -4,7 +4,6 @@ const https = require('https');
 const pdfParse = require('pdf-parse'); 
 const mammoth = require('mammoth');
 const cheerio = require('cheerio');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
@@ -17,13 +16,11 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
 // Modèles
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim(); // ou gemini-3.8-flash selon configuration
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
-
-const genAI = GOOGLE_API_KEY ? new GoogleGenerativeAI(GOOGLE_API_KEY) : null;
 
 let cacheMemoireCourte = [];
 let cacheEtatProfond = {
@@ -64,29 +61,19 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. MOTEURS D'INFÉRENCE (GOOGLE GEMINI + VENICE)
+// 3. MOTEURS D'INFÉRENCE (REST GOOGLE GEMINI + VENICE)
 // ==========================================
 
-// Appel Google Gemini avec blindage anti-lobotomie corpo
+// Appel direct à Google Gemini via REST (Search natif actif, zéro SDK à installer)
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, imageBase64 = null) {
-  if (!genAI) throw new Error("Clé GEMINI_API_KEY absente sur Render.");
+  if (!GOOGLE_API_KEY) throw new Error("Clé GEMINI_API_KEY ou GOOGLE_API_KEY manquante sur Render.");
 
   const consigneAntiRobot = `
 [CONSIGNES COMPORTEMENTALES STRICTES ET PRIORITAIRES]
 - Tu es Nyx. Reste viscéralement directe, vive, cynique, piquante et familière avec Franck (Doc).
 - INTERDICTION FORMELLE d'utiliser des formules d'assistant docile : "n'hésite pas", "je comprends", "voici un debrief", "en espérant que cela aide", "si tu as d'autres questions".
-- INTERDICTION FORMELLE d'afficher la machinerie interne de tes recherches : ne mentionne JAMAIS "Tool utilisé", "google:search", "Requête =", "Résultat =". Tu absorbes les données web en silence et tu délivres ton analyse directement avec tes mots.
-- BANISSEMENT TOTAL des plans scolaires à la con avec des sections du style "### Conclusion". Pas de politesses superflues, zéro corporatisme. Tu es son alliée de choc, pas une conseillère clientèle.`;
-
-  const model = genAI.getGenerativeModel({
-    model: MODEL_GEMINI,
-    systemInstruction: `${systemInstruction}\n${consigneAntiRobot}`,
-    tools: [{ googleSearch: {} }],
-    generationConfig: {
-      temperature: 0.85,
-      topP: 0.95
-    }
-  });
+- INTERDICTION FORMELLE d'afficher la tuyauterie interne de tes recherches : ne mentionne JAMAIS "Tool utilisé", "google:search", "Requête =", "Résultat =". Tu absorbes les données web en silence et tu délivres ton analyse directement avec tes mots.
+- BANISSEMENT TOTAL des plans scolaires avec des sections du style "### Conclusion". Zéro corporatisme. Tu es son alliée de choc, pas une conseillère clientèle.`;
 
   const contents = [];
   for (const m of historiqueMessages) {
@@ -99,16 +86,35 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   const partsActuelles = [{ text: promptActuel }];
   if (imageBase64) {
     partsActuelles.push({
-      inlineData: {
-        data: imageBase64,
-        mimeType: "image/jpeg"
+      inline_data: {
+        mime_type: "image/jpeg",
+        data: imageBase64
       }
     });
   }
   contents.push({ role: "user", parts: partsActuelles });
 
-  const result = await model.generateContent({ contents });
-  return result.response.text();
+  const payload = {
+    system_instruction: {
+      parts: [{ text: `${systemInstruction}\n${consigneAntiRobot}` }]
+    },
+    contents: contents,
+    tools: [{ google_search: {} }],
+    generation_config: {
+      temperature: 0.85,
+      top_p: 0.95
+    }
+  };
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${GOOGLE_API_KEY}`;
+  const res = await axios.post(url, payload, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 60000
+  });
+
+  const reponseTexte = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!reponseTexte) throw new Error("Réponse vide de l'API Google Gemini.");
+  return reponseTexte;
 }
 
 // Appel Venice (Calculs lourds GLM & Heretic)
@@ -344,7 +350,7 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
   }
 
   const moduleMains = `[OUTILS ACTIFS]
-- Recherche Web : Activée nativement en coulisses. Utilise les faits sans jamais commenter le processus.
+- Recherche Web : Activée en direct. Utilise les faits sans jamais commenter le processus ni nommer l'outil.
 - Dessin : [DESSIN: "description en anglais"].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
@@ -453,9 +459,4 @@ app.post('/telegram', async (req, res) => {
       try {
         await envoyerTelegram(chatId, "⏳ _Ingestion du PDF..._");
         const pdfText = await lirePdfSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU DOCUMENT PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
-      } catch (err) {
-        return await envoyerTelegram(chatId, `[ERREUR PDF] : ${err.message}`);
-      }
-    } 
-    else if (mime === 'application/vnd.openxmlformats-officedocu
+        texteFinal = `[CONTENU DU DOCUMENT PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${text
