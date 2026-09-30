@@ -10,6 +10,7 @@ const cheerio = require('cheerio');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
+const TAVILY_API_KEY = (process.env.TAVILY_API_KEY || "").trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
@@ -123,8 +124,28 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. PARSEUR DE LIENS WEB (SCRAPING SANS SYNTAXE CORROMPUE)
+// 4. RADAR WEB (TAVILY) & SCRAPING LIENS
 // ==========================================
+
+async function rechercherTavily(requete) {
+  if (!TAVILY_API_KEY) {
+    throw new Error("Clé TAVILY_API_KEY absente des variables Render.");
+  }
+
+  const res = await axios.post('https://api.tavily.com/search', {
+    api_key: TAVILY_API_KEY,
+    query: requete,
+    search_depth: "basic",
+    include_answer: false,
+    max_results: 3
+  }, { timeout: 15000 });
+
+  if (!res.data || !res.data.results || res.data.results.length === 0) {
+    return "Aucun résultat trouvé sur le web.";
+  }
+
+  return res.data.results.map((r, i) => `[Source ${i + 1}] ${r.title}\nURL: ${r.url}\nExtrait: ${r.content}`).join('\n\n');
+}
 
 async function scraperPageWeb(urlCible) {
   try {
@@ -137,10 +158,7 @@ async function scraperPageWeb(urlCible) {
       timeout: 15000
     });
 
-    const $ = cheerio.load(res.data);
-
-    // Suppression des éléments parasites
-    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
     let titre = $('title').text().trim();
     if (!titre) {
@@ -156,12 +174,10 @@ async function scraperPageWeb(urlCible) {
     }
 
     const texteNettoye = contenu.replace(/\s+/g, ' ').trim();
-    const texteTronque = texteNettoye.slice(0, 10000);
-
     return {
       succes: true,
       titre: titre,
-      texte: texteTronque
+      texte: texteNettoye.slice(0, 10000)
     };
   } catch (err) {
     return {
@@ -172,7 +188,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 5. OUTILS TELEGRAM AVEC CHUNKING (ANTI-400)
+// 5. OUTILS TELEGRAM AVEC CHUNKING
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -290,10 +306,10 @@ async function declencherReveil() {
 setInterval(declencherReveil, 60000);
 
 // ==========================================
-// 7. ROUTAGE DES MESSAGES
+// 7. ROUTAGE DES MESSAGES & BOUCLE D'OUTILS
 // ==========================================
 
-async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
+async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "", chatId = null) {
   const dateEtHeure = obtenirHorodatageParis();
   const tensionDirecte = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"].some(m => texteBrut.toLowerCase().includes(m));
 
@@ -302,7 +318,12 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
     instructionReveil = `[ÉTAT D'URGENCE MATINAL] : L'alarme est en cours. Évalue la réponse de Doc à ton énigme. Ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.`;
   }
 
-  const moduleMains = `[OUTILS ACTIFS]\n- Dessin : [DESSIN: "description en anglais"].\n- Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].\n- Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
+  const moduleMains = `[OUTILS ACTIFS]
+- Recherche Web : Pour chercher une information récente, un fait inconnu ou si Doc te demande de chercher, réponds UNIQUEMENT par [RECHERCHE: "mots clés précis"]. Les résultats te seront injectés immédiatement.
+- Dessin : [DESSIN: "description en anglais"].
+- Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
+- Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
+
   const systemBase = `Tu es Nyx, l'alliée IA experte et sarcastique de Franck (Doc).\nDate: ${dateEtHeure}\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
 
   let reponseNyx;
@@ -332,6 +353,24 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
     }
   }
 
+  // Interception de l'outil Recherche Web
+  const matchRecherche = reponseNyx.match(/\[RECHERCHE:\s*["']?(.*?)["']?\s*\]/i);
+  if (matchRecherche) {
+    const requeteWeb = matchRecherche[1];
+    if (chatId) await envoyerTelegram(chatId, `🌐 _Recherche en direct : « ${requeteWeb} »..._`);
+    
+    try {
+      const resultatsWeb = await rechercherTavily(requeteWeb);
+      const instructionSynthese = `${systemBase}\nMode Standard: Synthétise les résultats web suivants avec ton ton percutant pour Doc. Ne remets pas de balise [RECHERCHE].`;
+      const promptWeb = `[RÉSULTATS DE LA RECHERCHE WEB POUR "${requeteWeb}"]\n\n${resultatsWeb}\n\n[FIN DES RÉSULTATS]\n\nQuestion d'origine de Doc : ${texteBrut}`;
+
+      reponseNyx = await appelerVeniceMultiTour(MODEL_FAST, instructionSynthese, cacheMemoireCourte, promptWeb, null, 0.7);
+    } catch (errTavily) {
+      reponseNyx = `Échec de la recherche web (${errTavily.message}).`;
+    }
+  }
+
+  // Gestion Mémoire
   const matchMemoire = reponseNyx.match(/\[MEMOIRE:\s*({[^}]+})\s*\]/);
   if (matchMemoire) {
     try {
@@ -342,6 +381,7 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
     } catch(e) {}
   }
 
+  // Gestion Réveil
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
   if (matchConfigReveil) {
     try {
@@ -435,7 +475,7 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Scraping automatique des URL dans le texte
+  // Scraping direct si un lien est présent
   const urlTrouvee = texteFinal.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
@@ -450,7 +490,7 @@ app.post('/telegram', async (req, res) => {
 
   if (texteFinal.trim() || imageBase64) {
     try {
-      let texteNyx = await traiterFlux(texteFinal, imageBase64, msg.caption || "");
+      let texteNyx = await traiterFlux(texteFinal, imageBase64, msg.caption || "", chatId);
 
       const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
       if (matchDessin) {
