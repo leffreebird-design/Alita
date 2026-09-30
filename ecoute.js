@@ -139,20 +139,18 @@ async function scraperPageWeb(urlCible) {
 
     const $ = cheerio.load(res.data);
 
-    // Suppression des éléments parasites
+    // Nettoyage des éléments superflus
     $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
     const titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
     
-    // Extraction prioritaire sur les zones de contenu, repli sur le body
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) {
       contenu = $('body').text();
     }
 
-    // Nettoyage des espaces et sauts de ligne excessifs
     const texteNettoye = contenu.replace(/\s+/g, ' ').trim();
-    const texteTronque = texteNettoye.slice(0, 10000); // 10 000 caractères max pour éviter la saturation
+    const texteTronque = texteNettoye.slice(0, 10000);
 
     return {
       succes: true,
@@ -379,7 +377,6 @@ app.post('/telegram', async (req, res) => {
 
   await afficherFrappeTelegram(chatId);
 
-  // Ingestion Image
   if (msg.photo?.length > 0) {
     try {
       imageBase64 = await lireImageSecurisee(msg.photo[msg.photo.length - 1].file_id);
@@ -388,7 +385,6 @@ app.post('/telegram', async (req, res) => {
       return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
     }
   } 
-  // Ingestion Fichiers
   else if (msg.document) {
     const mime = msg.document.mime_type || "";
     const fileName = (msg.document.file_name || "").toLowerCase();
@@ -431,7 +427,6 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Détection et scraping automatique des URL dans le texte
   const urlTrouvee = texteFinal.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
