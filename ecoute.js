@@ -1,4 +1,3 @@
-
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
@@ -17,7 +16,7 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
 // Modèles
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim(); // ou gemini-1.5-pro
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
@@ -65,8 +64,8 @@ async function initialiserCache() {
 // 3. MOTEURS D'INFÉRENCE (REST GOOGLE GEMINI + VENICE)
 // ==========================================
 
-// Appel direct à Google Gemini via REST (Search natif actif, zéro SDK à installer)
-async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, imageBase64 = null) {
+// Appel direct à Google Gemini via REST (Search natif actif, Zéro SDK)
+async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
   if (!GOOGLE_API_KEY) throw new Error("Clé GEMINI_API_KEY ou GOOGLE_API_KEY manquante sur Render.");
 
   const consigneAntiRobot = `
@@ -85,11 +84,11 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   }
 
   const partsActuelles = [{ text: promptActuel }];
-  if (imageBase64) {
+  if (mediaData) {
     partsActuelles.push({
       inline_data: {
-        mime_type: "image/jpeg",
-        data: imageBase64
+        mime_type: mediaData.mime_type,
+        data: mediaData.data
       }
     });
   }
@@ -108,18 +107,23 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   };
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${GOOGLE_API_KEY}`;
-  const res = await axios.post(url, payload, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 60000
-  });
-
-  const reponseTexte = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!reponseTexte) throw new Error("Réponse vide de l'API Google Gemini.");
-  return reponseTexte;
+  
+  try {
+    const res = await axios.post(url, payload, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 60000
+    });
+    const reponseTexte = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!reponseTexte) throw new Error("Réponse vide de l'API Google Gemini.");
+    return reponseTexte;
+  } catch (err) {
+    console.error("[ERREUR API GOOGLE]", err.response?.data || err.message);
+    throw err;
+  }
 }
 
 // Appel Venice (Calculs lourds GLM & Heretic)
-async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, imageBase64 = null, temperature = 0.7) {
+async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
 
   const messages = [{ role: "system", content: systemInstruction }];
@@ -127,12 +131,12 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
   }
 
-  if (imageBase64) {
+  if (mediaData && mediaData.mime_type.startsWith('image/')) {
     messages.push({
       role: "user",
       content: [
         { type: "text", text: promptActuel },
-        { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}` } }
+        { type: "image_url", image_url: { url: `data:${mediaData.mime_type};base64,${mediaData.data}` } }
       ]
     });
   } else {
@@ -260,10 +264,11 @@ function envoyerPhotoTelegram(chatId, base64Image) {
   });
 }
 
-async function lireImageSecurisee(fileId) {
+// Nouvelle fonction générique pour lire n'importe quel média (Photo ou Audio)
+async function lireMediaSecurise(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
-  const resImg = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
-  return Buffer.from(resImg.data).toString('base64');
+  const resMedia = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  return Buffer.from(resMedia.data).toString('base64');
 }
 
 async function lirePdfSecurise(fileId) {
@@ -338,12 +343,15 @@ setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 // 7. ROUTEUR INTELLIGENT DES MESSAGES
 // ==========================================
 
-async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
+async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   const dateEtHeure = obtenirHorodatageParis();
   const texteMin = texteBrut.toLowerCase();
 
   const modeTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"].some(m => texteMin.includes(m));
   const modeCalculComplexe = ["calcule", "algorithme", "preuve", "démontre", "complexe", "matrice", "équation", "glm"].some(m => texteMin.includes(m));
+  
+  // DÉTECTION AUDIO : Venice ne gère pas l'audio, on force Gemini
+  const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil.etat === "en_cours") {
@@ -360,32 +368,41 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
 
   let reponseNyx;
 
-  // ROUTAGE 1 : Tensions / Insultes -> Venice Heretic
-  if (modeTension) {
+  if (estAudio) {
+    // ROUTAGE AUDIO -> Forcé vers Gemini
+    const sys = `${systemBase}\nMode Standard: Écoute ce vocal ou cet audio, sois vive, mordante et familière.`;
+    try {
+      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
+    } catch (errGoogle) {
+      reponseNyx = `[ERREUR DE TRANSCRIPTION] Désolé Doc, Google Gemini n'a pas pu traiter l'audio : ${errGoogle.message}`;
+    }
+  } 
+  else if (modeTension) {
+    // ROUTAGE 1 : Tensions / Insultes -> Venice Heretic
     const sys = `${systemBase}\nMode Heretic: Sans filtre, brutale, cynique, aucun compromis.`;
     try {
-      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.85);
+      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sys, cacheMemoireCourte, texteBrut, mediaData, 0.85);
     } catch (err1) {
-      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.85);
+      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, mediaData, 0.85);
     }
   } 
-  // ROUTAGE 2 : Calculs poussés / Démonstrations -> Venice GLM
   else if (modeCalculComplexe) {
+    // ROUTAGE 2 : Calculs poussés / Démonstrations -> Venice GLM
     const sys = `${systemBase}\nMode Calcul & Algorithmique Avancée : Démonstrations formelles, logique implacable et code rigoureux.`;
     try {
-      reponseNyx = await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.2);
+      reponseNyx = await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, sys, cacheMemoireCourte, texteBrut, mediaData, 0.2);
     } catch (errGLM) {
-      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, imageBase64);
+      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
     }
   } 
-  // ROUTAGE 3 : Flux Standard avec Search Natif -> Google Gemini direct
   else {
+    // ROUTAGE 3 : Flux Standard avec Search Natif -> Google Gemini direct
     const sys = `${systemBase}\nMode Standard: Vive, mordante, codeuse senior, familière et concise.`;
     try {
-      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, imageBase64);
+      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
     } catch (errGoogle) {
       console.warn(`[REPLI GOOGLE -> VENICE] Erreur Google (${errGoogle.message}), passage sur Venice...`);
-      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, imageBase64, 0.7);
+      reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, mediaData, 0.7);
     }
   }
 
@@ -417,8 +434,12 @@ async function traiterFlux(texteBrut, imageBase64 = null, texteLegende = "") {
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
 
-  if (imageBase64) cacheMemoireCourte.push({ role: "Doc", texte: texteLegende ? `[Image]: "${texteLegende}"` : `[Image]` });
-  else cacheMemoireCourte.push({ role: "Doc", texte: texteBrut });
+  if (mediaData) {
+    const isAudio = mediaData.mime_type.startsWith('audio');
+    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? `[Note Vocale/Audio]` : (texteLegende ? `[Image]: "${texteLegende}"` : `[Image]`) });
+  } else {
+    cacheMemoireCourte.push({ role: "Doc", texte: texteBrut });
+  }
 
   cacheMemoireCourte.push({ role: "Nyx", texte: reponseNyx });
   if (cacheMemoireCourte.length > 8) cacheMemoireCourte = cacheMemoireCourte.slice(-8);
@@ -438,19 +459,33 @@ app.post('/telegram', async (req, res) => {
 
   const chatId = msg.chat.id;
   let texteFinal = msg.text || msg.caption || "";
-  let imageBase64 = null;
+  let mediaData = null;
 
   await afficherFrappeTelegram(chatId);
 
-  // Vision
+  // Vision (Images)
   if (msg.photo?.length > 0) {
     try {
-      imageBase64 = await lireImageSecurisee(msg.photo[msg.photo.length - 1].file_id);
+      const base64Str = await lireMediaSecurise(msg.photo[msg.photo.length - 1].file_id);
+      mediaData = { mime_type: "image/jpeg", data: base64Str };
       if (!texteFinal.trim()) texteFinal = "Analyse cette image et donne ton avis direct.";
     } catch (err) {
       return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
     }
   } 
+  // OUI DOC, ON ECOUTE L'AUDIO ET LES NOTES VOCALES MAINTENANT
+  else if (msg.voice || msg.audio) {
+    try {
+      await envoyerTelegram(chatId, "🎧 _Nyx écoute ton audio..._");
+      const objAudio = msg.voice || msg.audio;
+      const mimeType = objAudio.mime_type || "audio/ogg";
+      const base64Str = await lireMediaSecurise(objAudio.file_id);
+      mediaData = { mime_type: mimeType, data: base64Str };
+      if (!texteFinal.trim()) texteFinal = "Écoute cet enregistrement audio et réponds naturellement.";
+    } catch (err) {
+      return await envoyerTelegram(chatId, `[ERREUR AUDIO] : Impossible de télécharger l'audio (${err.message}).`);
+    }
+  }
   // Fichiers (PDF, DOCX, TXT/Code)
   else if (msg.document) {
     const mime = msg.document.mime_type || "";
@@ -507,9 +542,9 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  if (texteFinal.trim() || imageBase64) {
+  if (texteFinal.trim() || mediaData) {
     try {
-      let texteNyx = await traiterFlux(texteFinal, imageBase64, msg.caption || "");
+      let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
 
       const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
       if (matchDessin) {
