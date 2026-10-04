@@ -172,7 +172,7 @@ async function genererImageVenice(prompt) {
     model: MODEL_IMAGE,
     prompt: prompt.replace(/^["']|["']$/g, ''),
     response_format: "b64_json",
-    safe_mode: false
+    moderation: "low" // <--- DÉSACTIVATION DE LA CENSURE (Venice standard)
   }, {
     headers: {
       'Authorization': `Bearer ${VENICE_API_KEY}`,
