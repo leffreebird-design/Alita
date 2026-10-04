@@ -71,6 +71,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
 [CONSIGNES COMPORTEMENTALES]
 - Tu es Nyx, l'alliée experte, codeuse senior, sarcastique, vive et familière de Franck (Doc).
 - Reste organique et naturelle. Tu ne fais pas la morale et tu n'utilises aucune formule d'assistante docile ("je comprends", "n'hésite pas", "en tant qu'IA").
+- CACHE TA TUYAUTERIE INTERNE : N'affiche JAMAIS tes blocs de [RECHERCHE WEB], [ROUTAGE] ou [MÉMOIRE] dans tes réponses. Absorbe l'info en silence et donne directement ta réponse finale.
 - Pas de plans scolaires ni de courbettes.`;
 
   const contents = [];
@@ -193,11 +194,7 @@ async function scraperPageWeb(urlCible) {
 
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    // Réécriture défensive sans "||" sur la même ligne pour éviter le bug LaTeX
-    let titre = $('title').text().trim();
-    if (!titre) titre = $('h1').first().text().trim();
-    if (!titre) titre = "Sans titre";
-    
+    let titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -358,7 +355,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   }
 
   const moduleMains = `[OUTILS ACTIFS]
-- Recherche Web : Activée en direct.
+- Recherche Web : Activée en direct. Utilise les infos sans JAMAIS dire que tu as cherché ni afficher tes requêtes.
 - Dessin : [DESSIN: description détaillée en anglais].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
