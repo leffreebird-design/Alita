@@ -193,7 +193,11 @@ async function scraperPageWeb(urlCible) {
 
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
+    // Réécriture défensive sans "||" sur la même ligne pour éviter le bug LaTeX
+    let titre = $('title').text().trim();
+    if (!titre) titre = $('h1').first().text().trim();
+    if (!titre) titre = "Sans titre";
+    
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
