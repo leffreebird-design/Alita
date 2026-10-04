@@ -108,9 +108,14 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
       timeout: 60000
     });
 
-    let reponseTexte = res.data?.model_output?.steps?.[0]?.content?.parts?.[0]?.text 
-                    || res.data?.interaction?.output_text 
-                    || res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    // Extraction sans symbole "||" pour éviter les bugs LaTeX de l'interface
+    let reponseTexte = res.data?.model_output?.steps?.[0]?.content?.parts?.[0]?.text;
+    if (!reponseTexte) {
+      reponseTexte = res.data?.interaction?.output_text;
+    }
+    if (!reponseTexte) {
+      reponseTexte = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    }
                     
     if (!reponseTexte && res.data) {
       const dump = JSON.stringify(res.data);
@@ -194,9 +199,19 @@ async function scraperPageWeb(urlCible) {
 
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
+    // Réécriture totalement sans le symbole "OU" (||) pour bloquer les bugs LaTeX
+    let titre = $('title').text().trim();
+    if (titre === "") {
+      titre = $('h1').first().text().trim();
+    }
+    if (titre === "") {
+      titre = "Sans titre";
+    }
+    
     let contenu = $('article, main, .content, #content, .post').text();
-    if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
+    if (!contenu || contenu.trim().length < 150) {
+      contenu = $('body').text();
+    }
 
     return {
       succes: true,
