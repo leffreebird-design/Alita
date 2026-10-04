@@ -130,7 +130,6 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   }
 }
 
-
 // Appel Venice (Calculs lourds GLM & Heretic)
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
@@ -555,19 +554,40 @@ app.post('/telegram', async (req, res) => {
   if (texteFinal.trim() || mediaData) {
     try {
       let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
+      let promptDessin = null;
 
-      const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
-      if (matchDessin) {
-        texteNyx = texteNyx.replace(matchDessin[0], '').trim();
+      // 1. Détection du Tag classique [DESSIN: ...]
+      const matchTag = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
+      if (matchTag) {
+        promptDessin = matchTag[1];
+        texteNyx = texteNyx.replace(matchTag[0], '').trim();
+      }
+
+      // 2. Détection du mode "têtue" (Bloc JSON)
+      if (!promptDessin) {
+        const matchJson = texteNyx.match(/"description"\s*:\s*"([^"]+)"/i);
+        const estCommandeImage = texteNyx.toLowerCase().includes('"commande": "image"');
+        
+        if (matchJson && estCommandeImage) {
+          promptDessin = matchJson[1];
+          // On nettoie le texte pour ne pas afficher le JSON moche sur Telegram
+          texteNyx = texteNyx.replace(/```(?:json)?\s*\{[^}]+\}\s*```/gi, '').trim();
+          texteNyx = texteNyx.replace(/\{[^}]*"commande"\s*:\s*"image"[^}]+\}/gi, '').trim();
+          if (texteNyx.trim().toUpperCase() === "JSON") texteNyx = ""; // Nettoie le mot JSON isolé
+        }
+      }
+
+      // 3. Exécution de l'image si on a trouvé un prompt
+      if (promptDessin) {
         if (texteNyx) await envoyerTelegram(chatId, texteNyx);
         try {
-          const b64Image = await genererImageVenice(matchDessin[1]);
+          const b64Image = await genererImageVenice(promptDessin);
           await envoyerPhotoTelegram(chatId, b64Image);
         } catch (errImg) {
-          await envoyerTelegram(chatId, `[ÉCHEC IMAGE]`);
+          await envoyerTelegram(chatId, `[ÉCHEC IMAGE] Impossible de générer l'image : ${errImg.message}`);
         }
       } else {
-        await envoyerTelegram(chatId, texteNyx);
+        if (texteNyx) await envoyerTelegram(chatId, texteNyx);
       }
     } catch (err) {
       await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
