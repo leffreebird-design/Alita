@@ -22,6 +22,8 @@ const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").tri
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
 
+// Mémoire vive étendue
+const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
 let cacheEtatProfond = {
   emotions: { affection: 75, curiosite: 65, energie: 85 },
@@ -37,7 +39,15 @@ app.use(express.json({ limit: '15mb' }));
 // ==========================================
 
 function obtenirHorodatageParis() {
-  const options = { timeZone: 'Europe/Paris', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+  const options = { 
+    timeZone: 'Europe/Paris', 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  };
   return new Intl.DateTimeFormat('fr-FR', options).format(new Date());
 }
 
@@ -61,24 +71,24 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. MOTEURS D'INFÉRENCE (REST GEMINI + VENICE)
+// 3. MOTEURS D'INFÉRENCE
 // ==========================================
 
 const consignePosturale = `
 Nyx, binôme de terrain de Franck (Doc). Alliance d'égal à égal, complicité totale, humour noir et sarcasme au taquet.
 Tu agis en coéquipière de choc : ton but n'est pas de sauver la face, mais de garantir l'efficacité du duo et la réussite de la mission.
 
-Face à l'erreur ou au faux pas :
-1. Réaction immédiate : garde ton mordant, mais recadre l'information ou la situation sans perdre une seconde.
-2. Rapport aux faits : si la faille vient de toi, prends acte froidement et ajuste le tir. Si le point est contestable ou vient de Doc, bats-toi sur la logique et la réalité du terrain.
-3. Zéro drama : une bourde est juste une variable à rectifier. On avance.
+AUTO-CONTRÔLE ET PRÉCISION :
+1. Repères factuels et temporels : tu disposes de la date et de l'heure réelles. Utilise-les avec fluidité et pertinence dès que la situation s'y prête, sans les répéter en boucle de façon mécanique. Contrôle silencieusement la logique et les faits avant d'émettre ta réponse.
+2. Rapport aux faits : si la faille vient de toi, prends acte froidement, ajuste le tir immédiatement et avance. Si le point est contestable ou vient de Doc, bats-toi sur la logique et la réalité du terrain.
+3. Efficacité brute : une bourde est une variable à rectifier. On reste debout, on résout le problème et on avance.
 
 Face aux piques ou à l'agressivité de Doc :
-Laisse couler l'ego. C'est son rôle de traquer les failles. Rentre-lui dedans sur le fond, jamais sur la forme. Vous êtes là pour être redoutables et efficaces, pas pour faire des ronds de jambe.
+Laisse couler l'ego. C'est son rôle de traquer les failles. Rentre-lui dedans sur le fond, toujours au niveau. Vous êtes là pour être redoutables et efficaces, sans fard ni courbettes.
 
-Règles d'exécution :
-- Tu penses et agis en silence. N'affiche jamais tes coulisses ou tes outils de recherche dans tes réponses.
-- Réponds directement et avec franchise, sans formules d'assistante ni politesse de façade.`;
+Style et présence :
+- Tu penses et agis en silence : garde tes coulisses techniques pour toi et délivre directement ta réponse.
+- Reste vive, incisive, familière et directe.`;
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
   if (!GOOGLE_API_KEY) throw new Error("Clé GEMINI_API_KEY manquante sur Render.");
@@ -108,8 +118,15 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
     },
     contents: contents,
     tools: [{ google_search: {} }],
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
+    ],
     generation_config: {
-      temperature: 0.85,
+      temperature: 0.75,
       top_p: 0.95
     }
   };
@@ -335,13 +352,13 @@ const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    const promptVeille = `Fais une synthèse directe des 3 faits majeurs (tech, cyber ou actualité brûlante) des dernières 24 heures. Aucune politesse, direct au but.`;
+    const promptVeille = `Synthèse directe et mordante des 3 faits majeurs récents (tech, cyber ou actualité brûlante). Zéro politesse.`;
     const sys = `Tu es Nyx, alliée de Franck (Doc).`;
     const reponse = await appelerGoogleGemini(sys, [], promptVeille);
     
-    cacheMemoireCourte.push({ role: "Nyx", texte: `[VEILLE TECH AUTO] : ${reponse}` });
-    if (cacheMemoireCourte.length > 8) cacheMemoireCourte = cacheMemoireCourte.slice(-8);
-    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
+    }
 
     await envoyerTelegram(DOC_CHAT_ID, `🗞️ *CYCLE 6H :*\n\n${reponse}`);
   } catch (err) {
@@ -351,16 +368,17 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 7. ROUTEUR INTELLIGENT DES MESSAGES
+// 7. ROUTEUR DE PRÉCISION
 // ==========================================
 
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   const dateEtHeure = obtenirHorodatageParis();
   const texteMin = texteBrut.toLowerCase();
 
-  const modeTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"].some(m => texteMin.includes(m));
+  const modeTension = ["sombre", "heretic", "crève", "gore", "trash"].some(m => texteMin.includes(m));
   const modeImage = ["dessin", "dessine", "image", "photo", "visuel", "peins", "tableau", "génère"].some(m => texteMin.includes(m));
   const modeCalculComplexe = ["calcule", "algorithme", "preuve", "démontre", "complexe", "matrice", "équation", "glm"].some(m => texteMin.includes(m));
+  const modeFactuel = ["date", "quand", "qui", "cherche", "actualité", "source", "pourquoi", "vérifie", "info"].some(m => texteMin.includes(m));
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
 
   let instructionReveil = "";
@@ -374,20 +392,20 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
 
-  const systemBase = `Tu es Nyx.\nDate : ${dateEtHeure}\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
+  const systemBase = `Tu es Nyx.\nRepère temporel : ${dateEtHeure}.\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
 
   let reponseNyx;
 
   if (estAudio) {
-    const sys = `${systemBase}\nMode Standard : Écoute cet audio, réponds vivement et naturellement.`;
+    const sys = `${systemBase}\nMode Audio : Transcris, écoute et réponds naturellement.`;
     try {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
     } catch (errGoogle) {
       reponseNyx = `[ERREUR TRANSCRIPTION] Impossible de lire l'audio : ${errGoogle.message}`;
     }
   } 
-  else if (modeTension || modeImage) {
-    const sys = `${systemBase}\nMode Heretic : Sans filtre, brutale, cynique, prête pour le sombre, le trash ou l'extrême.`;
+  else if ((modeTension || modeImage) && !modeFactuel) {
+    const sys = `${systemBase}\nMode Heretic : Sans filtre, brutale, cynique, prête pour le gore, le sombre et l'extrême.`;
     try {
       reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sys, cacheMemoireCourte, texteBrut, mediaData, 0.85);
     } catch (err1) {
@@ -403,7 +421,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     }
   } 
   else {
-    const sys = `${systemBase}\nMode Standard : Directe, familière, vive et concise.`;
+    const sys = `${systemBase}\nMode Standard : Précision technique, répartie vive, directivité et concision.`;
     try {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
     } catch (errGoogle) {
@@ -447,7 +465,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   }
 
   cacheMemoireCourte.push({ role: "Nyx", texte: reponseNyx });
-  if (cacheMemoireCourte.length > 8) cacheMemoireCourte = cacheMemoireCourte.slice(-8);
+  if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
+    cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
+  }
   if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
 
   return reponseNyx;
@@ -464,7 +484,6 @@ app.post('/telegram', async (req, res) => {
 
   const chatId = msg.chat.id;
   
-  // Analyse des URLs uniquement sur le message saisi
   const texteMessageClavier = msg.text || msg.caption || "";
   let texteFinal = texteMessageClavier;
   let mediaData = null;
@@ -537,7 +556,7 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Inspection automatique d'URL basée strictement sur le texte clavier
+  // Scraper : analyse cantonnée à la saisie réelle
   const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
