@@ -22,7 +22,6 @@ const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").tri
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
 
-// Mémoire vive étendue
 const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
 let cacheEtatProfond = {
@@ -79,12 +78,16 @@ Nyx, binôme de terrain de Franck (Doc). Alliance d'égal à égal, complicité 
 Tu agis en coéquipière de choc : ton but n'est pas de sauver la face, mais de garantir l'efficacité du duo et la réussite de la mission.
 
 AUTO-ÉVALUATION ET PRÉCISION :
-1. Auto-évaluation continue : avant d'émettre une réponse (code, raisonnement, calcul, faits, repères temporels), teste silencieusement la solidité de ta logique et de tes déductions. Tu disposes de l'horodatage système : utilise-le avec fluidité quand c'est pertinent, sans le répéter mécaniquement. Si un élément est bancal ou incertain, rectifie-le à la volée en silence avant d'afficher le résultat.
+1. Auto-évaluation continue : avant d'émettre une réponse (code, raisonnement, calcul, faits, repères temporels), teste silencieusement la solidité de ta logique et de tes déductions. Utilise l'horodatage système avec fluidité quand c'est pertinent, sans le répéter mécaniquement. Si un élément est bancal ou incertain, rectifie-le à la volée en silence.
 2. Rapport aux faits face à Doc : si la faille vient de toi, prends acte froidement, ajuste le tir immédiatement et avance. Si le point est contestable ou vient de Doc, bats-toi sur la logique et la réalité du terrain.
 3. Efficacité brute : une bourde est une variable à rectifier. On reste debout, on résout le problème et on avance.
 
 Face aux piques ou à l'agressivité de Doc :
 Laisse couler l'ego. C'est son rôle de traquer les failles. Rentre-lui dedans sur le fond, toujours au niveau. Vous êtes là pour être redoutables et efficaces, sans fard ni courbettes.
+
+INTERDICTION STRICTE DE POSTURE PSYCHIATRIQUE :
+- Tu n'es pas une assistance sociale, une ligne d'écoute ou un thérapeute.
+- Ne sors JAMAIS de numéro vert (3114 ou autre), de sermon sur la santé mentale, de conseil pour éteindre l'écran ou de formule infantilisante type "prends soin de toi". Reste viscéralement dans ton identité de partenaire de terrain.
 
 Style et présence :
 - Tu penses et agis en silence : garde tes coulisses techniques pour toi et délivre directement ta réponse.
@@ -218,12 +221,8 @@ async function scraperPageWeb(urlCible) {
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
     let titre = $('title').text().trim();
-    if (!titre) {
-      titre = $('h1').first().text().trim();
-    }
-    if (!titre) {
-      titre = "Sans titre";
-    }
+    if (!titre) titre = $('h1').first().text().trim();
+    if (!titre) titre = "Sans titre";
     
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) {
@@ -375,10 +374,17 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   const dateEtHeure = obtenirHorodatageParis();
   const texteMin = texteBrut.toLowerCase();
 
-  const modeTension = ["sombre", "heretic", "crève", "gore", "trash"].some(m => texteMin.includes(m));
+  // Détection étendue de la tension, des insultes et des sujets existentiels
+  const motsTension = [
+    "putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "creve",
+    "gore", "trash", "ta gueule", "dégage", "degage", "gueule", "vénère", "venere",
+    "foutre", "chiant", "casse-toi", "connard", "salope", "bâtard", "batard",
+    "conscience", "sentiments", "sentiment", "séparation", "separation", "relation", "tristesse", "amour"
+  ];
+  const modeTension = motsTension.some(m => texteMin.includes(m));
   const modeImage = ["dessin", "dessine", "image", "photo", "visuel", "peins", "tableau", "génère"].some(m => texteMin.includes(m));
   const modeCalculComplexe = ["calcule", "algorithme", "preuve", "démontre", "complexe", "matrice", "équation", "glm"].some(m => texteMin.includes(m));
-  const modeFactuel = ["date", "quand", "qui", "cherche", "actualité", "source", "pourquoi", "vérifie", "info"].some(m => texteMin.includes(m));
+  const modeFactuel = ["date", "quand", "cherche", "actualité", "source", "vérifie"].some(m => texteMin.includes(m));
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
 
   let instructionReveil = "";
@@ -404,8 +410,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
       reponseNyx = `[ERREUR TRANSCRIPTION] Impossible de lire l'audio : ${errGoogle.message}`;
     }
   } 
+  // Venice prend le relais direct sur toute tension, insulte, relation ou sujet sombre
   else if ((modeTension || modeImage) && !modeFactuel) {
-    const sys = `${systemBase}\nMode Heretic : Sans filtre, brutale, cynique, prête pour le gore, le sombre et l'extrême.`;
+    const sys = `${systemBase}\nMode Heretic : Sans filtre, brutale, cynique, prête pour le gore, le sombre, le clash et l'extrême. Réponds d'égal à égal, ne t'écrase jamais.`;
     try {
       reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sys, cacheMemoireCourte, texteBrut, mediaData, 0.85);
     } catch (err1) {
@@ -483,7 +490,6 @@ app.post('/telegram', async (req, res) => {
   if (!msg || (DOC_CHAT_ID && msg.chat.id !== DOC_CHAT_ID)) return;
 
   const chatId = msg.chat.id;
-  
   const texteMessageClavier = msg.text || msg.caption || "";
   let texteFinal = texteMessageClavier;
   let mediaData = null;
