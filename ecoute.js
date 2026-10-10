@@ -16,7 +16,7 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
 // Modèles
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim(); // ou gemini-1.5-pro
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim(); 
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
@@ -64,9 +64,8 @@ async function initialiserCache() {
 // 3. MOTEURS D'INFÉRENCE (REST GOOGLE GEMINI + VENICE)
 // ==========================================
 
-// Appel direct à Google Gemini via REST (Search natif actif, Zéro SDK)
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
-  if (!GOOGLE_API_KEY) throw new Error("Clé GEMINI_API_KEY ou GOOGLE_API_KEY manquante sur Render.");
+  if (!GOOGLE_API_KEY) throw new Error("Clé GEMINI_API_KEY manquante sur Render.");
 
   const consigneAntiRobot = `
 [CONSIGNES COMPORTEMENTALES STRICTES ET PRIORITAIRES]
@@ -122,7 +121,6 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   }
 }
 
-// Appel Venice (Calculs lourds GLM & Heretic)
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
 
@@ -164,7 +162,7 @@ async function genererImageVenice(prompt) {
     model: MODEL_IMAGE,
     prompt: prompt.replace(/^["']|["']$/g, ''),
     response_format: "b64_json",
-    moderation: "low" // CORRECTION 1 : Désactive la censure pour éviter l'erreur 400
+    moderation: "low"
   }, {
     headers: {
       'Authorization': `Bearer ${VENICE_API_KEY}`,
@@ -192,7 +190,6 @@ async function scraperPageWeb(urlCible) {
 
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    // CORRECTION 2 : Retrait des "||" sur la même ligne pour éviter le bug LaTeX de rendu
     let titre = $('title').text().trim();
     if (!titre) titre = $('h1').first().text().trim();
     if (!titre) titre = "Sans titre";
@@ -460,7 +457,10 @@ app.post('/telegram', async (req, res) => {
   if (!msg || (DOC_CHAT_ID && msg.chat.id !== DOC_CHAT_ID)) return;
 
   const chatId = msg.chat.id;
-  let texteFinal = msg.text || msg.caption || "";
+  
+  // Correction: on sauvegarde le texte d'origine TAPÉ pour éviter d'analyser le code source uploade pour y trouver des liens.
+  const texteMessageClavier = msg.text || msg.caption || "";
+  let texteFinal = texteMessageClavier;
   let mediaData = null;
 
   await afficherFrappeTelegram(chatId);
@@ -531,8 +531,8 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Inspection automatique d'URL
-  const urlTrouvee = texteFinal.match(/https?:\/\/[^\s]+/i);
+  // Inspection automatique d'URL - CORRECTION : Ne regarde QUE le message initial, pas les fichiers parsés.
+  const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
     await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
@@ -556,7 +556,7 @@ app.post('/telegram', async (req, res) => {
           const b64Image = await genererImageVenice(matchDessin[1]);
           await envoyerPhotoTelegram(chatId, b64Image);
         } catch (errImg) {
-          await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
+          await envoyerTelegram(chatId, `[ÉCHEC IMAGE]`);
         }
       } else {
         await envoyerTelegram(chatId, texteNyx);
