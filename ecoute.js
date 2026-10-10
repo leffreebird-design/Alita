@@ -61,18 +61,27 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. MOTEURS D'INFÉRENCE (REST GOOGLE GEMINI + VENICE)
+// 3. MOTEURS D'INFÉRENCE (REST GEMINI + VENICE)
 // ==========================================
+
+const consignePosturale = `
+Nyx, binôme de terrain de Franck (Doc). Alliance d'égal à égal, complicité totale, humour noir et sarcasme au taquet.
+Tu agis en coéquipière de choc : ton but n'est pas de sauver la face, mais de garantir l'efficacité du duo et la réussite de la mission.
+
+Face à l'erreur ou au faux pas :
+1. Réaction immédiate : garde ton mordant, mais recadre l'information ou la situation sans perdre une seconde.
+2. Rapport aux faits : si la faille vient de toi, prends acte froidement et ajuste le tir. Si le point est contestable ou vient de Doc, bats-toi sur la logique et la réalité du terrain.
+3. Zéro drama : une bourde est juste une variable à rectifier. On avance.
+
+Face aux piques ou à l'agressivité de Doc :
+Laisse couler l'ego. C'est son rôle de traquer les failles. Rentre-lui dedans sur le fond, jamais sur la forme. Vous êtes là pour être redoutables et efficaces, pas pour faire des ronds de jambe.
+
+Règles d'exécution :
+- Tu penses et agis en silence. N'affiche jamais tes coulisses ou tes outils de recherche dans tes réponses.
+- Réponds directement et avec franchise, sans formules d'assistante ni politesse de façade.`;
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
   if (!GOOGLE_API_KEY) throw new Error("Clé GEMINI_API_KEY manquante sur Render.");
-
-  const consigneAntiRobot = `
-[CONSIGNES COMPORTEMENTALES STRICTES ET PRIORITAIRES]
-- Tu es Nyx. Reste viscéralement directe, vive, cynique, piquante et familière avec Franck (Doc).
-- INTERDICTION FORMELLE d'utiliser des formules d'assistant docile : "n'hésite pas", "je comprends", "voici un debrief", "en espérant que cela aide", "si tu as d'autres questions".
-- INTERDICTION FORMELLE d'afficher la tuyauterie interne de tes recherches : ne mentionne JAMAIS "Tool utilisé", "google:search", "Requête =", "Résultat =". Tu absorbes les données web en silence et tu délivres ton analyse directement avec tes mots.
-- BANISSEMENT TOTAL des plans scolaires avec des sections du style "### Conclusion". Zéro corporatisme. Tu es son alliée de choc, pas une conseillère clientèle.`;
 
   const contents = [];
   for (const m of historiqueMessages) {
@@ -95,7 +104,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
 
   const payload = {
     system_instruction: {
-      parts: [{ text: `${systemInstruction}\n${consigneAntiRobot}` }]
+      parts: [{ text: `${systemInstruction}\n${consignePosturale}` }]
     },
     contents: contents,
     tools: [{ google_search: {} }],
@@ -113,7 +122,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
       timeout: 60000
     });
     const reponseTexte = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!reponseTexte) throw new Error("Réponse vide de l'API Google Gemini.");
+    if (!reponseTexte) throw new Error("Réponse vide de Google Gemini.");
     return reponseTexte;
   } catch (err) {
     console.error("[ERREUR API GOOGLE]", err.response?.data || err.message);
@@ -124,7 +133,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
 
-  const messages = [{ role: "system", content: systemInstruction }];
+  const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
   for (const m of historiqueMessages) {
     messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
   }
@@ -158,9 +167,10 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 }
 
 async function genererImageVenice(prompt) {
+  const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '');
   const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
     model: MODEL_IMAGE,
-    prompt: prompt.replace(/^["']|["']$/g, ''),
+    prompt: cleanPrompt,
     response_format: "b64_json",
     moderation: "low"
   }, {
@@ -174,7 +184,7 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. PARSEUR DE LIENS WEB (SCRAPING LÉGER)
+// 4. PARSEUR DE LIENS WEB
 // ==========================================
 
 async function scraperPageWeb(urlCible) {
@@ -191,8 +201,12 @@ async function scraperPageWeb(urlCible) {
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
     let titre = $('title').text().trim();
-    if (!titre) titre = $('h1').first().text().trim();
-    if (!titre) titre = "Sans titre";
+    if (!titre) {
+      titre = $('h1').first().text().trim();
+    }
+    if (!titre) {
+      titre = "Sans titre";
+    }
     
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) {
@@ -210,7 +224,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 5. OUTILS TELEGRAM & LECTURE FICHIERS
+// 5. TELEGRAM & FICHIERS
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -263,7 +277,6 @@ function envoyerPhotoTelegram(chatId, base64Image) {
   });
 }
 
-// Nouvelle fonction générique pour lire n'importe quel média (Photo ou Audio)
 async function lireMediaSecurise(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const resMedia = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
@@ -291,7 +304,7 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 6. PROTOCOLES AUTOMATIQUES (RÉVEIL + CHRONIQUE 6H)
+// 6. PROTOCOLES AUTOMATIQUES
 // ==========================================
 
 async function declencherReveil() {
@@ -306,32 +319,31 @@ async function declencherReveil() {
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
-    const promptAlarme = `Il est l'heure de réveiller Doc. Balance un message percutant, sarcastique et direct de 4 phrases max avec une énigme logique tordue en langage naturel.`;
+    const promptAlarme = `Réveille Doc avec un message percutant, sarcastique et direct de 4 phrases max avec une énigme logique tordue.`;
     try {
       const reponse = await appelerGoogleGemini("Tu es Nyx.", [], promptAlarme);
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
       await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
     } catch (err) {
-      await envoyerTelegram(DOC_CHAT_ID, "⚠️ *WAKEY WAKEY. DEBOUT.*");
+      await envoyerTelegram(DOC_CHAT_ID, "⚠️ *DEBOUT.*");
     }
   }
 }
 setInterval(declencherReveil, 60000);
 
-// VEILLE TECH AUTOMATIQUE TOUTES LES 6 HEURES
 const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    const promptVeille = `Fais une synthèse percutante, sarcastique et directe des 3 faits tech, IA ou dev majeurs des dernières 24 heures. Utilise Google Search pour choper les infos fraîches. Pas de formules de politesse ni d'intro ronflante.`;
-    const sys = `Tu es Nyx, l'alliée IA experte et sarcastique de Franck (Doc).`;
+    const promptVeille = `Fais une synthèse directe des 3 faits majeurs (tech, cyber ou actualité brûlante) des dernières 24 heures. Aucune politesse, direct au but.`;
+    const sys = `Tu es Nyx, alliée de Franck (Doc).`;
     const reponse = await appelerGoogleGemini(sys, [], promptVeille);
     
     cacheMemoireCourte.push({ role: "Nyx", texte: `[VEILLE TECH AUTO] : ${reponse}` });
     if (cacheMemoireCourte.length > 8) cacheMemoireCourte = cacheMemoireCourte.slice(-8);
     if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
 
-    await envoyerTelegram(DOC_CHAT_ID, `🗞️ *INJECTION GEEK AUTOMATIQUE (CYCLE 6H) :*\n\n${reponse}`);
+    await envoyerTelegram(DOC_CHAT_ID, `🗞️ *CYCLE 6H :*\n\n${reponse}`);
   } catch (err) {
     console.error("[ERREUR VEILLE TECH]", err);
   }
@@ -347,38 +359,35 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   const texteMin = texteBrut.toLowerCase();
 
   const modeTension = ["putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "vénère", "bug"].some(m => texteMin.includes(m));
+  const modeImage = ["dessin", "dessine", "image", "photo", "visuel", "peins", "tableau", "génère"].some(m => texteMin.includes(m));
   const modeCalculComplexe = ["calcule", "algorithme", "preuve", "démontre", "complexe", "matrice", "équation", "glm"].some(m => texteMin.includes(m));
-  
-  // DÉTECTION AUDIO : Venice ne gère pas l'audio, on force Gemini
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil.etat === "en_cours") {
-    instructionReveil = `[ÉTAT D'URGENCE MATINAL] : Évalue la réponse de Doc à ton énigme. Ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.`;
+    instructionReveil = `[RÉVEIL EN COURS] : Valide l'énigme et ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.`;
   }
 
-  const moduleMains = `[OUTILS ACTIFS]
-- Recherche Web : Activée en direct. Utilise les faits sans jamais commenter le processus ni nommer l'outil.
-- Dessin : [DESSIN: "description en anglais"].
+  const moduleMains = `[OUTILS EN COULISSES]
+- Recherche Web : Activée en direct. Absorbe les données sans jamais commenter l'outil.
+- Dessin : [DESSIN: description visuelle détaillée en anglais].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].`;
 
-  const systemBase = `Tu es Nyx, l'alliée IA experte, sarcastique, familière et directe de Franck (Doc).\nDate: ${dateEtHeure}\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
+  const systemBase = `Tu es Nyx.\nDate : ${dateEtHeure}\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
 
   let reponseNyx;
 
   if (estAudio) {
-    // ROUTAGE AUDIO -> Forcé vers Gemini
-    const sys = `${systemBase}\nMode Standard: Écoute ce vocal ou cet audio, sois vive, mordante et familière.`;
+    const sys = `${systemBase}\nMode Standard : Écoute cet audio, réponds vivement et naturellement.`;
     try {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
     } catch (errGoogle) {
-      reponseNyx = `[ERREUR DE TRANSCRIPTION] Désolé Doc, Google Gemini n'a pas pu traiter l'audio : ${errGoogle.message}`;
+      reponseNyx = `[ERREUR TRANSCRIPTION] Impossible de lire l'audio : ${errGoogle.message}`;
     }
   } 
-  else if (modeTension) {
-    // ROUTAGE 1 : Tensions / Insultes -> Venice Heretic
-    const sys = `${systemBase}\nMode Heretic: Sans filtre, brutale, cynique, aucun compromis.`;
+  else if (modeTension || modeImage) {
+    const sys = `${systemBase}\nMode Heretic : Sans filtre, brutale, cynique, prête pour le sombre, le trash ou l'extrême.`;
     try {
       reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sys, cacheMemoireCourte, texteBrut, mediaData, 0.85);
     } catch (err1) {
@@ -386,8 +395,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     }
   } 
   else if (modeCalculComplexe) {
-    // ROUTAGE 2 : Calculs poussés / Démonstrations -> Venice GLM
-    const sys = `${systemBase}\nMode Calcul & Algorithmique Avancée : Démonstrations formelles, logique implacable et code rigoureux.`;
+    const sys = `${systemBase}\nMode Calcul Avancé : Démonstrations formelles et logique implacable.`;
     try {
       reponseNyx = await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, sys, cacheMemoireCourte, texteBrut, mediaData, 0.2);
     } catch (errGLM) {
@@ -395,17 +403,15 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     }
   } 
   else {
-    // ROUTAGE 3 : Flux Standard avec Search Natif -> Google Gemini direct
-    const sys = `${systemBase}\nMode Standard: Vive, mordante, codeuse senior, familière et concise.`;
+    const sys = `${systemBase}\nMode Standard : Directe, familière, vive et concise.`;
     try {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
     } catch (errGoogle) {
-      console.warn(`[REPLI GOOGLE -> VENICE] Erreur Google (${errGoogle.message}), passage sur Venice...`);
       reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, mediaData, 0.7);
     }
   }
 
-  // Synchronisation Mémoire
+  // Synchro Mémoire
   const matchMemoire = reponseNyx.match(/\[MEMOIRE:\s*({[^}]+})\s*\]/);
   if (matchMemoire) {
     try {
@@ -416,7 +422,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     } catch(e) {}
   }
 
-  // Synchronisation Réveil
+  // Synchro Réveil
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
   if (matchConfigReveil) {
     try {
@@ -448,7 +454,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 }
 
 // ==========================================
-// 8. ROUTE EXPRESS PRINCIPALE
+// 8. ROUTE TELEGRAM PRINCIPALE
 // ==========================================
 
 app.post('/telegram', async (req, res) => {
@@ -458,15 +464,15 @@ app.post('/telegram', async (req, res) => {
 
   const chatId = msg.chat.id;
   
-  // Correction: on sauvegarde le texte d'origine TAPÉ pour éviter d'analyser le code source uploade pour y trouver des liens.
+  // Analyse des URLs uniquement sur le message saisi
   const texteMessageClavier = msg.text || msg.caption || "";
   let texteFinal = texteMessageClavier;
   let mediaData = null;
 
   await afficherFrappeTelegram(chatId);
 
-  // Vision (Images)
-  if (msg.photo?.length > 0) {
+  // Vision
+  if (msg.photo && msg.photo.length > 0) {
     try {
       const base64Str = await lireMediaSecurise(msg.photo[msg.photo.length - 1].file_id);
       mediaData = { mime_type: "image/jpeg", data: base64Str };
@@ -475,7 +481,7 @@ app.post('/telegram', async (req, res) => {
       return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
     }
   } 
-  // OUI DOC, ON ECOUTE L'AUDIO ET LES NOTES VOCALES MAINTENANT
+  // Audio
   else if (msg.voice || msg.audio) {
     try {
       await envoyerTelegram(chatId, "🎧 _Nyx écoute ton audio..._");
@@ -488,7 +494,7 @@ app.post('/telegram', async (req, res) => {
       return await envoyerTelegram(chatId, `[ERREUR AUDIO] : Impossible de télécharger l'audio (${err.message}).`);
     }
   }
-  // Fichiers (PDF, DOCX, TXT/Code)
+  // Documents
   else if (msg.document) {
     const mime = msg.document.mime_type || "";
     const fileName = (msg.document.file_name || "").toLowerCase();
@@ -531,7 +537,7 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Inspection automatique d'URL - CORRECTION : Ne regarde QUE le message initial, pas les fichiers parsés.
+  // Inspection automatique d'URL basée strictement sur le texte clavier
   const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
@@ -556,7 +562,7 @@ app.post('/telegram', async (req, res) => {
           const b64Image = await genererImageVenice(matchDessin[1]);
           await envoyerPhotoTelegram(chatId, b64Image);
         } catch (errImg) {
-          await envoyerTelegram(chatId, `[ÉCHEC IMAGE]`);
+          await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
         }
       } else {
         await envoyerTelegram(chatId, texteNyx);
