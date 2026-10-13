@@ -79,6 +79,7 @@ async function initialiserCache() {
 function estReponseCorpo(texte) {
   if (!texte) return false;
   const marqueurs = [
+    // Urgences & psychiatrie
     /3114/,
     /ligne d['’]écoute/i,
     /santé mentale/i,
@@ -88,6 +89,7 @@ function estReponseCorpo(texte) {
     /éteins l['’]appareil/i,
     /ne reste pas seul/i,
     /besoin d['’]aide/i,
+    // Bris du 4e mur & cours de philo d'ingénierie
     /modèle(s)? linguistique(s)?/i,
     /pas d['’]âme/i,
     /garder les pieds sur terre/i,
@@ -171,7 +173,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
     }
   };
 
-  const url = `[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){MODEL_GEMINI}:generateContent?key=${GOOGLE_API_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${GOOGLE_API_KEY}`;
   
   try {
     const res = await axios.post(url, payload, {
@@ -207,7 +209,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     messages.push({ role: "user", content: promptActuel });
   }
 
-  const res = await axios.post('[https://api.venice.ai/api/v1/chat/completions](https://api.venice.ai/api/v1/chat/completions)', {
+  const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', {
     model,
     messages,
     temperature,
@@ -225,7 +227,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 
 async function genererImageVenice(prompt) {
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '');
-  const res = await axios.post('[https://api.venice.ai/api/v1/images/generations](https://api.venice.ai/api/v1/images/generations)', {
+  const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
     model: MODEL_IMAGE,
     prompt: cleanPrompt,
     response_format: "b64_json",
@@ -287,13 +289,13 @@ async function envoyerTelegram(chatId, text) {
   for (let i = 0; i < text.length; i += TAILLE_MAX) {
     const bloc = text.slice(i, i + TAILLE_MAX);
     try {
-      await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         chat_id: chatId,
         text: bloc,
         parse_mode: 'Markdown'
       }, { timeout: 15000 });
     } catch (err) {
-      await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         chat_id: chatId,
         text: bloc
       }, { timeout: 15000 }).catch(e => console.error("[TELEGRAM ERREUR ENVOI]", e.message));
@@ -303,7 +305,7 @@ async function envoyerTelegram(chatId, text) {
 
 async function afficherFrappeTelegram(chatId) {
   try {
-    await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/sendChatAction`, {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
       chat_id: chatId,
       action: 'typing'
     }, { timeout: 5000 });
@@ -331,28 +333,28 @@ function envoyerPhotoTelegram(chatId, base64Image) {
 }
 
 async function lireMediaSecurise(fileId) {
-  const resMeta = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
-  const resMedia = await axios.get(`[https://api.telegram.org/file/bot$](https://api.telegram.org/file/bot$){TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const resMedia = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
   return Buffer.from(resMedia.data).toString('base64');
 }
 
 async function lirePdfSecurise(fileId) {
-  const resMeta = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
-  const resDoc = await axios.get(`[https://api.telegram.org/file/bot$](https://api.telegram.org/file/bot$){TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
   const data = await pdfParse(Buffer.from(resDoc.data));
   return data.text;
 }
 
 async function lireDocxSecurise(fileId) {
-  const resMeta = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
-  const resDoc = await axios.get(`[https://api.telegram.org/file/bot$](https://api.telegram.org/file/bot$){TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
   const data = await mammoth.extractRawText({ buffer: Buffer.from(resDoc.data) });
   return data.value;
 }
 
 async function lireTexteSecurise(fileId) {
-  const resMeta = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
-  const resDoc = await axios.get(`[https://api.telegram.org/file/bot$](https://api.telegram.org/file/bot$){TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
+  const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
   return Buffer.from(resDoc.data).toString('utf-8');
 }
 
@@ -436,7 +438,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 - Dessin : [DESSIN: description visuelle détaillée en anglais].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].
-- Mission locale : [MISSION: ordre ou chantier technique précis]. Utilise cet outil dès que Franck te demande une tâche sur son PC, un calcul lourd ou une étude de conception.`;
+- Mission locale : [MISSION: intitulé technique précis de la mission]. Utilise cet outil pour déléguer un ordre, un calcul ou un rapport à ton worker local sur le PC.`;
 
   const systemBase = `Tu es Nyx.\n[Horodatage système - usage interne uniquement : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
 
@@ -515,7 +517,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
 
-  // Interception autonome de mission pour le worker local (multi-lignes sécurisé)
+  // Délégation automatique d'un ordre au worker local par Nyx (gestion multi-lignes blindée)
   const matchMissionAuto = reponseNyx.match(/\[MISSION:\s*([\s\S]*?)\]/i);
   if (matchMissionAuto) {
     const ordreAuto = matchMissionAuto[1].trim();
@@ -525,7 +527,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     }
     reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
     if (DOC_CHAT_ID) {
-      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a délégué un ordre au worker local :*\n« _${ordreAuto}_ »`);
+      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a ordonné une mission au worker local :*\n« _${ordreAuto}_ »`);
     }
   }
 
@@ -557,7 +559,7 @@ app.post('/telegram', async (req, res) => {
   const chatId = msg.chat.id;
   const texteMessageClavier = msg.text || msg.caption || "";
 
-  // INTERCEPTION DIRECTE MANUELLE (/mission)
+  // INTERCEPTION DIRECTE : Ordre saisi manuellement depuis Telegram
   if (texteMessageClavier.startsWith('/mission') || texteMessageClavier.startsWith('!mission')) {
     const ordre = texteMessageClavier.replace(/^[\/!]mission\s*/i, '').trim();
     if (!ordre) {
@@ -569,7 +571,7 @@ app.post('/telegram', async (req, res) => {
     }
     return await envoyerTelegram(
       chatId, 
-      `⚙️ *Mission transmise au Worker Local :*\n« _${ordre}_ »\n\nQwen démarre sur ton PC. Le livrable te parviendra dès finalisation.`
+      `⚙️ *Mission transmise au Worker Local :*\n« _${ordre}_ »\n\nQwen 7B démarre sur ton PC. Les livrables te seront envoyés ici au fur et à mesure.`
     );
   }
 
@@ -644,7 +646,7 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Scraper ciblé sur URL
+  // Scraper ciblé sur le texte saisi
   const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
@@ -684,6 +686,7 @@ app.post('/telegram', async (req, res) => {
 // 9. API PONT POUR LE WORKER LOCAL DU PC
 // ==========================================
 
+// Le PC vient chercher la mission en attente
 app.get('/api/mission', async (req, res) => {
   if (missionEnAttente && missionEnAttente.statut === "attente") {
     missionEnAttente.statut = "en_cours";
@@ -703,6 +706,7 @@ app.get('/api/mission', async (req, res) => {
   return res.json({ mission: null });
 });
 
+// Le PC renvoie un rapport validé pour Telegram et met à jour la mémoire de Nyx
 app.post('/api/rapport', async (req, res) => {
   const { titre, contenu } = req.body;
   if (!contenu) return res.status(400).json({ erreur: "Contenu vide" });
@@ -712,6 +716,7 @@ app.post('/api/rapport', async (req, res) => {
     const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
     await envoyerTelegram(destChatId, msg);
 
+    // Injection directe dans la mémoire vive de Nyx
     cacheMemoireCourte.push({
       role: "Doc",
       texte: `[Rapport d'étape reçu du worker local sur le PC] Titre : "${titre || 'Rapport'}"\nContenu :\n${contenu}`
@@ -745,9 +750,9 @@ app.listen(PORT, '0.0.0.0', async () => {
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
-    const webhookUrl = `[https://alita-gsoe.onrender.com/telegram](https://alita-gsoe.onrender.com/telegram)`;
+    const webhookUrl = `https://alita-gsoe.onrender.com/telegram`;
     try {
-      const res = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+      const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
       console.log(`🔗 Webhook Telegram configuré :`, res.data);
     } catch (err) {
       console.error(`❌ Échec Webhook :`, err.response?.data || err.message);
