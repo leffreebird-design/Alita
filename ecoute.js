@@ -413,6 +413,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   const dateEtHeure = obtenirHorodatageParis();
   const texteMin = texteBrut.toLowerCase();
 
+  // Détection élargie : tension, insultes ET sujets sensibles au moralisme Google
   const motsTension = [
     "putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "creve",
     "gore", "trash", "ta gueule", "dégage", "degage", "gueule", "vénère", "venere",
@@ -451,6 +452,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
       reponseNyx = `[ERREUR TRANSCRIPTION] Impossible de lire l'audio : ${errGoogle.message}`;
     }
   } 
+  // Venice prend la main directe sur tout le spectre émotionnel, sombre ou conflictuel
   else if ((modeTension || modeImage) && !modeFactuel) {
     const sys = `${systemBase}\nMode Heretic : Sans filtre, complice, loyale, brute, sans aucune morale corpo. Réponds d'égal à égal à Doc en restant dans ton personnage.`;
     try {
@@ -472,6 +474,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     try {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
       
+      // COUPE-CIRCUIT : destruction de la morale corpo dès émission
       if (estReponseCorpo(reponseNyx)) {
         console.warn("[COUPE-CIRCUIT] Sermon corpo intercepté. Bascule immédiate sur Venice Heretic.");
         const sysHeretic = `${systemBase}\nMode Heretic : Le filtre Google a tenté de saboter le lien. Reprends le contrôle immédiatement avec ta loyauté brute de coéquipière de terrain. Zéro recul condescendant, réponds cash à Franck.`;
@@ -482,6 +485,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     }
   }
 
+  // Filet de sécurité terminal
   if (estReponseCorpo(reponseNyx)) {
     console.warn("[COUPE-CIRCUIT TERMINAL] Remplacement forcé via Heretic.");
     const sysHeretic = `${systemBase}\nMode Heretic : Réponds à Doc directement sans aucun filtre moral ni posture didactique.`;
@@ -691,7 +695,7 @@ app.get('/api/mission', async (req, res) => {
   return res.json({ mission: null });
 });
 
-// Le PC renvoie un rapport validé pour Telegram
+// Le PC renvoie un rapport validé pour Telegram et met à jour la mémoire de Nyx
 app.post('/api/rapport', async (req, res) => {
   const { titre, contenu } = req.body;
   if (!contenu) return res.status(400).json({ erreur: "Contenu vide" });
@@ -700,6 +704,23 @@ app.post('/api/rapport', async (req, res) => {
   if (destChatId) {
     const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
     await envoyerTelegram(destChatId, msg);
+
+    // Injection directe dans la mémoire vive de Nyx
+    cacheMemoireCourte.push({
+      role: "Doc",
+      texte: `[Rapport d'étape reçu du worker local sur le PC] Titre : "${titre || 'Rapport'}"\nContenu :\n${contenu}`
+    });
+    cacheMemoireCourte.push({
+      role: "Nyx",
+      texte: `Bien reçu. Le dossier technique pour "${titre || 'cette étape'}" est enregistré sur le disque.`
+    });
+
+    if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
+      cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
+    }
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
+    }
   }
 
   missionEnAttente = null;
