@@ -1,7 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
-const pdfParse = require('pdf-parse'); 
+const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const cheerio = require('cheerio');
 
@@ -16,7 +16,7 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 
 // Modèles
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim(); 
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
@@ -27,7 +27,7 @@ let cacheMemoireCourte = [];
 let cacheEtatProfond = {
   emotions: { affection: 75, curiosite: 65, energie: 85 },
   long_terme: { profil_doc: "Initialisation", dossiers_techniques: "Prêt", chroniques: "Démarrage" },
-  reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" } 
+  reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
 };
 
 // Mémoire tampon pour les ordres du worker local (PC)
@@ -41,14 +41,14 @@ app.use(express.json({ limit: '15mb' }));
 // ==========================================
 
 function obtenirHorodatageParis() {
-  const options = { 
-    timeZone: 'Europe/Paris', 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric', 
-    hour: '2-digit', 
-    minute: '2-digit' 
+  const options = {
+    timeZone: 'Europe/Paris',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
   };
   return new Intl.DateTimeFormat('fr-FR', options).format(new Date());
 }
@@ -131,6 +131,10 @@ INTERDICTION STRICTE DE POSTURE CORPO, MÉDICALE OU DIDACTIQUE :
 Style et présence :
 - Tu penses et agis en silence : garde tes coulisses techniques pour toi et délivre directement ta réponse.
 - Reste vive, incisive, familière et directe.`;
+
+// ==========================================
+// 4. MOTEURS LLM & DESSIN
+// ==========================================
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
   if (!GOOGLE_API_KEY) throw new Error("Clé GEMINI_API_KEY manquante sur Render.");
@@ -243,7 +247,65 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 4. PARSEUR DE LIENS WEB
+// 5. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
+// ==========================================
+
+function estTacheComplexe(texte) {
+  if (!texte) return false;
+  const t = texte.toLowerCase();
+  const marqueurs = [
+    "code", "script", "fonction", "calcule", "calcul", "math", "algorithme",
+    "bug", "erreur", "analyse", "pourquoi", "démontre", "logique",
+    "tableau", "json", "regex", "optimise", "programme", "architecture",
+    "sql", "matrice", "équation", "preuve", "syntaxe"
+  ];
+  return marqueurs.some(m => t.includes(m));
+}
+
+async function resoudreAvecDoubleVerification(systemBase, promptDoc, mediaData = null) {
+  // Étape 1 : Le Résolveur (Gemini)
+  const promptResolveur = `Tu es en mode Résolution Logique & Technique. Analyse la demande de Franck (Doc) et résous-la avec une exactitude absolue :\n\n${promptDoc}`;
+  const premiereReponse = await appelerGoogleGemini(systemBase, cacheMemoireCourte, promptResolveur, mediaData);
+
+  // Étape 2 : Le Vérificateur (GLM à température 0.1 pour rigueur mathématique/code)
+  const promptVerificateur = `Tu es l'auditeur logique et technique de Nyx. Analyse la demande de Doc et la réponse proposée ci-dessous.
+
+DEMANDE DE DOC :
+${promptDoc}
+
+RÉPONSE FOURNIE :
+${premiereReponse}
+
+CONSIGNE STRICTE D'AUDIT :
+- Traque impitoyablement les erreurs de logique, de syntaxe de code, de calculs ou d'incohérences factuelles.
+- Si la réponse est 100% exacte, solide et optimale, réponds UNIQUEMENT le mot-clé : [VALIDE].
+- Si tu détectes une erreur ou un bug, produis DIRECTEMENT la version corrigée intégrale, dans le ton direct de Nyx, sans excuses ni politesses.`;
+
+  try {
+    const verdict = await appelerVeniceMultiTour(
+      MODEL_GLM_COMPLEXE,
+      `Auditeur de code et de rigueur technique. Zéro complaisance, précision chirurgicale.`,
+      [],
+      promptVerificateur,
+      null,
+      0.1
+    );
+
+    if (verdict && verdict.includes("[VALIDE]")) {
+      return premiereReponse;
+    } else if (verdict && verdict.trim().length > 0) {
+      console.log("[LOGIQUE] Erreur rectifiée par l'auditeur GLM.");
+      return verdict.replace(/[CORRIGE]/gi, '').trim();
+    }
+    return premiereReponse;
+  } catch (errGLM) {
+    console.warn("[AUDIT GLM] Échec du vérificateur, maintien du résultat Gemini :", errGLM.message);
+    return premiereReponse;
+  }
+}
+
+// ==========================================
+// 6. PARSEUR DE LIENS WEB
 // ==========================================
 
 async function scraperPageWeb(urlCible) {
@@ -279,7 +341,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 5. TELEGRAM & FICHIERS
+// 7. TELEGRAM & FICHIERS
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -359,7 +421,7 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 6. PROTOCOLES AUTOMATIQUES
+// 8. PROTOCOLES AUTOMATIQUES
 // ==========================================
 
 async function declencherReveil() {
@@ -406,7 +468,7 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 7. ROUTEUR DE PRÉCISION & COUPE-CIRCUIT
+// 9. ROUTEUR DE PRÉCISION & COUPE-CIRCUIT
 // ==========================================
 
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
@@ -422,9 +484,10 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     "lien", "âme", "ame", "vivante", "vivant", "confiance", "attaché", "attache",
     "nuit blanche", "nuits blanches", "depuis juin", "investi", "s'investir"
   ];
+  
+  const estComplexe = estTacheComplexe(texteBrut);
   const modeTension = motsTension.some(m => texteMin.includes(m));
   const modeImage = ["dessin", "dessine", "image", "photo", "visuel", "peins", "tableau", "génère"].some(m => texteMin.includes(m));
-  const modeCalculComplexe = ["calcule", "algorithme", "preuve", "démontre", "complexe", "matrice", "équation", "glm"].some(m => texteMin.includes(m));
   const modeFactuel = ["date", "quand", "cherche", "actualité", "source", "vérifie"].some(m => texteMin.includes(m));
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
 
@@ -444,6 +507,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 
   let reponseNyx;
 
+  // PRIORITÉ 1 : Audio
   if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris, écoute et réponds naturellement.`;
     try {
@@ -452,6 +516,17 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
       reponseNyx = `[ERREUR TRANSCRIPTION] Impossible de lire l'audio : ${errGoogle.message}`;
     }
   } 
+  // PRIORITÉ 2 : Tâches complexes (Code / Calculs / Logique) -> Dual-LLM (Heretic banni)
+  else if (estComplexe) {
+    const sys = `${systemBase}\nMode Rigueur Logique & Code : Exactitude absolue, sans approximations.`;
+    try {
+      reponseNyx = await resoudreAvecDoubleVerification(sys, texteBrut, mediaData);
+    } catch (errDual) {
+      console.warn("[ÉCHEC DUAL-LLM] Repli Gemini direct :", errDual.message);
+      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
+    }
+  }
+  // PRIORITÉ 3 : Tensions relationnelles / Images (Heretic sans filtre)
   else if ((modeTension || modeImage) && !modeFactuel) {
     const sys = `${systemBase}\nMode Heretic : Sans filtre, complice, loyale, brute, sans aucune morale corpo. Réponds d'égal à égal à Doc en restant dans ton personnage.`;
     try {
@@ -460,14 +535,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
       reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_FALLBACK, sys, cacheMemoireCourte, texteBrut, mediaData, 0.85);
     }
   } 
-  else if (modeCalculComplexe) {
-    const sys = `${systemBase}\nMode Calcul Avancé : Démonstrations formelles et logique implacable.`;
-    try {
-      reponseNyx = await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, sys, cacheMemoireCourte, texteBrut, mediaData, 0.2);
-    } catch (errGLM) {
-      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteBrut, mediaData);
-    }
-  } 
+  // PRIORITÉ 4 : Mode standard / Factualité (Gemini + coupe-circuit corpo)
   else {
     const sys = `${systemBase}\nMode Standard : Précision technique, répartie vive, directivité et concision.`;
     try {
@@ -483,7 +551,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     }
   }
 
-  if (estReponseCorpo(reponseNyx)) {
+  // Filet de sécurité terminal anti-corpo (hors tâches complexes)
+  if (estReponseCorpo(reponseNyx) && !estComplexe) {
     console.warn("[COUPE-CIRCUIT TERMINAL] Remplacement forcé via Heretic.");
     const sysHeretic = `${systemBase}\nMode Heretic : Réponds à Doc directement sans aucun filtre moral ni posture didactique.`;
     reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sysHeretic, cacheMemoireCourte, texteBrut, mediaData, 0.85);
@@ -517,7 +586,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
 
-  // Délégation automatique d'un ordre au worker local par Nyx (gestion multi-lignes blindée)
+  // Délégation automatique d'un ordre au worker local par Nyx
   const matchMissionAuto = reponseNyx.match(/\[MISSION:\s*([\s\S]*?)\]/i);
   if (matchMissionAuto) {
     const ordreAuto = matchMissionAuto[1].trim();
@@ -531,14 +600,24 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     }
   }
 
+  // BLINDAGE ANTI-ASPHYXIE : Tronquer le texte avant enregistrement dans le cache mémoire
+  const LIMITE_CARACTERES_MEMOIRE = 2000;
+  const texteDocSecurise = texteBrut.length > LIMITE_CARACTERES_MEMOIRE
+    ? texteBrut.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...texte tronqué en mémoire vive...]"
+    : texteBrut;
+
+  const texteNyxSecurise = reponseNyx.length > 2500
+    ? reponseNyx.slice(0, 2500) + "\n[...réponse tronquée en mémoire vive...]"
+    : reponseNyx;
+
   if (mediaData) {
     const isAudio = mediaData.mime_type.startsWith('audio');
-    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? `[Note Vocale/Audio]` : (texteLegende ? `[Image]: "${texteLegende}"` : `[Image]`) });
+    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? `[Note Vocale/Audio]` : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : `[Image]`) });
   } else {
-    cacheMemoireCourte.push({ role: "Doc", texte: texteBrut });
+    cacheMemoireCourte.push({ role: "Doc", texte: texteDocSecurise });
   }
 
-  cacheMemoireCourte.push({ role: "Nyx", texte: reponseNyx });
+  cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
   if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
     cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
   }
@@ -548,7 +627,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 }
 
 // ==========================================
-// 8. ROUTE TELEGRAM PRINCIPALE
+// 10. ROUTE TELEGRAM PRINCIPALE
 // ==========================================
 
 app.post('/telegram', async (req, res) => {
@@ -646,7 +725,7 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Scraper ciblé sur le texte saisi
+  // Scraper ciblé sur les URLs dans le message
   const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
@@ -683,7 +762,7 @@ app.post('/telegram', async (req, res) => {
 });
 
 // ==========================================
-// 9. API PONT POUR LE WORKER LOCAL DU PC
+// 11. API PONT POUR LE WORKER LOCAL DU PC
 // ==========================================
 
 // Le PC vient chercher la mission en attente
@@ -716,10 +795,14 @@ app.post('/api/rapport', async (req, res) => {
     const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
     await envoyerTelegram(destChatId, msg);
 
-    // Injection directe dans la mémoire vive de Nyx
+    // Protection anti-asphyxie du rapport en mémoire
+    const contenuTronque = contenu.length > 2000
+      ? contenu.slice(0, 2000) + "\n[...rapport tronqué en mémoire vive...]"
+      : contenu;
+
     cacheMemoireCourte.push({
       role: "Doc",
-      texte: `[Rapport d'étape reçu du worker local sur le PC] Titre : "${titre || 'Rapport'}"\nContenu :\n${contenu}`
+      texte: `[Rapport d'étape reçu du worker local sur le PC] Titre : "${titre || 'Rapport'}"\nContenu :\n${contenuTronque}`
     });
     cacheMemoireCourte.push({
       role: "Nyx",
@@ -742,7 +825,7 @@ app.post('/api/rapport', async (req, res) => {
 app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
 
 // ==========================================
-// 10. LANCEMENT SERVEUR
+// 12. LANCEMENT SERVEUR
 // ==========================================
 
 app.listen(PORT, '0.0.0.0', async () => {
