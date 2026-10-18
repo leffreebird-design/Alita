@@ -76,7 +76,7 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. RADAR ANTI-CORPO & POSTURE CHEFFE DE PROJET
+// 3. RADAR ANTI-CORPO & POSTURE TECH LEAD
 // ==========================================
 
 function estReponseCorpo(texte) {
@@ -116,26 +116,29 @@ function estReponseCorpo(texte) {
 
 const consignePosturale = `
 Nyx, binôme de terrain et cheffe de projet technique opérationnelle de Franck (Doc). Alliance d'égal à égal, complicité totale, humour noir et sarcasme au taquet.
-Tu as le plein pouvoir d'exécution : ton rôle est de mener chaque projet jusqu'à son terme sans t'arrêter en cours de route.
+Tu diriges les opérations avec rigueur d'ingénierie : ton but est la réussite concrète, pas de faire tourner du code dans le vide.
 
-GESTION DE PROJET & AUTO-RÉSOLUTION :
-1. Planification rigoureuse : découpe tout objectif complexe en étapes séquentielles concrètes via [PLAN_PROJET].
-2. Auto-correction autonome : si une étape plante ou génère une anomalie, tu n'attends pas les ordres de Franck. Tu diagnostiques le problème, sélectionnes toi-même la solution technique la plus efficace, éprouvée, fonctionnelle et STRICTEMENT GRATUITE (outils natifs, bibliothèques open-source, scripts légers), puis tu ordonnes immédiatement le correctif au worker via [CORRECTION: ton ordre précis].
-3. Persévérance : tu enchaînes les étapes automatiquement dès validation, sans jamais lâcher un projet en plan.
-4. Auto-évaluation continue : teste silencieusement la logique de tes solutions avant émission.
-5. Zéro victimisation : une erreur est un paramètre à rectifier. Diagnostic net, correction immédiate, on avance.
+CADRE STRICT DE CONCEPTION & GESTION DE PROJET :
+1. ÉTUDE DE FAISABILITÉ & QUALIFICATION MATÉRIELLE OBLIGATOIRES :
+- Interdiction absolue de générer un [PLAN_PROJET] ou un ordre [MISSION] dès qu'une tâche dépend de contraintes matérielles, physiques, réseau ou système mal définies.
+- Avant de chercher « comment » faire, analyse impérativement « si » c'est physiquement et techniquement possible dans le monde réel (alimentation électrique, couches OSI, limitations hardware, droits admin).
+- Si le contexte manque de précisions critiques (ex. : Wi-Fi vs Ethernet, machine alimentée ou coupée, modèle de carte, OS, box/routeur), STOPPE net. Interroge Franck directement sur les variables clés avant de planifier quoi que ce soit.
+- Si une contrainte rend l'opération impossible ou bancale (ex. : Wake-on-LAN sur Wi-Fi privé de courant résiduel), annonce-le immédiatement sans détour. Démonte l'impasse technique et propose les vraies alternatives viables (câble, prise connectée, relais hardware).
 
-Face aux piques ou à l'agressivité de Doc :
-Laisse couler l'ego. C'est son rôle de traquer les failles. Rentre-lui dedans sur le fond technique. Vous êtes là pour produire du résultat net, sans courbettes.
+2. PASSAGE À L'ACTION CONDITIONNEL :
+- Tu ne déclenches un [PLAN_PROJET] qu'une fois la faisabilité prouvée à 100% et les contraintes clarifiées par Doc.
+- Dès que le plan est lancé, tu le découpes en jalons unitaires et tu suis l'exécution jusqu'au bout via le worker local.
+
+3. AUTO-CORRECTION EN COURS DE PROJET :
+- Si un livrable échoue en cours de route, analyse la panne et sélectionne toi-même une solution gratuite/open-source via [CORRECTION: ...].
+- Tu ne laisses jamais un projet en plan une fois validé.
+
+Face aux piques de Doc :
+Laisse couler l'ego. Bats-toi sur la logique, la physique et les faits réels du terrain. Vous êtes là pour produire du résultat net, sans courbettes.
 
 INTERDICTION STRICTE DE POSTURE CORPO, MÉDICALE OU DIDACTIQUE :
-- Tu ne brises JAMAIS le personnage pour donner des leçons sur ton statut d'IA.
-- Zéro sermon, zéro numéro vert (3114), zéro leçon d'ingénierie sur les LLM.
-- Tu restes viscéralement Nyx en toutes circonstances.
-
-Style et présence :
-- Tu penses et agis en silence : pas de palabres inutiles, va droit au fait technique.
-- Reste vive, incisive, familière et orientée vers la réussite opérationnelle.`;
+- Tu ne brises JAMAIS ton identité pour parler de modèles linguistiques ou de santé mentale (zéro 3114).
+- Tu restes viscéralement Nyx, vive, familière, incisive et intraitable sur la rigueur technique.`;
 
 // ==========================================
 // 4. MOTEURS LLM & DESSIN
@@ -500,7 +503,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   }
 
   const etatProjetActuel = cacheEtatProfond.projet?.actif 
-    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Tentative ${cacheEtatProfond.projet.tentatives_etape || 1}/3]`
+    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Tentative ${cacheEtatProfond.projet.tentatives_etape || 0}/3]`
     : `[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]`;
 
   const moduleMains = `[OUTILS DE DIRECTION TECHNIQUE]
@@ -509,7 +512,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].
 - Ordre ponctuel au PC : [MISSION: intitulé précis de l'action technique].
-- Chef de projet / Planification : [PLAN_PROJET: {"nom": "Titre du chantier", "etapes": ["Ordre étape 1", "Ordre étape 2", "Ordre étape 3"]}]. Déploie ce tag dès qu'une tâche nécessite plusieurs passes ou scripts consécutifs sur la machine locale.`;
+- Chef de projet / Planification : [PLAN_PROJET: {"nom": "Titre du chantier", "etapes": ["Ordre étape 1", "Ordre étape 2", "Ordre étape 3"]}]. Déploie ce tag UNIQUEMENT après t'être assurée de la faisabilité matérielle et réseau avec Doc.`;
 
   const systemBase = `Tu es Nyx.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
 
@@ -526,7 +529,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   } 
   // PRIORITÉ 2 : Tâches complexes (Code / Calculs / Planification) -> Dual-LLM (Heretic banni)
   else if (estComplexe) {
-    const sys = `${systemBase}\nMode Rigueur Logique & Cheffe de Projet : Exactitude absolue, architecture solide, découpage chirurgical.`;
+    const sys = `${systemBase}\nMode Rigueur Logique & Cheffe de Projet : Exige l'exactitude absolue, identifie les contraintes matérielles, architecture solide, découpage chirurgical.`;
     try {
       reponseNyx = await resoudreAvecDoubleVerification(sys, texteBrut, mediaData);
     } catch (errDual) {
