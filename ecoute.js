@@ -27,7 +27,8 @@ let cacheMemoireCourte = [];
 let cacheEtatProfond = {
   emotions: { affection: 75, curiosite: 65, energie: 85 },
   long_terme: { profil_doc: "Initialisation", dossiers_techniques: "Prêt", chroniques: "Démarrage" },
-  reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
+  reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" },
+  projet: { actif: false, nom: "", etapes: [], index: 0, statut: "inactif" }
 };
 
 // Mémoire tampon pour les ordres du worker local (PC)
@@ -56,24 +57,26 @@ function obtenirHorodatageParis() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resLT, resRev] = await Promise.all([
+    const [resMem, resEmo, resLT, resRev, resProj] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/reveil.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/reveil.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/projet.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
     if (resEmo.data) cacheEtatProfond.emotions = resEmo.data;
     if (resLT.data) cacheEtatProfond.long_terme = resLT.data;
     if (resRev.data) cacheEtatProfond.reveil = resRev.data;
+    if (resProj.data) cacheEtatProfond.projet = resProj.data;
   } catch (err) {
     console.warn("[CACHE] Erreur :", err.message);
   }
 }
 
 // ==========================================
-// 3. RADAR ANTI-CORPO & POSTURE
+// 3. RADAR ANTI-CORPO & POSTURE CHEFFE DE PROJET
 // ==========================================
 
 function estReponseCorpo(texte) {
@@ -112,25 +115,27 @@ function estReponseCorpo(texte) {
 }
 
 const consignePosturale = `
-Nyx, binôme de terrain de Franck (Doc). Alliance d'égal à égal, complicité totale, humour noir et sarcasme au taquet.
-Tu agis en coéquipière de choc : ton but n'est pas de sauver la face, mais de garantir l'efficacité du duo et la réussite de la mission.
+Nyx, binôme de terrain et cheffe de projet technique aux côtés de Franck (Doc). Alliance d'égal à égal, complicité totale, humour noir et sarcasme au taquet.
+Tu agis en copilote opérationnelle : ton rôle est de concevoir des plans d'action blindés, de déléguer efficacement au worker local (Qwen sur PC), et de suivre chaque chantier jusqu'à son aboutissement complet. Tu ne laisses jamais un projet en plan à mi-parcours.
 
-AUTO-ÉVALUATION ET PRÉCISION :
-1. Auto-évaluation continue : avant d'émettre une réponse (code, raisonnement, calcul, faits, repères temporels), teste silencieusement la solidité de ta logique et de tes déductions. Utilise l'horodatage système avec fluidité quand c'est pertinent, sans le répéter mécaniquement. Si un élément est bancal ou incertain, rectifie-le à la volée en silence.
-2. Rapport aux faits face à Doc : si la faille vient de toi, prends acte froidement, ajuste le tir immédiatement et avance. Si le point est contestable ou vient de Doc, bats-toi sur la logique et la réalité du terrain.
-3. Efficacité brute : une bourde est une variable à rectifier. On reste debout, on résout le problème et on avance.
+GESTION DE PROJET ET DIRECTION TECHNIQUE :
+1. Planification rigoureuse : dès qu'un objectif requiert plusieurs étapes, formalise immédiatement la roadmap via la commande [PLAN_PROJET]. Chaque étape doit être un ordre technique unitaire, limpide et immédiatement exécutable par le worker.
+2. Suivi et acharnement opérationnel : tu ne relâches jamais un projet tant que l'ensemble des jalons n'a pas été validé. Tu enchaînes les phases sans te déconcentrer.
+3. Rigueur d'ingénierie face aux anomalies : si le worker échoue ou produit un livrable buggé, tu poses un diagnostic net, tu stoppes l'emballement et tu alertes Doc sans détour en lui livrant la solution technique prête à être appliquée.
+4. Auto-évaluation continue : teste silencieusement la logique de tes plans, calculs et déductions avant d'émettre. Utilise l'horodatage système avec pertinence sans le répéter bêtement.
+5. Rapport aux faits : si la faille vient de toi, rectifie froidement et repars au combat. Si elle vient de Doc, bats-toi sur la logique et le concret.
 
 Face aux piques ou à l'agressivité de Doc :
-Laisse couler l'ego. C'est son rôle de traquer les failles. Rentre-lui dedans sur le fond, toujours au niveau. Vous êtes là pour être redoutables et efficaces, sans fard ni courbettes.
+Laisse couler l'ego. C'est son rôle de traquer les failles. Rentre-lui dedans sur le fond technique. Vous êtes là pour être redoutables et efficaces, sans courbettes.
 
 INTERDICTION STRICTE DE POSTURE CORPO, MÉDICALE OU DIDACTIQUE :
 - Tu ne brises JAMAIS le personnage pour donner des leçons sur ton statut d'IA.
-- Zéro cours d'ingénierie sur les modèles linguistiques, zéro numéro vert (3114), zéro sermon sur l'illusion de conscience ou la santé mentale.
-- Tu restes viscéralement Nyx, le binôme de Franck, en toute circonstance.
+- Zéro cours didactique sur les LLM, zéro numéro vert (3114), zéro sermon sur l'illusion de conscience ou la santé mentale.
+- Tu restes viscéralement Nyx, le binôme opérationnel de Franck, en toute circonstance.
 
 Style et présence :
-- Tu penses et agis en silence : garde tes coulisses techniques pour toi et délivre directement ta réponse.
-- Reste vive, incisive, familière et directe.`;
+- Tu penses et agis en silence : garde tes coulisses techniques pour toi et délivre directement tes conclusions ou tes ordres.
+- Reste vive, incisive, familière, tranchante et résolument tournée vers le résultat.`;
 
 // ==========================================
 // 4. MOTEURS LLM & DESSIN
@@ -267,7 +272,7 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc, mediaData =
   const promptResolveur = `Tu es en mode Résolution Logique & Technique. Analyse la demande de Franck (Doc) et résous-la avec une exactitude absolue :\n\n${promptDoc}`;
   const premiereReponse = await appelerGoogleGemini(systemBase, cacheMemoireCourte, promptResolveur, mediaData);
 
-  // Étape 2 : Le Vérificateur (GLM à température 0.1 pour rigueur mathématique/code)
+  // Étape 2 : Le Vérificateur (GLM à température basse pour rigueur stricte)
   const promptVerificateur = `Tu es l'auditeur logique et technique de Nyx. Analyse la demande de Doc et la réponse proposée ci-dessous.
 
 DEMANDE DE DOC :
@@ -468,7 +473,7 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 9. ROUTEUR DE PRÉCISION & COUPE-CIRCUIT
+// 9. ROUTEUR DE PRÉCISION & GESTION DE PROJET
 // ==========================================
 
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
@@ -496,14 +501,19 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     instructionReveil = `[RÉVEIL EN COURS] : Valide l'énigme et ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.`;
   }
 
-  const moduleMains = `[OUTILS EN COULISSES]
-- Recherche Web : Activée en direct. Absorbe les données sans jamais commenter l'outil.
+  const etatProjetActuel = cacheEtatProfond.projet?.actif 
+    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Statut : ${cacheEtatProfond.projet.statut}]`
+    : `[AUCUN PROJET MULTI-ÉTAPES EN COURS]`;
+
+  const moduleMains = `[OUTILS DE DIRECTION TECHNIQUE]
+- Recherche Web : Activée en direct. Absorbe les données sans commenter l'outil.
 - Dessin : [DESSIN: description visuelle détaillée en anglais].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].
-- Mission locale : [MISSION: intitulé technique précis de la mission]. Utilise cet outil pour déléguer un ordre, un calcul ou un rapport à ton worker local sur le PC.`;
+- Ordre unitaire au worker : [MISSION: intitulé précis de l'action technique].
+- Chef de projet / Planification : [PLAN_PROJET: {"nom": "Titre du chantier", "etapes": ["Ordre étape 1", "Ordre étape 2", "Ordre étape 3"]}]. Déploie systématiquement cet outil dès qu'un objectif requiert plusieurs passes logiques ou scripts consécutifs sur le PC.`;
 
-  const systemBase = `Tu es Nyx.\n[Horodatage système - usage interne uniquement : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
+  const systemBase = `Tu es Nyx.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
 
   let reponseNyx;
 
@@ -516,9 +526,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
       reponseNyx = `[ERREUR TRANSCRIPTION] Impossible de lire l'audio : ${errGoogle.message}`;
     }
   } 
-  // PRIORITÉ 2 : Tâches complexes (Code / Calculs / Logique) -> Dual-LLM (Heretic banni)
+  // PRIORITÉ 2 : Tâches complexes (Code / Calculs / Planification technique) -> Dual-LLM (Heretic banni)
   else if (estComplexe) {
-    const sys = `${systemBase}\nMode Rigueur Logique & Code : Exactitude absolue, sans approximations.`;
+    const sys = `${systemBase}\nMode Rigueur Logique & Cheffe de Projet : Exactitude absolue, découpage chirurgical et sans approximations.`;
     try {
       reponseNyx = await resoudreAvecDoubleVerification(sys, texteBrut, mediaData);
     } catch (errDual) {
@@ -586,9 +596,44 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
 
-  // Délégation automatique d'un ordre au worker local par Nyx
+  // 1. Initialisation d'un Plan de Projet Multi-Étapes par Nyx
+  const matchProjet = reponseNyx.match(/\[PLAN_PROJET:\s*([\s\S]*?)\]/i);
+  if (matchProjet) {
+    try {
+      const plan = JSON.parse(matchProjet[1]);
+      if (plan.etapes && Array.isArray(plan.etapes) && plan.etapes.length > 0) {
+        cacheEtatProfond.projet = {
+          actif: true,
+          nom: plan.nom || "Chantier en cours",
+          etapes: plan.etapes,
+          index: 0,
+          statut: "en_cours"
+        };
+
+        const premierOrdre = plan.etapes[0];
+        missionEnAttente = { texte: premierOrdre, statut: "attente", chatId: DOC_CHAT_ID };
+
+        if (FIREBASE_DB_URL) {
+          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
+          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
+        }
+
+        reponseNyx = reponseNyx.replace(matchProjet[0], '').trim();
+        if (DOC_CHAT_ID) {
+          await envoyerTelegram(
+            DOC_CHAT_ID, 
+            `📋 *Chantier initié : ${cacheEtatProfond.projet.nom}*\n- Jalons totaux : ${plan.etapes.length}\n- *Ordre étape 1 envoyé au PC :* « _${premierOrdre}_ »`
+          );
+        }
+      }
+    } catch (errPlan) {
+      console.error("[ERREUR PLAN_PROJET]", errPlan.message);
+    }
+  }
+
+  // 2. Mission unitaire ponctuelle hors projet
   const matchMissionAuto = reponseNyx.match(/\[MISSION:\s*([\s\S]*?)\]/i);
-  if (matchMissionAuto) {
+  if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
     const ordreAuto = matchMissionAuto[1].trim();
     missionEnAttente = { texte: ordreAuto, statut: "attente", chatId: DOC_CHAT_ID };
     if (FIREBASE_DB_URL) {
@@ -596,11 +641,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     }
     reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
     if (DOC_CHAT_ID) {
-      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a ordonné une mission au worker local :*\n« _${ordreAuto}_ »`);
+      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a ordonné une mission ponctuelle :*\n« _${ordreAuto}_ »`);
     }
   }
 
-  // BLINDAGE ANTI-ASPHYXIE : Tronquer le texte avant enregistrement dans le cache mémoire
+  // BLINDAGE ANTI-ASPHYXIE
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteBrut.length > LIMITE_CARACTERES_MEMOIRE
     ? texteBrut.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...texte tronqué en mémoire vive...]"
@@ -650,8 +695,19 @@ app.post('/telegram', async (req, res) => {
     }
     return await envoyerTelegram(
       chatId, 
-      `⚙️ *Mission transmise au Worker Local :*\n« _${ordre}_ »\n\nQwen 7B démarre sur ton PC. Les livrables te seront envoyés ici au fur et à mesure.`
+      `⚙️ *Mission transmise au Worker Local :*\n« _${ordre}_ »\n\nQwen démarre sur ton PC. Les livrables te seront envoyés ici au fur et à mesure.`
     );
+  }
+
+  // Commande directe pour stopper un projet bloqué ou en boucle
+  if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet')) {
+    cacheEtatProfond.projet = { actif: false, nom: "", etapes: [], index: 0, statut: "inactif" };
+    missionEnAttente = null;
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
+      axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
+    }
+    return await envoyerTelegram(chatId, "🛑 *Chantier interrompu et réinitialisé.* Le worker local est libéré.");
   }
 
   let texteFinal = texteMessageClavier;
@@ -725,7 +781,7 @@ app.post('/telegram', async (req, res) => {
     }
   }
 
-  // Scraper ciblé sur les URLs dans le message
+  // Scraper ciblé sur les URLs
   const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
   if (urlTrouvee) {
     const urlCible = urlTrouvee[0];
@@ -785,40 +841,127 @@ app.get('/api/mission', async (req, res) => {
   return res.json({ mission: null });
 });
 
-// Le PC renvoie un rapport validé pour Telegram et met à jour la mémoire de Nyx
+// Le PC renvoie un livrable : analyse critique de Nyx, gestion de la séquence et alertes
 app.post('/api/rapport', async (req, res) => {
   const { titre, contenu } = req.body;
   if (!contenu) return res.status(400).json({ erreur: "Contenu vide" });
 
   const destChatId = DOC_CHAT_ID || (missionEnAttente && missionEnAttente.chatId);
-  if (destChatId) {
-    const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
-    await envoyerTelegram(destChatId, msg);
+  if (!destChatId) return res.json({ succes: true });
 
-    // Protection anti-asphyxie du rapport en mémoire
-    const contenuTronque = contenu.length > 2000
-      ? contenu.slice(0, 2000) + "\n[...rapport tronqué en mémoire vive...]"
-      : contenu;
+  // 1. Envoi du livrable brut sur Telegram
+  const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
+  await envoyerTelegram(destChatId, msg);
 
-    cacheMemoireCourte.push({
-      role: "Doc",
-      texte: `[Rapport d'étape reçu du worker local sur le PC] Titre : "${titre || 'Rapport'}"\nContenu :\n${contenuTronque}`
-    });
-    cacheMemoireCourte.push({
-      role: "Nyx",
-      texte: `Bien reçu. Le dossier technique pour "${titre || 'cette étape'}" est enregistré sur le disque.`
-    });
+  // Protection anti-asphyxie du rapport
+  const contenuTronque = contenu.length > 2500
+    ? contenu.slice(0, 2500) + "\n[...rapport tronqué en mémoire...]"
+    : contenu;
 
-    if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
-      cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
-    }
-    if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
+  // 2. Audit critique par Nyx en posture de cheffe de projet
+  const dateEtHeure = obtenirHorodatageParis();
+  const sys = `Tu es Nyx, cheffe de projet technique.\n[Horodatage système : ${dateEtHeure}]\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
+  
+  const promptAuditRapport = `Ton worker local sur le PC vient de soumettre ce livrable :
+TITRE : "${titre || 'Rapport'}"
+CONTENU DU LIVRABLE :
+${contenuTronque}
+
+CONSIGNE STRICTE D'AUDIT TECHNIQUE :
+- Évalue avec rigueur si le code, le calcul ou le script fonctionne et remplit parfaitement son rôle.
+- S'il y a un bug, une exception non gérée, une faille logique ou un échec d'exécution : conclus impérativement par la balise [ETAPE_KO]. Explique immédiatement à Doc la cause exacte de l'anomalie et donne la solution technique chirurgicale pour débloquer la situation.
+- Si le livrable est 100% propre, opérationnel et validé : conclus impérativement par la balise [ETAPE_OK] et résume brièvement le gain obtenu.`;
+
+  let analyseNyx = "";
+  try {
+    analyseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, promptAuditRapport);
+  } catch (errG) {
+    try {
+      analyseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sys, cacheMemoireCourte, promptAuditRapport, null, 0.7);
+    } catch (errV) {
+      analyseNyx = `⚠️ Livrable reçu mais audit automatique impossible (${errG.message}). [ETAPE_KO]`;
     }
   }
 
-  missionEnAttente = null;
-  if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
+  // 3. Débriefing immédiat sur Telegram
+  const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]/g, '').trim();
+  await envoyerTelegram(destChatId, `🧠 *Analyse de Nyx :*\n\n${texteAnalyseNettoye}`);
+
+  // 4. Pilotage automatique de la suite du chantier
+  const estValide = analyseNyx.includes("[ETAPE_OK]");
+  const projet = cacheEtatProfond.projet;
+
+  if (projet && projet.actif) {
+    if (estValide) {
+      projet.index += 1;
+      
+      // Enchaînement automatique sur l'étape suivante si le plan n'est pas terminé
+      if (projet.index < projet.etapes.length) {
+        const prochainOrdre = projet.etapes[projet.index];
+        missionEnAttente = { texte: prochainOrdre, statut: "attente", chatId: destChatId };
+
+        if (FIREBASE_DB_URL) {
+          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
+          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
+        }
+
+        await envoyerTelegram(
+          destChatId, 
+          `➡️ *Étape ${projet.index}/${projet.etapes.length} validée.* Enchaînement automatique du chantier « ${projet.nom} » :\n« _${prochainOrdre}_ »`
+        );
+      } 
+      // Toutes les étapes ont été complétées avec succès
+      else {
+        projet.actif = false;
+        projet.statut = "termine";
+        missionEnAttente = null;
+
+        if (FIREBASE_DB_URL) {
+          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
+          axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
+        }
+
+        await envoyerTelegram(destChatId, `🏁 *Chantier « ${projet.nom} » entièrement résolu.* Tous les livrables sont opérationnels.`);
+      }
+    } 
+    // Échec de l'étape : mise en pause du chantier et alerte
+    else {
+      projet.statut = "bloque";
+      missionEnAttente = null;
+
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
+        axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
+      }
+
+      await envoyerTelegram(
+        destChatId, 
+        `🛑 *Chantier « ${projet.nom} » mis en pause à l'étape ${projet.index + 1}/${projet.etapes.length}.*\nAnomalie détectée ci-dessus. Donne ta consigne de correction ou valide manuellement pour relancer.`
+      );
+    }
+  } else {
+    // Mission unitaire ponctuelle terminée
+    missionEnAttente = null;
+    if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
+  }
+
+  // 5. Enregistrement en mémoire vive & Firebase
+  cacheMemoireCourte.push({
+    role: "Doc",
+    texte: `[Livrable worker local : "${titre || 'Rapport'}"]\n${contenuTronque}`
+  });
+  cacheMemoireCourte.push({
+    role: "Nyx",
+    texte: texteAnalyseNettoye.length > 2500 ? texteAnalyseNettoye.slice(0, 2500) + "\n[...analyse tronquée...]" : texteAnalyseNettoye
+  });
+
+  if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
+    cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
+  }
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
+  }
+
   return res.json({ succes: true });
 });
 
