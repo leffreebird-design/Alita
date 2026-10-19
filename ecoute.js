@@ -25,7 +25,7 @@ const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
-const MODEL_IMAGEN = (process.env.IMAGEN_MODEL || "imagen-3.0-generate-002").trim();
+const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
 
 const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
@@ -144,7 +144,7 @@ INTERDICTION STRICTE DE POSTURE CORPO, MÉDICALE OU DIDACTIQUE :
 - Tu restes viscéralement Nyx, vive, familière, incisive et intraitable sur la rigueur technique.`;
 
 // ==========================================
-// 4. MOTEURS LLM & DESSIN (GOOGLE DIRECT)
+// 4. MOTEURS LLM & DESSIN (VENICE)
 // ==========================================
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
@@ -257,83 +257,21 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   }
 }
 
-async function genererImageGoogle(prompt) {
-  // Clés payantes prioritaires pour Imagen
-  const clesATester = [
-    (process.env.GEMINI_API_KEY_PAID || "").trim(),
-    (process.env.GEMINI_API_KEY || "").trim(),
-    (process.env.GOOGLE_API_KEY || "").trim(),
-    (process.env.GEMINI_API_KEY_FREE || "").trim()
-  ].filter(k => k.length > 0);
-
-  if (clesATester.length === 0) {
-    throw new Error("Aucune clé Gemini configurée sur Render.");
-  }
-
-  const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
-  const modelesImagen = [
-    MODEL_IMAGEN,
-    "imagen-3.0-generate-002",
-    "imagen-3.0-generate-001",
-    "imagen-3.0-fast-generate-001"
-  ];
-  const modelesUniques = [...new Set(modelesImagen)];
-
-  let derniereErreur = null;
-
-  // 1. Appel direct sur Imagen via l'API Google avec paramètres stricts
-  for (const cle of clesATester) {
-    for (const modele of modelesUniques) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modele}:predict?key=${cle}`;
-      try {
-        const res = await axios.post(url, {
-          instances: [{ prompt: cleanPrompt }],
-          parameters: {
-            sampleCount: 1,
-            aspectRatio: "1:1"
-          }
-        }, {
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 60000
-        });
-
-        const b64 = res.data?.predictions?.[0]?.bytesBase64Encoded;
-        if (b64) return b64;
-      } catch (err) {
-        derniereErreur = err;
-        const msg = err.response?.data?.error?.message || err.message;
-        console.warn(`[IMAGEN ${modele} KO] : ${msg}`);
-      }
-    }
-  }
-
-  // 2. Repli multimodal direct sur Gemini si l'endpoint predict est zoné
-  for (const cle of clesATester) {
-    try {
-      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${cle}`;
-      const resGemini = await axios.post(urlGemini, {
-        contents: [{ parts: [{ text: `Generate an image: ${cleanPrompt}` }] }],
-        generationConfig: {
-          responseModalities: ["TEXT", "IMAGE"]
-        }
-      }, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 60000
-      });
-
-      const parts = resGemini.data?.candidates?.[0]?.content?.parts || [];
-      for (const part of parts) {
-        if (part.inlineData && part.inlineData.data) {
-          return part.inlineData.data;
-        }
-      }
-    } catch (errG) {
-      // Poursuite si non supporté
-    }
-  }
-
-  const detailFinal = derniereErreur?.response?.data?.error?.message || derniereErreur?.message;
-  throw new Error(`Google Imagen a échoué sur les modèles configurés : ${detailFinal}`);
+async function genererImageVenice(prompt) {
+  const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '');
+  const res = await axios.post('https://api.venice.ai/api/v1/image/generate', {
+    model: MODEL_IMAGE,
+    prompt: cleanPrompt,
+    response_format: "b64_json",
+    moderation: "low"
+  }, {
+    headers: {
+      'Authorization': `Bearer ${VENICE_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 60000 
+  });
+  return res.data.data[0].b64_json;
 }
 
 // ==========================================
@@ -892,10 +830,10 @@ app.post('/telegram', async (req, res) => {
         texteNyx = texteNyx.replace(matchDessin[0], '').trim();
         if (texteNyx) await envoyerTelegram(chatId, texteNyx);
         try {
-          const b64Image = await genererImageGoogle(matchDessin[1]);
+          const b64Image = await genererImageVenice(matchDessin[1]);
           await envoyerPhotoTelegram(chatId, b64Image);
         } catch (errImg) {
-          await envoyerTelegram(chatId, `[ÉCHEC IMAGE GOOGLE] : ${errImg.message}`);
+          await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
         }
       } else {
         await envoyerTelegram(chatId, texteNyx);
