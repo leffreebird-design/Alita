@@ -3,16 +3,13 @@
   "version": "1.0.0",
   "main": "ecoute.js",
   "scripts": {
-    "start": "node ecoute.js"
+    "start": "node --max-old-space-size=384 ecoute.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
     "axios": "^1.6.0",
-    "@google/generative-ai": "^0.21.0",
-    "firebase-admin": "^12.0.0",
-    "msedge-tts": "*",
-    "pdf-parse": "^1.1.1",
+    "cheerio": "^1.0.0",
+    "express": "^4.18.2",
     "mammoth": "^1.6.0",
-    "cheerio": "^1.0.0"
+    "pdf-parse": "^1.1.1"
   }
 }
