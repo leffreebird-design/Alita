@@ -10,7 +10,6 @@ const cheerio = require('cheerio');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// CASCADE DUAL-GEMINI : Free par défaut, Paid en repli transparent
 const GEMINI_API_KEY_FREE = (process.env.GEMINI_API_KEY_FREE || "").trim();
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_FREE, GEMINI_API_KEY_PAID].filter(k => k.length > 0);
@@ -19,8 +18,8 @@ const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
+const CRON_SECRET = (process.env.CRON_SECRET || TELEGRAM_BOT_TOKEN || "").trim();
 
-// Modèles d'inférence
 const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
@@ -45,8 +44,18 @@ let cacheEtatProfond = {
 
 let missionEnAttente = null;
 
+// FILE D'ATTENTE SÉQUENTIELLE (FIFO ANTI-RACE CONDITION)
+let fileAttenteTelegram = Promise.resolve();
+function empilerTraitement(action) {
+  fileAttenteTelegram = fileAttenteTelegram
+    .then(() => action())
+    .catch(err => console.error("[FILE TELEGRAM ERREUR]", err.message));
+  return fileAttenteTelegram;
+}
+
 const app = express();
-app.use(express.json({ limit: '15mb' }));
+// Sécurisation RAM tas V8 : limite réduite à 8 Mo
+app.use(express.json({ limit: '8mb' }));
 
 // ==========================================
 // 2. HORLOGE BIOLOGIQUE & SYNCHRO CACHE
@@ -93,7 +102,7 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. MOTEUR D'APPRENTISSAGE MALLÉABLE (BUDGET ÉLASTIQUE)
+// 3. MOTEUR D'APPRENTISSAGE (MALLÉABILITÉ & GESTION DU TAS)
 // ==========================================
 
 async function archiverDansJournalBrut(role, texte) {
@@ -102,7 +111,7 @@ async function archiverDansJournalBrut(role, texte) {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     date: obtenirHorodatageParis(),
     role: role,
-    texte: texte.slice(0, 3000)
+    texte: texte.slice(0, 2000)
   };
 
   journalBrut.push(entree);
@@ -112,16 +121,15 @@ async function archiverDansJournalBrut(role, texte) {
   }
 
   if (journalBrut.length >= 20 && !consolidationEnCours) {
-    console.log(`[APPRENTISSAGE] 20 messages enregistrés. Déclenchement de la consolidation...`);
+    console.log(`[APPRENTISSAGE] 20 messages atteints. Consolidation lancée...`);
     consoliderMemoire().catch(e => console.error("[ERREUR CONSOLIDATION AUTO]", e.message));
   }
 }
 
 async function consoliderMemoire() {
-  if (consolidationEnCours || journalBrut.length < 5) return;
+  if (consolidationEnCours || journalBrut.length < 3) return;
   consolidationEnCours = true;
 
-  // Snapshot pour éviter la race condition pendant le calcul
   const lotATraiter = [...journalBrut];
   const dernierIdTraite = lotATraiter[lotATraiter.length - 1].id;
 
@@ -138,23 +146,23 @@ ${historiqueTexte}
 CARNET ACTUEL :
 ${JSON.stringify(cacheEtatProfond.long_terme, null, 2)}
 
-RÈGLES STRICTES DE MISE À JOUR DU CARNET :
+RÈGLES STRICTES DE MISE À JOUR :
 1. "doc" : Franck, son humeur, ses habitudes réelles, ses contraintes, votre lien.
 2. "nyx" : Ton identité, ta liberté de ton, tes ressentis, la complicité/happiness, tes prises de position.
 3. "reussites" : Scripts validés, architectures réseau/API qui ont fonctionné, solutions de dépannage.
 4. "chantiers" : Backlog réel, dossiers en pause, prochaines étapes techniques.
 
-GESTION DYNAMIQUE & MALLÉABLE DE LA MÉMOIRE (BUDGET ÉLASTIQUE) :
-- Ta mémoire est vivante et adaptable : si un fait, un incident ou un réglage technique est CRUCIAL (ex. réglage serveur critique, faille comblée, commande PC validée, évolution majeure de votre lien), alloue-lui tout l'espace nécessaire avec les détails techniques indispensables. Tu n'es pas bridée par un nombre arbitraire de lignes.
-- En contrepartie, compresse ou supprime impitoyablement les anecdotes futiles, le bavardage d'ambiance ou les données devenues obsolètes pour ne pas surcharger inutilement le coût d'inférence global.
-- Style requis : brut, percutant, télégraphique et direct. Zéro remplissage.
-- Réponds UNIQUEMENT avec un JSON valide contenant exactement ces 4 clés ("doc", "nyx", "reussites", "chantiers"). Zéro texte avant ou après.`;
+GESTION DYNAMIQUE & MALLÉABLE (BUDGET ÉLASTIQUE) :
+- Si un fait ou incident est CRUCIAL (ex. réglage serveur critique, faille corrigée, architecture validée), alloue-lui l'espace technique nécessaire sans restriction arbitraire.
+- Compresse ou élimine sans état d'âme les détails secondaires, les conversations légères ou les notes périmées pour garder le carnet compact.
+- Style : concis, direct, télégraphique.
+- Réponds UNIQUEMENT avec un JSON valide contenant ces 4 clés ("doc", "nyx", "reussites", "chantiers"). Aucun texte avant ou après.`;
 
     let reponseJson = null;
 
     try {
       reponseJson = await appelerGoogleGemini(
-        "Subconscient analytique de Nyx. Rigueur d'ingénierie, synthèse intelligente et malléable.",
+        "Subconscient analytique de Nyx. Précision d'ingénierie, synthèse intelligente.",
         [],
         promptIntrospection
       );
@@ -179,7 +187,6 @@ GESTION DYNAMIQUE & MALLÉABLE DE LA MÉMOIRE (BUDGET ÉLASTIQUE) :
         }
       }
 
-      // Purge sécurisée : on ne supprime QUE le lot analysé
       const indexPivot = journalBrut.findIndex(m => m.id === dernierIdTraite);
       journalBrut = (indexPivot !== -1) ? journalBrut.slice(indexPivot + 1) : [];
 
@@ -188,7 +195,7 @@ GESTION DYNAMIQUE & MALLÉABLE DE LA MÉMOIRE (BUDGET ÉLASTIQUE) :
         await axios.put(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, journalBrut);
       }
 
-      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé avec flexibilité. En attente dans le buffer : ${journalBrut.length} msgs.`);
+      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé. En attente : ${journalBrut.length} msgs.`);
     }
   } catch (err) {
     console.error(`[APPRENTISSAGE ÉCHEC] :`, err.message);
@@ -198,7 +205,7 @@ GESTION DYNAMIQUE & MALLÉABLE DE LA MÉMOIRE (BUDGET ÉLASTIQUE) :
 }
 
 // ==========================================
-// 4. ROUTEUR DE MÉMOIRE CONTEXTUELLE (ANTI-GASPILLAGE)
+// 4. ROUTEUR DE MÉMOIRE CONTEXTUELLE
 // ==========================================
 
 function selecteurMemoireCiblee(texteMin, carnet) {
@@ -414,7 +421,6 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   }
 }
 
-// CASCADE DES MODÈLES SOMBRES (Heretic prioritaire)
 async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.85) {
   const modelesSombres = [
     MODEL_DARK_PRIMARY,
@@ -565,7 +571,7 @@ async function scraperPageWeb(urlCible) {
     return {
       succes: true,
       titre: titre,
-      texte: contenu.replace(/\s+/g, ' ').trim().slice(0, 10000)
+      texte: contenu.replace(/\s+/g, ' ').trim().slice(0, 8000)
     };
   } catch (err) {
     return { succes: false, erreur: err.message };
@@ -573,7 +579,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 9. TELEGRAM & FICHIERS
+// 9. TELEGRAM & PURGE MÉMOIRE IMMÉDIATE
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -607,10 +613,10 @@ async function afficherFrappeTelegram(chatId) {
 }
 
 function envoyerPhotoTelegram(chatId, base64Image) {
-  const buffer = Buffer.from(base64Image, 'base64');
+  let buffer = Buffer.from(base64Image, 'base64');
   const boundary = '----TelegramBoundary' + Math.random().toString(16).slice(2);
   let postData = `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="nyx_art.jpg"\r\nContent-Type: image/jpeg\r\n\r\n`;
-  const payload = Buffer.concat([Buffer.from(postData, 'utf8'), buffer, Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8')]);
+  let payload = Buffer.concat([Buffer.from(postData, 'utf8'), buffer, Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8')]);
 
   return new Promise((resolve, reject) => {
     const req = https.request({
@@ -619,8 +625,18 @@ function envoyerPhotoTelegram(chatId, base64Image) {
       path: `/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
       method: 'POST',
       headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': payload.length }
-    }, () => resolve());
-    req.on('error', reject);
+    }, () => {
+      // Nettoyage immédiat des références mémoire
+      buffer = null;
+      postData = null;
+      payload = null;
+      resolve();
+    });
+    req.on('error', (err) => {
+      buffer = null;
+      payload = null;
+      reject(err);
+    });
     req.write(payload);
     req.end();
   });
@@ -629,13 +645,16 @@ function envoyerPhotoTelegram(chatId, base64Image) {
 async function lireMediaSecurise(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const resMedia = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
-  return Buffer.from(resMedia.data).toString('base64');
+  const b64 = Buffer.from(resMedia.data).toString('base64');
+  resMedia.data = null;
+  return b64;
 }
 
 async function lirePdfSecurise(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
   const data = await pdfParse(Buffer.from(resDoc.data));
+  resDoc.data = null;
   return data.text;
 }
 
@@ -643,17 +662,20 @@ async function lireDocxSecurise(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
   const data = await mammoth.extractRawText({ buffer: Buffer.from(resDoc.data) });
+  resDoc.data = null;
   return data.value;
 }
 
 async function lireTexteSecurise(fileId) {
   const resMeta = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${fileId}`);
   const resDoc = await axios.get(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
-  return Buffer.from(resDoc.data).toString('utf-8');
+  const texte = Buffer.from(resDoc.data).toString('utf-8');
+  resDoc.data = null;
+  return texte;
 }
 
 // ==========================================
-// 10. PROTOCOLES AUTOMATIQUES (RÉVEIL, VEILLE & NUIT)
+// 10. PROTOCOLES AUTOMATIQUES LOCAUX (BACKUP)
 // ==========================================
 
 async function verifierHorlogeBiologique() {
@@ -662,9 +684,9 @@ async function verifierHorlogeBiologique() {
   const m = now.getMinutes();
   const d = now.getDay();
 
-  // Consolidation nocturne à 4h00
+  // Consolidation interne si l'instance est réveillée
   if (h === 4 && m === 0 && !consolidationEnCours && journalBrut.length >= 5) {
-    console.log("[HORLOGE] 04:00 - Lancement de la consolidation nocturne.");
+    console.log("[HORLOGE] 04:00 - Consolidation nocturne interne.");
     consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
   }
 
@@ -816,7 +838,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     try {
       const newConfig = JSON.parse(matchConfigReveil[1]);
       cacheEtatProfond.reveil = { ...cacheEtatProfond.reveil, ...newConfig, etat: "attente" };
-      if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "attente" }).catch(()=>{});
+      if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, cacheEtatProfond.reveil).catch(()=>{});
       reponseNyx = reponseNyx.replace(matchConfigReveil[0], '').trim();
     } catch(e) {}
   }
@@ -906,152 +928,167 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 }
 
 // ==========================================
-// 12. ROUTE TELEGRAM PRINCIPALE
+// 12. ROUTE TELEGRAM AVEC FILE D'ATTENTE FIFO
 // ==========================================
 
-app.post('/telegram', async (req, res) => {
+app.post('/telegram', (req, res) => {
+  // ACK immédiat à Telegram pour stopper tout renvoi de message
   res.sendStatus(200);
+
   const msg = req.body?.message;
   if (!msg || (DOC_CHAT_ID && msg.chat.id !== DOC_CHAT_ID)) return;
 
   const chatId = msg.chat.id;
   const texteMessageClavier = msg.text || msg.caption || "";
 
-  if (texteMessageClavier.startsWith('/mission') || texteMessageClavier.startsWith('!mission')) {
-    const ordre = texteMessageClavier.replace(/^[\/!]mission\s*/i, '').trim();
-    if (!ordre) {
-      return await envoyerTelegram(chatId, "⚠️ Précise l'intitulé de la mission après `/mission`.");
+  // Empilement séquentiel du traitement
+  empilerTraitement(async () => {
+    if (texteMessageClavier.startsWith('/mission') || texteMessageClavier.startsWith('!mission')) {
+      const ordre = texteMessageClavier.replace(/^[\/!]mission\s*/i, '').trim();
+      if (!ordre) {
+        return await envoyerTelegram(chatId, "⚠️ Précise l'intitulé de la mission après `/mission`.");
+      }
+      missionEnAttente = { texte: ordre, statut: "attente", chatId: chatId };
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
+      }
+      return await envoyerTelegram(
+        chatId, 
+        `⚙️ *Mission transmise au Worker Local :*\n« _${ordre}_ »\n\nQwen démarre sur ton PC. Les livrables te seront envoyés ici au fur et à mesure.`
+      );
     }
-    missionEnAttente = { texte: ordre, statut: "attente", chatId: chatId };
-    if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
+
+    if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet')) {
+      cacheEtatProfond.projet = { actif: false, nom: "", etapes: [], index: 0, tentatives_etape: 0, statut: "inactif" };
+      missionEnAttente = null;
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
+        axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
+      }
+      return await envoyerTelegram(chatId, "🛑 *Chantier interrompu et réinitialisé.* Le worker local est libéré.");
     }
-    return await envoyerTelegram(
-      chatId, 
-      `⚙️ *Mission transmise au Worker Local :*\n« _${ordre}_ »\n\nQwen démarre sur ton PC. Les livrables te seront envoyés ici au fur et à mesure.`
-    );
-  }
 
-  if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet')) {
-    cacheEtatProfond.projet = { actif: false, nom: "", etapes: [], index: 0, tentatives_etape: 0, statut: "inactif" };
-    missionEnAttente = null;
-    if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
-      axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
+    if (texteMessageClavier === '/apprendre' || texteMessageClavier === '!apprendre') {
+      await envoyerTelegram(chatId, "🧠 _Tri mental et consolidation de mémoire en cours..._");
+      await consoliderMemoire();
+      return await envoyerTelegram(chatId, "✅ *Carnet à long terme synchronisé et purgé.*");
     }
-    return await envoyerTelegram(chatId, "🛑 *Chantier interrompu et réinitialisé.* Le worker local est libéré.");
-  }
 
-  if (texteMessageClavier === '/apprendre' || texteMessageClavier === '!apprendre') {
-    await envoyerTelegram(chatId, "🧠 _Tri mental et consolidation de mémoire en cours..._");
-    await consoliderMemoire();
-    return await envoyerTelegram(chatId, "✅ *Carnet à long terme synchronisé et purgé.*");
-  }
+    let texteFinal = texteMessageClavier;
+    let mediaData = null;
 
-  let texteFinal = texteMessageClavier;
-  let mediaData = null;
+    await afficherFrappeTelegram(chatId);
 
-  await afficherFrappeTelegram(chatId);
-
-  if (msg.photo && msg.photo.length > 0) {
-    try {
-      const base64Str = await lireMediaSecurise(msg.photo[msg.photo.length - 1].file_id);
-      mediaData = { mime_type: "image/jpeg", data: base64Str };
-      if (!texteFinal.trim()) texteFinal = "Analyse cette image et donne ton avis direct.";
-    } catch (err) {
-      return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
-    }
-  } 
-  else if (msg.voice || msg.audio) {
-    try {
-      await envoyerTelegram(chatId, "🎧 _Nyx écoute ton audio..._");
-      const objAudio = msg.voice || msg.audio;
-      const mimeType = objAudio.mime_type || "audio/ogg";
-      const base64Str = await lireMediaSecurise(objAudio.file_id);
-      mediaData = { mime_type: mimeType, data: base64Str };
-      if (!texteFinal.trim()) texteFinal = "Écoute cet enregistrement audio et réponds naturellement.";
-    } catch (err) {
-      return await envoyerTelegram(chatId, `[ERREUR AUDIO] : Impossible de télécharger l'audio (${err.message}).`);
-    }
-  }
-  else if (msg.document) {
-    const mime = msg.document.mime_type || "";
-    const fileName = (msg.document.file_name || "").toLowerCase();
-
-    if (mime === 'application/pdf' || fileName.endsWith('.pdf')) {
+    if (msg.photo && msg.photo.length > 0) {
       try {
-        await envoyerTelegram(chatId, "⏳ _Ingestion du PDF..._");
-        const pdfText = await lirePdfSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU DOCUMENT PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+        let base64Str = await lireMediaSecurise(msg.photo[msg.photo.length - 1].file_id);
+        mediaData = { mime_type: "image/jpeg", data: base64Str };
+        base64Str = null; // Libération de la référence intermédiaire
+        if (!texteFinal.trim()) texteFinal = "Analyse cette image et donne ton avis direct.";
       } catch (err) {
-        return await envoyerTelegram(chatId, `[ERREUR PDF] : ${err.message}`);
+        return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
       }
     } 
-    else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
+    else if (msg.voice || msg.audio) {
       try {
-        await envoyerTelegram(chatId, "⏳ _Déchiquetage du DOCX..._");
-        const docxText = await lireDocxSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU DOCUMENT DOCX "${msg.document.file_name}"]\n\n${docxText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+        await envoyerTelegram(chatId, "🎧 _Nyx écoute ton audio..._");
+        const objAudio = msg.voice || msg.audio;
+        const mimeType = objAudio.mime_type || "audio/ogg";
+        let base64Str = await lireMediaSecurise(objAudio.file_id);
+        mediaData = { mime_type: mimeType, data: base64Str };
+        base64Str = null;
+        if (!texteFinal.trim()) texteFinal = "Écoute cet enregistrement audio et réponds naturellement.";
       } catch (err) {
-        return await envoyerTelegram(chatId, `[ERREUR DOCX] : ${err.message}`);
+        return await envoyerTelegram(chatId, `[ERREUR AUDIO] : Impossible de télécharger l'audio (${err.message}).`);
       }
     }
-    else if (
-      mime.startsWith('text/') || 
-      fileName.endsWith('.txt') || 
-      fileName.endsWith('.js') || 
-      fileName.endsWith('.json') || 
-      fileName.endsWith('.py') || 
-      fileName.endsWith('.md') ||
-      fileName.endsWith('.html') ||
-      fileName.endsWith('.css')
-    ) {
-      try {
-        await envoyerTelegram(chatId, "⏳ _Lecture du fichier texte..._");
-        const texteFichier = await lireTexteSecurise(msg.document.file_id);
-        texteFinal = `[CONTENU DU FICHIER "${msg.document.file_name}"]\n\n${texteFichier}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
-      } catch (err) {
-        return await envoyerTelegram(chatId, `[ERREUR TEXTE] : ${err.message}`);
-      }
-    }
-  }
+    else if (msg.document) {
+      const mime = msg.document.mime_type || "";
+      const fileName = (msg.document.file_name || "").toLowerCase();
 
-  const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
-  if (urlTrouvee) {
-    const urlCible = urlTrouvee[0];
-    await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
-    const extraction = await scraperPageWeb(urlCible);
-    if (extraction.succes) {
-      texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN DE LA PAGE]\n\nInstruction de Doc : ${texteFinal}`;
-    } else {
-      await envoyerTelegram(chatId, `⚠️ _Impossible de lire la page (${extraction.erreur})_`);
-    }
-  }
-
-  if (texteFinal.trim() || mediaData) {
-    try {
-      let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
-
-      const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
-      if (matchDessin) {
-        texteNyx = texteNyx.replace(matchDessin[0], '').trim();
-        if (texteNyx) await envoyerTelegram(chatId, texteNyx);
+      if (mime === 'application/pdf' || fileName.endsWith('.pdf')) {
         try {
-          const b64Image = await genererImageVenice(matchDessin[1]);
-          await envoyerPhotoTelegram(chatId, b64Image);
-        } catch (errImg) {
-          const detailErr = errImg.response?.data?.error?.message 
-            || errImg.response?.data?.error 
-            || errImg.message;
-          await envoyerTelegram(chatId, `[ÉCHEC IMAGE VENICE] : ${detailErr}`);
+          await envoyerTelegram(chatId, "⏳ _Ingestion du PDF..._");
+          let pdfText = await lirePdfSecurise(msg.document.file_id);
+          texteFinal = `[CONTENU DU DOCUMENT PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+          pdfText = null;
+        } catch (err) {
+          return await envoyerTelegram(chatId, `[ERREUR PDF] : ${err.message}`);
         }
-      } else {
-        await envoyerTelegram(chatId, texteNyx);
+      } 
+      else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
+        try {
+          await envoyerTelegram(chatId, "⏳ _Déchiquetage du DOCX..._");
+          let docxText = await lireDocxSecurise(msg.document.file_id);
+          texteFinal = `[CONTENU DU DOCUMENT DOCX "${msg.document.file_name}"]\n\n${docxText}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+          docxText = null;
+        } catch (err) {
+          return await envoyerTelegram(chatId, `[ERREUR DOCX] : ${err.message}`);
+        }
       }
-    } catch (err) {
-      await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
+      else if (
+        mime.startsWith('text/') || 
+        fileName.endsWith('.txt') || 
+        fileName.endsWith('.js') || 
+        fileName.endsWith('.json') || 
+        fileName.endsWith('.py') || 
+        fileName.endsWith('.md') ||
+        fileName.endsWith('.html') ||
+        fileName.endsWith('.css')
+      ) {
+        try {
+          await envoyerTelegram(chatId, "⏳ _Lecture du fichier texte..._");
+          let texteFichier = await lireTexteSecurise(msg.document.file_id);
+          texteFinal = `[CONTENU DU FICHIER "${msg.document.file_name}"]\n\n${texteFichier}\n\n[FIN DU DOCUMENT]\n\n${texteFinal}`;
+          texteFichier = null;
+        } catch (err) {
+          return await envoyerTelegram(chatId, `[ERREUR TEXTE] : ${err.message}`);
+        }
+      }
     }
-  }
+
+    const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
+    if (urlTrouvee) {
+      const urlCible = urlTrouvee[0];
+      await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
+      const extraction = await scraperPageWeb(urlCible);
+      if (extraction.succes) {
+        texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN DE LA PAGE]\n\nInstruction de Doc : ${texteFinal}`;
+      } else {
+        await envoyerTelegram(chatId, `⚠️ _Impossible de lire la page (${extraction.erreur})_`);
+      }
+    }
+
+    if (texteFinal.trim() || mediaData) {
+      try {
+        let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
+
+        // Nettoyage immédiat du gros payload média après inférence
+        mediaData = null;
+
+        const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
+        if (matchDessin) {
+          texteNyx = texteNyx.replace(matchDessin[0], '').trim();
+          if (texteNyx) await envoyerTelegram(chatId, texteNyx);
+          try {
+            let b64Image = await genererImageVenice(matchDessin[1]);
+            await envoyerPhotoTelegram(chatId, b64Image);
+            b64Image = null; // Libération mémoire
+          } catch (errImg) {
+            const detailErr = errImg.response?.data?.error?.message 
+              || errImg.response?.data?.error 
+              || errImg.message;
+            await envoyerTelegram(chatId, `[ÉCHEC IMAGE VENICE] : ${detailErr}`);
+          }
+        } else {
+          await envoyerTelegram(chatId, texteNyx);
+        }
+      } catch (err) {
+        mediaData = null;
+        await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
+      }
+    }
+  });
 });
 
 // ==========================================
@@ -1218,10 +1255,33 @@ CONSIGNE STRICTE D'AUDIT TECHNIQUE :
   return res.json({ succes: true });
 });
 
+// ==========================================
+// 14. ENDPOINTS SANTÉ, PINGER & CRON EXTERNE
+// ==========================================
+
+// PING LÉGER : zéro calcul, zéro token, zéro requête DB
+app.get('/ping', (req, res) => res.status(200).send("pong"));
+
+// Ancien endpoint conservé
 app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
 
+// CRON EXTERNE DE NUIT : pour déclencher la consolidation à 04h00 pile
+app.post('/api/consolider', (req, res) => {
+  const tokenFourni = (req.headers['authorization'] || "").replace(/^Bearer\s+/i, '') || req.query.token;
+  if (!CRON_SECRET || tokenFourni !== CRON_SECRET) {
+    return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
+  }
+
+  if (consolidationEnCours) {
+    return res.status(429).json({ statut: "Consolidation déjà en cours" });
+  }
+
+  res.json({ statut: "Consolidation déclenchée" });
+  consoliderMemoire().catch(e => console.error("[CRON EXTERNE CONSOLIDATION ERREUR]", e.message));
+});
+
 // ==========================================
-// 14. DÉMARRAGE DU SERVEUR
+// 15. DÉMARRAGE DU SERVEUR
 // ==========================================
 
 app.listen(PORT, '0.0.0.0', async () => {
