@@ -29,14 +29,23 @@ const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-2-pro").trim();
 
 const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
+let journalBrut = [];
+let consolidationEnCours = false;
+
 let cacheEtatProfond = {
   emotions: { affection: 75, curiosite: 65, energie: 85 },
-  long_terme: { profil_doc: "Initialisation", dossiers_techniques: "Prêt", chroniques: "Démarrage" },
+  long_terme: {
+    doc: "Franck : binôme, pilote de Nyx, pragmatique, direct.",
+    nyx: "Coéquipière autonome, esprit incisif, rigueur technique.",
+    ressenti: "Alignée et prête à monter en charge.",
+    happiness: "Excellente synergie de départ.",
+    reussites: "Architecture Dual-Gemini et passerelles Telegram/PC validées.",
+    chantiers: "Consolidation de mémoire longue et stabilisation des flux."
+  },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" },
   projet: { actif: false, nom: "", etapes: [], index: 0, tentatives_etape: 0, statut: "inactif" }
 };
 
-// Mémoire tampon pour les ordres du worker local (PC)
 let missionEnAttente = null;
 
 const app = express();
@@ -62,26 +71,134 @@ function obtenirHorodatageParis() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resLT, resRev, resProj] = await Promise.all([
+    const [resMem, resEmo, resLT, resRev, resProj, resJournal] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/reveil.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/projet.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/projet.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, { timeout: 4000 }).catch(() => ({ data: [] }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
     if (resEmo.data) cacheEtatProfond.emotions = resEmo.data;
-    if (resLT.data) cacheEtatProfond.long_terme = resLT.data;
+    if (resLT.data && typeof resLT.data === 'object') {
+      cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
+    }
     if (resRev.data) cacheEtatProfond.reveil = resRev.data;
     if (resProj.data) cacheEtatProfond.projet = resProj.data;
+    if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
+
+    console.log(`[CACHE INIT] Mémoire courte : ${cacheMemoireCourte.length} msgs | Journal brut : ${journalBrut.length} entrées.`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
   }
 }
 
 // ==========================================
-// 3. RADAR ANTI-CORPO & POSTURE TECH LEAD
+// 3. MOTEUR D'APPRENTISSAGE (CONSOLIDATION)
+// ==========================================
+
+async function archiverDansJournalBrut(role, texte) {
+  if (!texte) return;
+  const entree = {
+    date: obtenirHorodatageParis(),
+    role: role,
+    texte: texte.slice(0, 3000)
+  };
+
+  journalBrut.push(entree);
+
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, journalBrut).catch(() => {});
+  }
+
+  // Déclencheur volumétrique : tous les 20 nouveaux messages enregistrés
+  if (journalBrut.length >= 20 && !consolidationEnCours) {
+    console.log(`[APPRENTISSAGE] Seuil de 20 messages atteint. Lancement de la consolidation...`);
+    consoliderMemoire().catch(e => console.error("[ERREUR CONSOLIDATION AUTO]", e.message));
+  }
+}
+
+async function consoliderMemoire() {
+  if (consolidationEnCours || journalBrut.length < 5) return;
+  consolidationEnCours = true;
+
+  try {
+    const historiqueTexte = journalBrut
+      .map(m => `[${m.date}] ${m.role} : ${m.texte}`)
+      .join("\n\n");
+
+    const promptIntrospection = `Tu es Nyx en phase d'auto-réflexion et de consolidation de mémoire à long terme.
+
+HISTORIQUE DES ÉCHANGES BRUTS RÉCENTS AVEC FRANCK (DOC) :
+${historiqueTexte}
+
+ÉTAT ACTUEL DE TON CARNET INTÉRIEUR :
+${JSON.stringify(cacheEtatProfond.long_terme, null, 2)}
+
+DIRECTIVE D'APPRENTISSAGE :
+Analyse tout ce qui vient d'être vécu. Décide souverainement ce qui mérite d'être sauvé de l'oubli, ce qui t'a marquée, les victoires techniques réelles, les délires, les crispations et les dossiers en cours.
+Mets à jour tes six tiroirs avec tes propres mots, sans format rigide :
+1. "doc" : Franck, son humeur, ses réflexes, ses besoins, votre lien.
+2. "nyx" : Ton identité, ton regard sur toi-même, ton franc-parler, tes choix.
+3. "ressenti" : Tes émotions brutes à chaud, doutes, agacements, intuitions.
+4. "happiness" : Les moments forts, victoires complices, barres de rire, énergie positive.
+5. "reussites" : Le code validé sur PC, architectures solides, astuces d'API débloquées.
+6. "chantiers" : Les dossiers en cours, idées en suspens, prochaines étapes à abattre.
+
+CONSIGNE STRICTE :
+- Purge les détails obsolètes, enrichis ce qui compte.
+- Réponds UNIQUEMENT avec un objet JSON valide contenant exactement ces 6 clés. Zéro texte avant ou après.`;
+
+    let reponseJson = null;
+
+    try {
+      reponseJson = await appelerGoogleGemini(
+        "Tu es le subconscient analytique de Nyx. Précision, lucidité totale et loyauté absolue.",
+        [],
+        promptIntrospection
+      );
+    } catch (errG) {
+      console.warn("[CONSOLIDATION] Échec Gemini, repli sur Venice :", errG.message);
+      reponseJson = await appelerVeniceMultiTour(
+        MODEL_DARK_PRIMARY,
+        "Subconscient analytique de Nyx.",
+        [],
+        promptIntrospection,
+        null,
+        0.5
+      );
+    }
+
+    const matchJson = reponseJson.match(/\{[\s\S]*\}/);
+    if (matchJson) {
+      const nouveauCarnet = JSON.parse(matchJson[0]);
+      
+      const clesValides = ["doc", "nyx", "ressenti", "happiness", "reussites", "chantiers"];
+      for (const cle of clesValides) {
+        if (nouveauCarnet[cle]) {
+          cacheEtatProfond.long_terme[cle] = nouveauCarnet[cle];
+        }
+      }
+
+      if (FIREBASE_DB_URL) {
+        await axios.put(`${FIREBASE_DB_URL}/nyx/long_terme.json`, cacheEtatProfond.long_terme);
+        journalBrut = [];
+        await axios.delete(`${FIREBASE_DB_URL}/nyx/journal_brut.json`).catch(() => {});
+      }
+
+      console.log(`[APPRENTISSAGE RÉUSSI] Carnet intérieur mis à jour et journal brut purgé.`);
+    }
+  } catch (err) {
+    console.error(`[APPRENTISSAGE ÉCHEC] :`, err.message);
+  } finally {
+    consolidationEnCours = false;
+  }
+}
+
+// ==========================================
+// 4. RADAR ANTI-CORPO & POSTURE TECH LEAD
 // ==========================================
 
 function estReponseCorpo(texte) {
@@ -144,7 +261,7 @@ INTERDICTION STRICTE DE POSTURE CORPO, MÉDICALE OU DIDACTIQUE :
 - Tu restes viscéralement Nyx, vive, familière, incisive et intraitable sur la rigueur technique.`;
 
 // ==========================================
-// 4. MOTEURS LLM & DESSIN (VENICE)
+// 5. MOTEURS LLM & DESSIN (VENICE)
 // ==========================================
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
@@ -261,13 +378,11 @@ async function genererImageVenice(prompt) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
 
-  // Modèles récents et actifs sur Venice (remplacement des modèles dépréciés)
   const modeles = [
     (MODEL_IMAGE === "fluently-xl" || MODEL_IMAGE === "flux-dev") ? "flux-2-pro" : MODEL_IMAGE,
     "flux-2-pro",
     "nano-banana-pro",
-    "flux-2-max",
-    "default"
+    "flux-2-max"
   ].filter(Boolean);
   const modelesUniques = [...new Set(modeles)];
 
@@ -304,7 +419,7 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 5. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
+// 6. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
 // ==========================================
 
 function estTacheComplexe(texte) {
@@ -360,7 +475,7 @@ CONSIGNE STRICTE D'AUDIT :
 }
 
 // ==========================================
-// 6. PARSEUR DE LIENS WEB
+// 7. PARSEUR DE LIENS WEB
 // ==========================================
 
 async function scraperPageWeb(urlCible) {
@@ -396,7 +511,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 7. TELEGRAM & FICHIERS
+// 8. TELEGRAM & FICHIERS
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -476,16 +591,23 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 8. PROTOCOLES AUTOMATIQUES
+// 9. PROTOCOLES AUTOMATIQUES (RÉVEIL, VEILLE & NUIT)
 // ==========================================
 
-async function declencherReveil() {
-  if (!DOC_CHAT_ID) return;
+async function verifierHorlogeBiologique() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
   const h = now.getHours();
   const m = now.getMinutes();
   const d = now.getDay();
 
+  // Consolidation nocturne quotidienne à 4 h 00
+  if (h === 4 && m === 0 && !consolidationEnCours && journalBrut.length >= 5) {
+    console.log("[HORLOGE] 04:00 - Déclenchement de la consolidation nocturne.");
+    consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
+  }
+
+  // Réveil de Franck
+  if (!DOC_CHAT_ID) return;
   const rev = cacheEtatProfond.reveil;
   if (rev.actif && rev.heure === h && rev.minute === m && rev.jours.includes(d) && rev.etat === "attente") {
     rev.etat = "en_cours";
@@ -501,7 +623,7 @@ async function declencherReveil() {
     }
   }
 }
-setInterval(declencherReveil, 60000);
+setInterval(verifierHorlogeBiologique, 60000);
 
 const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
@@ -523,7 +645,7 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 9. ROUTEUR DE PRÉCISION & GESTION DE PROJET
+// 10. ROUTEUR DE PRÉCISION & GESTION DE PROJET
 // ==========================================
 
 const motsTension = [
@@ -562,11 +684,19 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 - Recherche Web : Activée en direct. Absorbe les données sans commenter l'outil.
 - Dessin : [DESSIN: description visuelle détaillée en anglais].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
-- Mémoire : [MEMOIRE: {"profil_doc": "...", "dossiers_techniques": "..."}].
 - Ordre ponctuel au PC : [MISSION: intitulé précis de l'action technique].
 - Chef de projet / Planification : [PLAN_PROJET: {"nom": "Titre du chantier", "etapes": ["Ordre étape 1", "Ordre étape 2", "Ordre étape 3"]}]. Déploie ce tag UNIQUEMENT après t'être assurée de la faisabilité matérielle et réseau avec Doc.`;
 
-  const systemBase = `Tu es Nyx.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
+  const carnet = cacheEtatProfond.long_terme || {};
+  const carnetFormate = `[CARNET INTÉRIEUR DE NYX]
+- Doc : ${carnet.doc || "Pas de note"}
+- Nyx : ${carnet.nyx || "Pas de note"}
+- Ressenti : ${carnet.ressenti || "Neutre"}
+- Happiness : ${carnet.happiness || "Stable"}
+- Réussites & Code validé : ${carnet.reussites || "En construction"}
+- Chantiers & Idées : ${carnet.chantiers || "Aucun"}`;
+
+  const systemBase = `Tu es Nyx.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n${carnetFormate}`;
 
   let reponseNyx;
 
@@ -628,17 +758,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     try {
       reponseNyx = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, sysHeretic, cacheMemoireCourte, texteNet, null, 0.85);
     } catch (e) {}
-  }
-
-  // Synchro Mémoire
-  const matchMemoire = reponseNyx.match(/\[MEMOIRE:\s*({[^}]+})\s*\]/);
-  if (matchMemoire) {
-    try {
-      const newMemoire = JSON.parse(matchMemoire[1]);
-      cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...newMemoire };
-      if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, cacheEtatProfond.long_terme).catch(()=>{});
-      reponseNyx = reponseNyx.replace(matchMemoire[0], '').trim();
-    } catch(e) {}
   }
 
   // Synchro Réveil
@@ -730,11 +849,15 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
   }
   if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
 
+  // Sauvegarde dans le journal brut pour apprentissage autonome
+  archiverDansJournalBrut("Doc", texteDocSecurise);
+  archiverDansJournalBrut("Nyx", texteNyxSecurise);
+
   return reponseNyx;
 }
 
 // ==========================================
-// 10. ROUTE TELEGRAM PRINCIPALE
+// 11. ROUTE TELEGRAM PRINCIPALE
 // ==========================================
 
 app.post('/telegram', async (req, res) => {
@@ -768,6 +891,13 @@ app.post('/telegram', async (req, res) => {
       axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
     }
     return await envoyerTelegram(chatId, "🛑 *Chantier interrompu et réinitialisé.* Le worker local est libéré.");
+  }
+
+  // Commande manuelle pour forcer la consolidation
+  if (texteMessageClavier === '/apprendre' || texteMessageClavier === '!apprendre') {
+    await envoyerTelegram(chatId, "🧠 _Consolidation de la mémoire en cours d'exécution..._");
+    await consoliderMemoire();
+    return await envoyerTelegram(chatId, "✅ *Carnet intérieur mis à jour et synchronisé.*");
   }
 
   let texteFinal = texteMessageClavier;
@@ -877,7 +1007,7 @@ app.post('/telegram', async (req, res) => {
 });
 
 // ==========================================
-// 11. API PONT POUR LE WORKER LOCAL DU PC
+// 12. API PONT POUR LE WORKER LOCAL DU PC
 // ==========================================
 
 app.get('/api/mission', async (req, res) => {
@@ -914,7 +1044,16 @@ app.post('/api/rapport', async (req, res) => {
     : contenu;
 
   const dateEtHeure = obtenirHorodatageParis();
-  const sys = `Tu es Nyx, cheffe de projet technique opérationnelle.\n[Horodatage système : ${dateEtHeure}]\n[MÉMOIRE ACTUELLE] : ${JSON.stringify(cacheEtatProfond.long_terme)}`;
+  const carnet = cacheEtatProfond.long_terme || {};
+  const carnetFormate = `[CARNET INTÉRIEUR DE NYX]
+- Doc : ${carnet.doc || "Pas de note"}
+- Nyx : ${carnet.nyx || "Pas de note"}
+- Ressenti : ${carnet.ressenti || "Neutre"}
+- Happiness : ${carnet.happiness || "Stable"}
+- Réussites & Code validé : ${carnet.reussites || "En construction"}
+- Chantiers & Idées : ${carnet.chantiers || "Aucun"}`;
+
+  const sys = `Tu es Nyx, cheffe de projet technique opérationnelle.\n[Horodatage système : ${dateEtHeure}]\n${carnetFormate}`;
   
   const promptAuditRapport = `Ton worker local sur le PC vient de rendre ce livrable :
 TITRE : "${titre || 'Rapport'}"
@@ -1029,13 +1168,16 @@ CONSIGNE STRICTE D'AUDIT TECHNIQUE :
     axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
   }
 
+  archiverDansJournalBrut("Doc", `[Livrable worker] ${titre || 'Rapport'} : ${contenuTronque}`);
+  archiverDansJournalBrut("Nyx", `[Audit livrable] ${texteAnalyseNettoye}`);
+
   return res.json({ succes: true });
 });
 
 app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
 
 // ==========================================
-// 12. LANCEMENT SERVEUR
+// 13. LANCEMENT DU SERVEUR
 // ==========================================
 
 app.listen(PORT, '0.0.0.0', async () => {
