@@ -261,21 +261,28 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   }
 }
 
-async function genererImageVenice(prompt) {
+async function genererImageGoogle(prompt) {
+  const cle = GEMINI_API_KEY_PAID || GEMINI_KEYS[0];
+  if (!cle) throw new Error("Aucune clé Gemini payante trouvée.");
+
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '');
-  const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
-    model: MODEL_IMAGE,
-    prompt: cleanPrompt,
-    response_format: "b64_json",
-    moderation: "low"
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${cle}`;
+
+  const res = await axios.post(url, {
+    instances: [{ prompt: cleanPrompt }],
+    parameters: {
+      sampleCount: 1,
+      aspectRatio: "1:1",
+      personGeneration: "ALLOW_ADULT"
+    }
   }, {
-    headers: {
-      'Authorization': `Bearer ${VENICE_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 60000 
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 60000
   });
-  return res.data.data[0].b64_json;
+
+  const b64Image = res.data?.predictions?.[0]?.bytesBase64Encoded;
+  if (!b64Image) throw new Error("Google Imagen n'a renvoyé aucune donnée d'image.");
+  return b64Image;
 }
 
 // ==========================================
@@ -513,7 +520,7 @@ const motsTension = [
 ];
 
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
-  const dateEtHeure =  obtenirHorodatageParis();
+  const dateEtHeure = obtenirHorodatageParis();
   const texteNet = (texteBrut || texteLegende || "").trim();
   const texteMin = texteNet.toLowerCase();
 
@@ -847,10 +854,11 @@ app.post('/telegram', async (req, res) => {
         texteNyx = texteNyx.replace(matchDessin[0], '').trim();
         if (texteNyx) await envoyerTelegram(chatId, texteNyx);
         try {
-          const b64Image = await genererImageVenice(matchDessin[1]);
+          // Bascule ici sur la nouvelle fonction Google Imagen
+          const b64Image = await genererImageGoogle(matchDessin[1]);
           await envoyerPhotoTelegram(chatId, b64Image);
         } catch (errImg) {
-          await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
+          await envoyerTelegram(chatId, `[ÉCHEC IMAGE GOOGLE] : ${errImg.message}`);
         }
       } else {
         await envoyerTelegram(chatId, texteNyx);
