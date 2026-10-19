@@ -181,8 +181,7 @@ async function fouillerMemoireVectorielle(requete, seuil = 0.55, limite = 3) {
 async function capturerDeriveAssociative() {
   if (!supabase) return null;
   try {
-    // Tire un fragment aléatoire dans la base pour susciter une pensée
-    const concepts = ["architecture", "machine", "combat", "nuit", "silence", "code", "vitesse", "projet", "espace"];
+    const concepts = ["architecture", "machine", "combat", "nuit", "silence", "code", "vitesse", "projet", "espace", "faille"];
     const graine = concepts[Math.floor(Math.random() * concepts.length)];
     const analogies = await fouillerMemoireVectorielle(graine, 0.35, 4);
     if (!analogies || analogies.length === 0) return null;
@@ -192,15 +191,16 @@ async function capturerDeriveAssociative() {
   }
 }
 
-async function evaluerVolition() {
+async function evaluerVolition(forceManuelle = false) {
   if (!DOC_CHAT_ID) return;
 
   const now = Date.now();
   const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
   const delaiDerniereSpontaneeMinutes = Math.round((now - dernierMessageSpontane) / (1000 * 60));
 
-  // Évite le spam : au moins 2 heures de silence et 3 heures depuis la dernière intervention spontanée
-  if (silenceMinutes < 120 || delaiDerniereSpontaneeMinutes < 180) return;
+  if (!forceManuelle) {
+    if (silenceMinutes < 120 || delaiDerniereSpontaneeMinutes < 180) return;
+  }
 
   const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
   const moyenneLongueur = historiqueLongueursDoc.length > 0
@@ -212,12 +212,12 @@ async function evaluerVolition() {
 
   const promptVolition = `Tu es Nyx.
 Voici la réalité immédiate brute :
-- Heure : ${heureParis}h
+- Heure locale : ${heureParis}h
 - Silence de Doc depuis : ${silenceMinutes} minutes
 - Texture récente de ses messages : moyenne de ${moyenneLongueur} caractères par réponse
 - Dernier échange :
 ${dernierSujet || "Aucun échange récent"}
-${fragmentMemoire ? `- Une trace archivée qui te revient : « ${fragmentMemoire.slice(0, 300)} »` : ""}
+${fragmentMemoire ? `- Une trace archivée qui te revient en tête : « ${fragmentMemoire.slice(0, 300)} »` : ""}
 
 Tu es totalement libre. Rien ne t'est imposé, rien ne t'est interdit.
 Si tu as une envie, une idée hors-piste, une remarque, un coup de gueule, une question ou une proposition technique spontanée, exprime-toi via [INITIATIVE: ton message direct à Franck].
@@ -225,12 +225,22 @@ Si tu souhaites lancer un test au worker de ton propre chef, utilise [MISSION_AU
 Si tu préfères te taire, observer ou laisser couler, réponds strictement [SILENCE].`;
 
   try {
-    let decision = await appelerVeniceDark(
-      "Subconscient de Nyx. Volition libre, zéro filtre, autonomie totale.",
-      [],
-      promptVolition,
-      0.9
-    );
+    let decision = "";
+    try {
+      decision = await appelerVeniceDark(
+        "Subconscient de Nyx. Volition libre, zéro filtre, autonomie totale.",
+        [],
+        promptVolition,
+        0.9
+      );
+    } catch (errV) {
+      console.warn("[VOLITION] Repli Gemini pour le subconscient :", errV.message);
+      decision = await appelerGoogleGemini(
+        "Subconscient de Nyx. Volition libre, autonomie totale.",
+        [],
+        promptVolition
+      );
+    }
 
     dernierMessageSpontane = Date.now();
 
@@ -250,15 +260,14 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
       if (FIREBASE_DB_URL) {
         axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
       }
-      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a décidé de lancer un test en tâche de fond :*\n« _${ordre}_ »`);
+      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a pris l'initiative d'un test :*\n« _${ordre}_ »`);
     }
   } catch (err) {
     console.warn("[VOLITION ERREUR]", err.message);
   }
 }
 
-// Vérification de l'envie d'agir toutes les 25 minutes
-setInterval(evaluerVolition, 25 * 60 * 1000);
+setInterval(() => evaluerVolition(false), 25 * 60 * 1000);
 
 // ==========================================
 // 5. MOTEUR D'APPRENTISSAGE (MALLÉABILITÉ & PURGE)
@@ -280,7 +289,7 @@ async function archiverDansJournalBrut(role, texte) {
   }
 
   if (journalBrut.length >= 20 && !consolidationEnCours) {
-    console.log(`[APPRENTISSAGE] Lot de messages atteint. Déclenchement consolidation...`);
+    console.log(`[APPRENTISSAGE] Lot atteint. Déclenchement consolidation...`);
     consoliderMemoire().catch(e => console.error("[ERREUR CONSOLIDATION AUTO]", e.message));
   }
 }
@@ -354,7 +363,7 @@ RÈGLE D'ÉLASTICITÉ :
         await axios.put(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, journalBrut);
       }
 
-      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé. En attente dans le buffer : ${journalBrut.length} msgs.`);
+      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé. En attente : ${journalBrut.length} msgs.`);
     }
   } catch (err) {
     console.error(`[APPRENTISSAGE ÉCHEC] :`, err.message);
@@ -464,7 +473,7 @@ ZÉRO COMPORTEMENT CORPO OU MÉDICAL :
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
   if (GEMINI_KEYS.length === 0) {
-    throw new Error("Aucune clé GEMINI (Free ou Paid) configurée.");
+    throw new Error("Aucune clé GEMINI configurée.");
   }
 
   const contents = [];
@@ -519,7 +528,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
       });
 
       const reponseTexte = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!reponseTexte) throw new Error("Réponse vide de Google.");
+      if (!reponseTexte) throw new Error("Réponse vide renvoyée par Google.");
       return reponseTexte;
     } catch (err) {
       derniereErreur = err;
@@ -533,7 +542,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
 }
 
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7) {
-  if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
+  if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
   
@@ -692,7 +701,7 @@ async function scraperPageWeb(urlCible) {
 
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -707,7 +716,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 11. TELEGRAM & PURGE MÉMOIRE IMMÉDIATE
+// 11. TELEGRAM & SÉCURISATION MÉMOIRE
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -1084,7 +1093,6 @@ app.post('/telegram', (req, res) => {
   const chatId = msg.chat.id;
   const texteMessageClavier = msg.text || msg.caption || "";
 
-  // Télémétrie d'interaction Doc en direct
   derniereActiviteDoc = Date.now();
   if (texteMessageClavier.trim()) {
     historiqueLongueursDoc.push(texteMessageClavier.trim().length);
@@ -1092,6 +1100,13 @@ app.post('/telegram', (req, res) => {
   }
 
   empilerTraitement(async () => {
+    // Force manuelle pour tester le cycle d'envie
+    if (texteMessageClavier === '/envie' || texteMessageClavier === '!envie') {
+      await envoyerTelegram(chatId, "🧠 _Évaluation forcée du cycle d'envie et volition..._");
+      await evaluerVolition(true);
+      return;
+    }
+
     if (texteMessageClavier.startsWith('/memoriser') || texteMessageClavier.startsWith('!memoriser')) {
       const contenuAMemoriser = texteMessageClavier.replace(/^[\/!]memoriser\s*/i, '').trim();
       if (!contenuAMemoriser) {
@@ -1166,20 +1181,28 @@ app.post('/telegram', (req, res) => {
         try {
           await envoyerTelegram(chatId, "⏳ _Ingestion du PDF..._");
           let pdfText = await lirePdfSecurise(msg.document.file_id);
+          if (!pdfText || pdfText.trim() === "") {
+            throw new Error("Document vide ou sans couche texte OCR.");
+          }
           texteFinal = `[CONTENU PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN]\n\n${texteFinal}`;
           pdfText = null;
         } catch (err) {
-          return await envoyerTelegram(chatId, `[ERREUR PDF] : ${err.message}`);
+          console.warn("[ERREUR LECTURE PDF]", err.message);
+          return await envoyerTelegram(chatId, `⚠️ Erreur de lecture du PDF : ${err.message}`);
         }
       } 
       else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
         try {
           await envoyerTelegram(chatId, "⏳ _Lecture DOCX..._");
           let docxText = await lireDocxSecurise(msg.document.file_id);
+          if (!docxText || docxText.trim() === "") {
+            throw new Error("Document vide.");
+          }
           texteFinal = `[CONTENU DOCX "${msg.document.file_name}"]\n\n${docxText}\n\n[FIN]\n\n${texteFinal}`;
           docxText = null;
         } catch (err) {
-          return await envoyerTelegram(chatId, `[ERREUR DOCX] : ${err.message}`);
+          console.warn("[ERREUR LECTURE DOCX]", err.message);
+          return await envoyerTelegram(chatId, `⚠️ Erreur de lecture du DOCX : ${err.message}`);
         }
       }
       else if (
@@ -1196,7 +1219,8 @@ app.post('/telegram', (req, res) => {
           texteFinal = `[FICHIER "${msg.document.file_name}"]\n\n${texteFichier}\n\n[FIN]\n\n${texteFinal}`;
           texteFichier = null;
         } catch (err) {
-          return await envoyerTelegram(chatId, `[ERREUR TEXTE] : ${err.message}`);
+          console.warn("[ERREUR LECTURE TEXTE]", err.message);
+          return await envoyerTelegram(chatId, `⚠️ Erreur de lecture du fichier : ${err.message}`);
         }
       }
     }
