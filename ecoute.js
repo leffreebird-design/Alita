@@ -258,20 +258,56 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 }
 
 async function genererImageVenice(prompt) {
-  const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '');
-  const res = await axios.post('https://api.venice.ai/api/v1/image/generate', {
-    model: MODEL_IMAGE,
-    prompt: cleanPrompt,
-    response_format: "b64_json",
-    moderation: "low"
-  }, {
-    headers: {
-      'Authorization': `Bearer ${VENICE_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 60000 
-  });
-  return res.data.data[0].b64_json;
+  if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
+  const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
+
+  // Liste de secours des modèles image Venice
+  const modeles = [
+    MODEL_IMAGE,
+    "fluently-xl",
+    "flux-dev-uncensored",
+    "flux-dev"
+  ].filter(Boolean);
+  const modelesUniques = [...new Set(modeles)];
+
+  // Essai prioritaire sur le standard OpenAI (images/generations), puis repli sur la route alternative
+  const routes = [
+    'https://api.venice.ai/api/v1/images/generations',
+    'https://api.venice.ai/api/v1/image/generate'
+  ];
+
+  let derniereErreur = null;
+
+  for (const route of routes) {
+    for (const mod of modelesUniques) {
+      try {
+        const res = await axios.post(route, {
+          model: mod,
+          prompt: cleanPrompt,
+          response_format: "b64_json",
+          moderation: "low"
+        }, {
+          headers: {
+            'Authorization': `Bearer ${VENICE_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 60000 
+        });
+
+        const b64 = res.data?.data?.[0]?.b64_json || res.data?.images?.[0];
+        if (b64) return b64;
+      } catch (err) {
+        derniereErreur = err;
+        const msgErr = err.response?.data?.error?.message || err.response?.data?.error || err.message;
+        console.warn(`[VENICE IMAGE KO sur ${route} avec ${mod}] : ${JSON.stringify(msgErr)}`);
+      }
+    }
+  }
+
+  const detailFinal = derniereErreur?.response?.data?.error?.message 
+    || derniereErreur?.response?.data?.error 
+    || derniereErreur?.message;
+  throw new Error(`${detailFinal}`);
 }
 
 // ==========================================
@@ -833,7 +869,10 @@ app.post('/telegram', async (req, res) => {
           const b64Image = await genererImageVenice(matchDessin[1]);
           await envoyerPhotoTelegram(chatId, b64Image);
         } catch (errImg) {
-          await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
+          const detailErr = errImg.response?.data?.error?.message 
+            || errImg.response?.data?.error 
+            || errImg.message;
+          await envoyerTelegram(chatId, `[ÉCHEC IMAGE VENICE] : ${detailErr}`);
         }
       } else {
         await envoyerTelegram(chatId, texteNyx);
