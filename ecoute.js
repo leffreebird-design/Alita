@@ -25,7 +25,7 @@ const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "olafangensan-glm-4.7-flash-heretic").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "glm-4-9b-chat").trim();
 const MODEL_DARK_FALLBACK = "venice-uncensored-1-2";
-const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "fluently-xl").trim();
+const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-2-pro").trim();
 
 const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
@@ -261,46 +261,39 @@ async function genererImageVenice(prompt) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente sur Render.");
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
 
-  // Liste de secours des modèles image Venice
+  // Modèles récents et actifs sur Venice (remplacement des modèles dépréciés)
   const modeles = [
-    MODEL_IMAGE,
-    "fluently-xl",
-    "flux-dev-uncensored",
-    "flux-dev"
+    (MODEL_IMAGE === "fluently-xl" || MODEL_IMAGE === "flux-dev") ? "flux-2-pro" : MODEL_IMAGE,
+    "flux-2-pro",
+    "nano-banana-pro",
+    "flux-2-max",
+    "default"
   ].filter(Boolean);
   const modelesUniques = [...new Set(modeles)];
 
-  // Essai prioritaire sur le standard OpenAI (images/generations), puis repli sur la route alternative
-  const routes = [
-    'https://api.venice.ai/api/v1/images/generations',
-    'https://api.venice.ai/api/v1/image/generate'
-  ];
-
   let derniereErreur = null;
 
-  for (const route of routes) {
-    for (const mod of modelesUniques) {
-      try {
-        const res = await axios.post(route, {
-          model: mod,
-          prompt: cleanPrompt,
-          response_format: "b64_json",
-          moderation: "low"
-        }, {
-          headers: {
-            'Authorization': `Bearer ${VENICE_API_KEY}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 60000 
-        });
+  for (const mod of modelesUniques) {
+    try {
+      const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
+        model: mod,
+        prompt: cleanPrompt,
+        response_format: "b64_json",
+        moderation: "low"
+      }, {
+        headers: {
+          'Authorization': `Bearer ${VENICE_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 60000 
+      });
 
-        const b64 = res.data?.data?.[0]?.b64_json || res.data?.images?.[0];
-        if (b64) return b64;
-      } catch (err) {
-        derniereErreur = err;
-        const msgErr = err.response?.data?.error?.message || err.response?.data?.error || err.message;
-        console.warn(`[VENICE IMAGE KO sur ${route} avec ${mod}] : ${JSON.stringify(msgErr)}`);
-      }
+      const b64 = res.data?.data?.[0]?.b64_json;
+      if (b64) return b64;
+    } catch (err) {
+      derniereErreur = err;
+      const msgErr = err.response?.data?.error?.message || err.response?.data?.error || err.message;
+      console.warn(`[VENICE IMAGE KO avec ${mod}] :`, msgErr);
     }
   }
 
