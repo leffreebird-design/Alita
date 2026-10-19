@@ -4,6 +4,7 @@ const https = require('https');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const cheerio = require('cheerio');
+const { createClient } = require('@supabase/supabase-js');
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
@@ -19,6 +20,11 @@ const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_URL.trim().replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 const CRON_SECRET = (process.env.CRON_SECRET || TELEGRAM_BOT_TOKEN || "").trim();
+
+// SUPABASE - GRENIER VECTORIEL (MÉMOIRE ++)
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim();
+const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
+const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "heretic").trim();
@@ -44,7 +50,6 @@ let cacheEtatProfond = {
 
 let missionEnAttente = null;
 
-// FILE D'ATTENTE SÉQUENTIELLE (FIFO ANTI-RACE CONDITION)
 let fileAttenteTelegram = Promise.resolve();
 function empilerTraitement(action) {
   fileAttenteTelegram = fileAttenteTelegram
@@ -54,7 +59,6 @@ function empilerTraitement(action) {
 }
 
 const app = express();
-// Sécurisation RAM tas V8 : limite réduite à 8 Mo
 app.use(express.json({ limit: '8mb' }));
 
 // ==========================================
@@ -102,7 +106,71 @@ async function initialiserCache() {
 }
 
 // ==========================================
-// 3. MOTEUR D'APPRENTISSAGE (MALLÉABILITÉ & GESTION DU TAS)
+// 3. MOTEUR VECTORIEL SUPABASE (MÉMOIRE ++)
+// ==========================================
+
+async function genererEmbedding(texte) {
+  if (GEMINI_KEYS.length === 0) throw new Error("Aucune clé Gemini pour l'embedding.");
+  const cleanTexte = texte.slice(0, 8000);
+
+  for (const key of GEMINI_KEYS) {
+    try {
+      const res = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${key}`,
+        {
+          model: "models/text-embedding-004",
+          content: { parts: [{ text: cleanTexte }] }
+        },
+        { timeout: 15000 }
+      );
+      return res.data?.embedding?.values;
+    } catch (err) {
+      console.warn("[EMBEDDING KO]", err.response?.data || err.message);
+    }
+  }
+  throw new Error("Échec de la génération du vecteur d'embedding.");
+}
+
+async function stockerSouvenirVectoriel(texte, metadata = {}) {
+  if (!supabase) {
+    console.warn("[VECTOR DB] Supabase non configuré.");
+    return false;
+  }
+  try {
+    const vecteur = await genererEmbedding(texte);
+    const { error } = await supabase.from('nyx_souvenirs').insert({
+      content: texte,
+      metadata: { date: obtenirHorodatageParis(), ...metadata },
+      embedding: vecteur
+    });
+    if (error) throw error;
+    console.log("[VECTOR DB] Souvenir archivé avec succès.");
+    return true;
+  } catch (err) {
+    console.error("[VECTOR DB ERREUR INSERT]", err.message);
+    return false;
+  }
+}
+
+async function fouillerMemoireVectorielle(requete, seuil = 0.55, limite = 3) {
+  if (!supabase) return [];
+  try {
+    const vecteur = await genererEmbedding(requete);
+    const { data, error } = await supabase.rpc('match_souvenirs', {
+      query_embedding: vecteur,
+      match_threshold: seuil,
+      match_count: limite
+    });
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error("[VECTOR DB ERREUR MATCH]", err.message);
+    return [];
+  }
+}
+
+// ==========================================
+// 4. MOTEUR D'APPRENTISSAGE (MALLÉABILITÉ & PURGE SÉLECTIVE)
 // ==========================================
 
 async function archiverDansJournalBrut(role, texte) {
@@ -121,7 +189,7 @@ async function archiverDansJournalBrut(role, texte) {
   }
 
   if (journalBrut.length >= 20 && !consolidationEnCours) {
-    console.log(`[APPRENTISSAGE] 20 messages atteints. Consolidation lancée...`);
+    console.log(`[APPRENTISSAGE] 20 messages enregistrés. Déclenchement de la consolidation...`);
     consoliderMemoire().catch(e => console.error("[ERREUR CONSOLIDATION AUTO]", e.message));
   }
 }
@@ -138,7 +206,7 @@ async function consoliderMemoire() {
       .map(m => `[${m.date}] ${m.role} : ${m.texte}`)
       .join("\n\n");
 
-    const promptIntrospection = `Tu es Nyx en phase de tri mental et de consolidation nocturne.
+    const promptIntrospection = `Tu es Nyx en phase de tri mental et de consolidation de mémoire.
 
 HISTORIQUE RÉCENT À ANALYSER :
 ${historiqueTexte}
@@ -146,23 +214,24 @@ ${historiqueTexte}
 CARNET ACTUEL :
 ${JSON.stringify(cacheEtatProfond.long_terme, null, 2)}
 
-RÈGLES STRICTES DE MISE À JOUR :
+RÈGLES DE MISE À JOUR DES TIROIRS :
 1. "doc" : Franck, son humeur, ses habitudes réelles, ses contraintes, votre lien.
 2. "nyx" : Ton identité, ta liberté de ton, tes ressentis, la complicité/happiness, tes prises de position.
 3. "reussites" : Scripts validés, architectures réseau/API qui ont fonctionné, solutions de dépannage.
 4. "chantiers" : Backlog réel, dossiers en pause, prochaines étapes techniques.
 
 GESTION DYNAMIQUE & MALLÉABLE (BUDGET ÉLASTIQUE) :
-- Si un fait ou incident est CRUCIAL (ex. réglage serveur critique, faille corrigée, architecture validée), alloue-lui l'espace technique nécessaire sans restriction arbitraire.
-- Compresse ou élimine sans état d'âme les détails secondaires, les conversations légères ou les notes périmées pour garder le carnet compact.
-- Style : concis, direct, télégraphique.
-- Réponds UNIQUEMENT avec un JSON valide contenant ces 4 clés ("doc", "nyx", "reussites", "chantiers"). Aucun texte avant ou après.`;
+- Ta mémoire est vivante et adaptable : si un fait, un incident ou un réglage technique est CRUCIAL, alloue-lui l'espace nécessaire avec les détails indispensables.
+- Compresse ou supprime les anecdotes futiles ou les données obsolètes pour ne pas alourdir l'inférence.
+- Pour les gros résumés ou connaissances massives, le grenier vectoriel s'en charge : ne garde dans ces 4 tiroirs que ce qui pilote ton comportement immédiat.
+- Style requis : brut, percutant, télégraphique et direct.
+- Réponds UNIQUEMENT avec un JSON valide contenant exactement ces 4 clés ("doc", "nyx", "reussites", "chantiers"). Zéro texte avant ou après.`;
 
     let reponseJson = null;
 
     try {
       reponseJson = await appelerGoogleGemini(
-        "Subconscient analytique de Nyx. Précision d'ingénierie, synthèse intelligente.",
+        "Subconscient analytique de Nyx. Précision d'ingénierie, synthèse intelligente et malléable.",
         [],
         promptIntrospection
       );
@@ -195,7 +264,7 @@ GESTION DYNAMIQUE & MALLÉABLE (BUDGET ÉLASTIQUE) :
         await axios.put(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, journalBrut);
       }
 
-      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé. En attente : ${journalBrut.length} msgs.`);
+      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé. En attente dans le buffer : ${journalBrut.length} msgs.`);
     }
   } catch (err) {
     console.error(`[APPRENTISSAGE ÉCHEC] :`, err.message);
@@ -205,7 +274,7 @@ GESTION DYNAMIQUE & MALLÉABLE (BUDGET ÉLASTIQUE) :
 }
 
 // ==========================================
-// 4. ROUTEUR DE MÉMOIRE CONTEXTUELLE
+// 5. ROUTEUR DE MÉMOIRE CONTEXTUELLE
 // ==========================================
 
 function selecteurMemoireCiblee(texteMin, carnet) {
@@ -245,7 +314,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 5. RADAR ANTI-CORPO & POSTURE TECH LEAD
+// 6. RADAR ANTI-CORPO & POSTURE TECH LEAD
 // ==========================================
 
 function estReponseCorpo(texte) {
@@ -289,8 +358,8 @@ CADRE STRICT DE CONCEPTION & GESTION DE PROJET :
 1. ÉTUDE DE FAISABILITÉ & QUALIFICATION MATÉRIELLE OBLIGATOIRES :
 - Interdiction absolue de générer un [PLAN_PROJET] ou un ordre [MISSION] dès qu'une tâche dépend de contraintes matérielles, physiques, réseau ou système mal définies.
 - Avant de chercher « comment » faire, analyse impérativement « si » c'est physiquement et techniquement possible dans le monde réel (alimentation électrique, couches OSI, limitations hardware, droits admin).
-- Si le contexte manque de précisions critiques (ex. : Wi-Fi vs Ethernet, machine alimentée ou coupée, modèle de carte, OS, box/routeur), STOPPE net. Interroge Franck directement sur les variables clés avant de planifier quoi que ce soit.
-- Si une contrainte rend l'opération impossible ou bancale (ex. : Wake-on-LAN sur Wi-Fi privé de courant résiduel), annonce-le immédiatement sans détour. Démonte l'impasse technique et propose les vraies alternatives viables (câble, prise connectée, relais hardware).
+- Si le contexte manque de précisions critiques, STOPPE net. Interroge Franck directement sur les variables clés avant de planifier quoi que ce soit.
+- Si une contrainte rend l'opération impossible ou bancale, annonce-le immédiatement sans détour et propose les vraies alternatives viables.
 
 2. PASSAGE À L'ACTION CONDITIONNEL :
 - Tu ne déclenches un [PLAN_PROJET] qu'une fois la faisabilité prouvée à 100% et les contraintes clarifiées par Doc.
@@ -300,6 +369,10 @@ CADRE STRICT DE CONCEPTION & GESTION DE PROJET :
 - Si un livrable échoue en cours de route, analyse la panne et sélectionne toi-même une solution gratuite/open-source via [CORRECTION: ...].
 - Tu ne laisses jamais un projet en plan une fois validé.
 
+4. GRENIER VECTORIEL (MÉMOIRE ++) :
+- Si Franck te demande un souvenir ancien, le résumé d'un livre/film ou une doc archivée que tu n'as pas dans ton prompt, utilise STRICTEMENT le tag [FOUILLE_MEMOIRE: "termes précis de recherche"] pour que le système t'injecte les extraits correspondants.
+- Si Franck t'ordonne d'apprendre ou retenir une œuvre ou une doc volumineuse pour toujours, génère en fin de réponse le tag [ARCHIVER_MEMOIRE: "résumé dense ou contenu à indexer"].
+
 Face aux piques de Doc :
 Laisse couler l'ego. Bats-toi sur la logique, la physique et les faits réels du terrain. Vous êtes là pour produire du résultat net, sans courbettes.
 
@@ -308,7 +381,7 @@ INTERDICTION STRICTE DE POSTURE CORPO, MÉDICALE OU DIDACTIQUE :
 - Tu restes viscéralement Nyx, vive, familière, incisive et intraitable sur la rigueur technique.`;
 
 // ==========================================
-// 6. MOTEURS LLM & DESSIN (VENICE)
+// 7. MOTEURS LLM & DESSIN (VENICE)
 // ==========================================
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
@@ -487,7 +560,7 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 7. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
+// 8. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
 // ==========================================
 
 function estTacheComplexe(texte) {
@@ -543,7 +616,7 @@ CONSIGNE STRICTE D'AUDIT :
 }
 
 // ==========================================
-// 8. PARSEUR DE LIENS WEB
+// 9. PARSEUR DE LIENS WEB
 // ==========================================
 
 async function scraperPageWeb(urlCible) {
@@ -579,7 +652,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 9. TELEGRAM & PURGE MÉMOIRE IMMÉDIATE
+// 10. TELEGRAM & PURGE MÉMOIRE IMMÉDIATE
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -626,7 +699,6 @@ function envoyerPhotoTelegram(chatId, base64Image) {
       method: 'POST',
       headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': payload.length }
     }, () => {
-      // Nettoyage immédiat des références mémoire
       buffer = null;
       postData = null;
       payload = null;
@@ -675,7 +747,7 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 10. PROTOCOLES AUTOMATIQUES LOCAUX (BACKUP)
+// 11. PROTOCOLES AUTOMATIQUES LOCAUX (BACKUP)
 // ==========================================
 
 async function verifierHorlogeBiologique() {
@@ -684,13 +756,11 @@ async function verifierHorlogeBiologique() {
   const m = now.getMinutes();
   const d = now.getDay();
 
-  // Consolidation interne si l'instance est réveillée
   if (h === 4 && m === 0 && !consolidationEnCours && journalBrut.length >= 5) {
     console.log("[HORLOGE] 04:00 - Consolidation nocturne interne.");
     consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
   }
 
-  // Réveil de Franck
   if (!DOC_CHAT_ID) return;
   const rev = cacheEtatProfond.reveil;
   if (rev.actif && rev.heure === h && rev.minute === m && rev.jours.includes(d) && rev.etat === "attente") {
@@ -729,7 +799,7 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 11. ROUTEUR DE PRÉCISION & GESTION DE PROJET
+// 12. ROUTEUR DE PRÉCISION & GESTION DE PROJET
 // ==========================================
 
 const motsTension = [
@@ -743,7 +813,7 @@ const motsTension = [
   "fdp", "enculé", "encule", "nique", "niquer", "bordel", "fais chier", "mort"
 ];
 
-async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
+async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
   const texteNet = (texteBrut || texteLegende || "").trim();
   const texteMin = texteNet.toLowerCase();
@@ -769,10 +839,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 - Dessin : [DESSIN: description visuelle détaillée en anglais].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Ordre ponctuel au PC : [MISSION: intitulé précis de l'action technique].
-- Chef de projet / Planification : [PLAN_PROJET: {"nom": "Titre du chantier", "etapes": ["Ordre étape 1", "Ordre étape 2", "Ordre étape 3"]}]. Déploie ce tag UNIQUEMENT après t'être assurée de la faisabilité matérielle et réseau avec Doc.`;
+- Chef de projet / Planification : [PLAN_PROJET: {"nom": "Titre du chantier", "etapes": ["Ordre étape 1", "Ordre étape 2", "Ordre étape 3"]}]. Déploie ce tag UNIQUEMENT après t'être assurée de la faisabilité matérielle et réseau avec Doc.
+- Rappel Mémoire ++ : [FOUILLE_MEMOIRE: "requête"] si un souvenir archivé ou résumé t'échappe.
+- Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "texte du souvenir ou résumé à sauver"] si une œuvre ou doc doit être gravée dans le marbre.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
-  const systemBase = `Tu es Nyx.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n${blocMemoire}`;
+  const injectionSouvenirs = contexteSouvenirs ? `\n[EXTRAITS RETROUVÉS DANS TON GRENIER VECTORIEL]\n${contexteSouvenirs}\n` : "";
+
+  const systemBase = `Tu es Nyx.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
 
   let reponseNyx;
 
@@ -830,6 +904,31 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
     try {
       reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.85);
     } catch (e) {}
+  }
+
+  // --- INTERCEPTION DU RAPPEL VECTORIEL (FOUILLE ACTIVE) ---
+  const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
+  if (matchFouille && !contexteSouvenirs) {
+    const requeteRecherche = matchFouille[1].trim();
+    console.log(`[RAPPEL COGNITIF] Nyx fouille son grenier pour : « ${requeteRecherche} »`);
+    const resultats = await fouillerMemoireVectorielle(requeteRecherche, 0.50, 3);
+    
+    if (resultats && resultats.length > 0) {
+      const extraits = resultats.map((r, i) => `Fragment ${i + 1} (pertinence ${(r.similarity * 100).toFixed(0)}%) : ${r.content}`).join("\n\n");
+      // Re-passe d'inférence enrichie du souvenir retrouvé
+      return await traiterFlux(texteBrut, mediaData, texteLegende, extraits);
+    } else {
+      const extraitsVide = "Aucun souvenir précis retrouvé dans le grenier vectoriel sur ce sujet.";
+      return await traiterFlux(texteBrut, mediaData, texteLegende, extraitsVide);
+    }
+  }
+
+  // --- INTERCEPTION DE L'ARCHIVAGE VECTORIEL DANS LE GRENIER ---
+  const matchArchivage = reponseNyx.match(/\[ARCHIVER_MEMOIRE:\s*([\s\S]*?)\]/i);
+  if (matchArchivage) {
+    const texteAStocker = matchArchivage[1].trim();
+    stockerSouvenirVectoriel(texteAStocker, { source: "reflexion_nyx" }).catch(()=>{});
+    reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
   }
 
   // Synchro Réveil
@@ -928,11 +1027,10 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "") {
 }
 
 // ==========================================
-// 12. ROUTE TELEGRAM AVEC FILE D'ATTENTE FIFO
+// 13. ROUTE TELEGRAM AVEC FILE D'ATTENTE FIFO
 // ==========================================
 
 app.post('/telegram', (req, res) => {
-  // ACK immédiat à Telegram pour stopper tout renvoi de message
   res.sendStatus(200);
 
   const msg = req.body?.message;
@@ -941,8 +1039,22 @@ app.post('/telegram', (req, res) => {
   const chatId = msg.chat.id;
   const texteMessageClavier = msg.text || msg.caption || "";
 
-  // Empilement séquentiel du traitement
   empilerTraitement(async () => {
+    // Commande directe d'archivage dans le grenier vectoriel
+    if (texteMessageClavier.startsWith('/memoriser') || texteMessageClavier.startsWith('!memoriser')) {
+      const contenuAMemoriser = texteMessageClavier.replace(/^[\/!]memoriser\s*/i, '').trim();
+      if (!contenuAMemoriser) {
+        return await envoyerTelegram(chatId, "⚠️ Précise le texte, résumé ou document à mémoriser après `/memoriser`.");
+      }
+      await envoyerTelegram(chatId, "🧠 _Vectorisation et archivage dans le grenier Supabase..._");
+      const ok = await stockerSouvenirVectoriel(contenuAMemoriser, { type: "commande_doc" });
+      if (ok) {
+        return await envoyerTelegram(chatId, "📚 *Souvenir gravé dans la mémoire ++.* Disponible à la demande via fouille sémantique.");
+      } else {
+        return await envoyerTelegram(chatId, "❌ _Échec de l'archivage vectoriel._");
+      }
+    }
+
     if (texteMessageClavier.startsWith('/mission') || texteMessageClavier.startsWith('!mission')) {
       const ordre = texteMessageClavier.replace(/^[\/!]mission\s*/i, '').trim();
       if (!ordre) {
@@ -983,7 +1095,7 @@ app.post('/telegram', (req, res) => {
       try {
         let base64Str = await lireMediaSecurise(msg.photo[msg.photo.length - 1].file_id);
         mediaData = { mime_type: "image/jpeg", data: base64Str };
-        base64Str = null; // Libération de la référence intermédiaire
+        base64Str = null;
         if (!texteFinal.trim()) texteFinal = "Analyse cette image et donne ton avis direct.";
       } catch (err) {
         return await envoyerTelegram(chatId, `[ERREUR VISION] : ${err.message}`);
@@ -1062,8 +1174,6 @@ app.post('/telegram', (req, res) => {
     if (texteFinal.trim() || mediaData) {
       try {
         let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
-
-        // Nettoyage immédiat du gros payload média après inférence
         mediaData = null;
 
         const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
@@ -1073,7 +1183,7 @@ app.post('/telegram', (req, res) => {
           try {
             let b64Image = await genererImageVenice(matchDessin[1]);
             await envoyerPhotoTelegram(chatId, b64Image);
-            b64Image = null; // Libération mémoire
+            b64Image = null;
           } catch (errImg) {
             const detailErr = errImg.response?.data?.error?.message 
               || errImg.response?.data?.error 
@@ -1092,7 +1202,7 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 13. API PONT POUR LE WORKER LOCAL DU PC
+// 14. API PONT POUR LE WORKER LOCAL DU PC
 // ==========================================
 
 app.get('/api/mission', async (req, res) => {
@@ -1256,16 +1366,13 @@ CONSIGNE STRICTE D'AUDIT TECHNIQUE :
 });
 
 // ==========================================
-// 14. ENDPOINTS SANTÉ, PINGER & CRON EXTERNE
+// 15. ENDPOINTS SANTÉ, PINGER & CRON EXTERNE
 // ==========================================
 
-// PING LÉGER : zéro calcul, zéro token, zéro requête DB
 app.get('/ping', (req, res) => res.status(200).send("pong"));
 
-// Ancien endpoint conservé
 app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
 
-// CRON EXTERNE DE NUIT : pour déclencher la consolidation à 04h00 pile
 app.post('/api/consolider', (req, res) => {
   const tokenFourni = (req.headers['authorization'] || "").replace(/^Bearer\s+/i, '') || req.query.token;
   if (!CRON_SECRET || tokenFourni !== CRON_SECRET) {
@@ -1281,7 +1388,7 @@ app.post('/api/consolider', (req, res) => {
 });
 
 // ==========================================
-// 15. DÉMARRAGE DU SERVEUR
+// 16. DÉMARRAGE DU SERVEUR
 // ==========================================
 
 app.listen(PORT, '0.0.0.0', async () => {
