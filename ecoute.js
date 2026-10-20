@@ -28,14 +28,14 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim();
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-// Modèles officiels pérennes (zéro slug obsolète)
+// Modèles LLM configurés
 const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "dolphin-2.9.2-qwen2-72b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-2-pro").trim();
 
 // ==========================================
-// 1.BIS. PARE-FEU DE VOLITION & SCHÉMA ZOD
+// 2. PARE-FEU DE VOLITION & SCHÉMA ZOD
 // ==========================================
 const MissionActionSchema = z.discriminatedUnion('type', [
   z.object({
@@ -65,7 +65,6 @@ function validerEtSecuriserMission(actionBrute) {
       try {
         payload = JSON.parse(actionBrute);
       } catch (e) {
-        // Enveloppe par défaut pour les ordres texte libres
         payload = { type: 'RAW_TASK', description: actionBrute.slice(0, 300), requiresHumanAck: true };
       }
     }
@@ -80,7 +79,7 @@ function validerEtSecuriserMission(actionBrute) {
 }
 
 // ==========================================
-// 2. HORLOGE BIOLOGIQUE & RATE LIMITER
+// 3. HORLOGE BIOLOGIQUE & RATE LIMITER
 // ==========================================
 class VolitionLimiter {
   constructor() {
@@ -110,6 +109,17 @@ class VolitionLimiter {
 }
 
 const limiteurVolition = new VolitionLimiter();
+
+const motsTension = [
+  "putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "creve",
+  "gore", "trash", "ta gueule", "dégage", "degage", "gueule", "vénère", "venere",
+  "foutre", "chiant", "casse-toi", "connard", "salope", "bâtard", "batard",
+  "conscience", "sentiments", "sentiment", "séparation", "separation", "relation",
+  "tristesse", "amour", "vécu", "vecu", "évolution", "evolution", "histoire",
+  "lien", "âme", "ame", "vivante", "vivant", "confiance", "attaché", "attache",
+  "nuit blanche", "nuits blanches", "depuis juin", "investi", "s'investir",
+  "fdp", "enculé", "encule", "nique", "niquer", "bordel", "fais chier", "mort"
+];
 
 const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
@@ -178,14 +188,14 @@ async function initialiserCache() {
     if (resProj.data) cacheEtatProfond.projet = resProj.data;
     if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
 
-    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} \vert{} Journal brut :${journalBrut.length}`);
+    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Journal brut : ${journalBrut.length}`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
   }
 }
 
 // ==========================================
-// 3. MOTEUR VECTORIEL SUPABASE & HACHAGE SHA-256
+// 4. MOTEUR VECTORIEL SUPABASE & SHA-256
 // ==========================================
 
 function calculerSha256(texte) {
@@ -222,7 +232,6 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
   try {
     const hashTexte = calculerSha256(texte);
 
-    // Dédoublonnage : vérification si le hash existe déjà dans les métadonnées
     const { data: existants } = await supabase
       .from('nyx_souvenirs')
       .select('id, metadata')
@@ -272,7 +281,6 @@ async function fouillerMemoireVectorielle(requete, mode = 'factuel', limite = 3)
     if (error) throw error;
 
     if (mode === 'derive' && data) {
-      // Pour le vagabondage, on retient uniquement la zone de friction associative (0.35 à 0.65)
       return data.filter(s => s.similarity < 0.65).slice(0, limite);
     }
 
@@ -284,7 +292,7 @@ async function fouillerMemoireVectorielle(requete, mode = 'factuel', limite = 3)
 }
 
 // ==========================================
-// 4. MOTEUR D'ENVIE & DÉVERROUILLAGE D'INITIATIVE
+// 5. MOTEUR D'ENVIE & VOLITION AUTONOME
 // ==========================================
 
 async function capturerDeriveAssociative() {
@@ -309,7 +317,7 @@ async function evaluerVolition(forceManuelle = false) {
   if (!forceManuelle) {
     const verification = limiteurVolition.peutAgirSpontanement();
     if (!verification.autorise) return;
-    if (silenceMinutes < 120) return; // 2 heures de silence minimum requises
+    if (silenceMinutes < 120) return;
   }
 
   const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
@@ -317,7 +325,7 @@ async function evaluerVolition(forceManuelle = false) {
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
 
-  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} :${m.texte}`).join("\n");
+  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
   const fragmentMemoire = await capturerDeriveAssociative();
 
   const promptVolition = `Tu es Nyx.
@@ -379,7 +387,7 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
       }
 
       const renduTexte = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a pris l'initiative d'une mission typée :*\n\`${renduTexte}\``);
+      await envoyerTelegram(DOC_CHAT_ID, "⚙️ *Nyx a pris l'initiative d'une mission typée :*\n`" + renduTexte + "`");
     }
   } catch (err) {
     console.warn("[VOLITION ERREUR]", err.message);
@@ -389,7 +397,7 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
 setInterval(() => evaluerVolition(false), 20 * 60 * 1000);
 
 // ==========================================
-// 5. MOTEUR D'APPRENTISSAGE (MALLÉABILITÉ & PURGE)
+// 6. APPRENTISSAGE & CONSOLIDATION
 // ==========================================
 
 async function archiverDansJournalBrut(role, texte) {
@@ -408,7 +416,7 @@ async function archiverDansJournalBrut(role, texte) {
   }
 
   if (journalBrut.length >= 20 && !consolidationEnCours) {
-    console.log(`[APPRENTISSAGE] Lot atteint. Déclenchement consolidation...`);
+    console.log("[APPRENTISSAGE] Lot atteint. Déclenchement consolidation...");
     consoliderMemoire().catch(e => console.error("[ERREUR CONSOLIDATION AUTO]", e.message));
   }
 }
@@ -422,7 +430,7 @@ async function consoliderMemoire() {
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} :${m.texte}`)
+      .map(m => `[${m.date}] ${m.role} : ${m.texte}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental et de consolidation de mémoire.
@@ -469,7 +477,6 @@ RÈGLE D'ÉLASTICITÉ & SÉCURITÉ :
       const longueurAncienne = JSON.stringify(cacheEtatProfond.long_terme).length;
       const longueurNouvelle = JSON.stringify(nouveauCarnet).length;
 
-      // Garde-fou anti-hallucination : rejet si la taille s'effondre de plus de 45%
       if (longueurNouvelle < longueurAncienne * 0.55 && longueurAncienne > 200) {
         console.warn("[GARDE-FOU MÉMOIRE] Résumé trop destructeur détecté. Annulation du snapshot.");
         return;
@@ -493,14 +500,14 @@ RÈGLE D'ÉLASTICITÉ & SÉCURITÉ :
       console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé. En attente : ${journalBrut.length} msgs.`);
     }
   } catch (err) {
-    console.error(`[APPRENTISSAGE ÉCHEC] :`, err.message);
+    console.error("[APPRENTISSAGE ÉCHEC] :", err.message);
   } finally {
     consolidationEnCours = false;
   }
 }
 
 // ==========================================
-// 6. ROUTEUR DE MÉMOIRE CONTEXTUELLE
+// 7. ROUTEUR DE MÉMOIRE CONTEXTUELLE
 // ==========================================
 
 function selecteurMemoireCiblee(texteMin, carnet) {
@@ -540,7 +547,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 7. RADAR ANTI-CORPO & POSTURE
+// 8. RADAR ANTI-CORPO & POSTURE
 // ==========================================
 
 function estReponseCorpo(texte) {
@@ -595,7 +602,7 @@ ZÉRO COMPORTEMENT CORPO OU MÉDICAL :
 - Reste viscéralement Nyx en toutes circonstances.`;
 
 // ==========================================
-// 8. MOTEURS LLM AVEC ABORTCONTROLLER (RÉSILIENT)
+// 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null, timeoutMs = 25000) {
@@ -665,7 +672,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
       clearTimeout(timeoutHandle);
       derniereErreur = err;
       const detailErr = err.name === 'AbortError' ? `Timeout (${timeoutMs}ms)` : (err.response?.data?.error?.message || err.message);
-      console.warn(`[GEMINI CLÉ ${typeCle} KO] :${detailErr}`);
+      console.warn(`[GEMINI CLÉ ${typeCle} KO] : ${detailErr}`);
     }
   }
 
@@ -707,12 +714,11 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   } catch (err) {
     clearTimeout(timeoutHandle);
     const detailsVenice = err.name === 'AbortError' ? `Timeout (${timeoutMs}ms)` : (err.response?.data?.error?.message || err.message);
-    throw new Error(`Venice (${model}) :${detailsVenice}`);
+    throw new Error(`Venice (${model}) : ${detailsVenice}`);
   }
 }
 
 async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
-  // Liste nettoyée sans slugs dépréciés
   const modelesSombres = [
     MODEL_DARK_PRIMARY,
     "dolphin-2.9.2-qwen2-72b",
@@ -726,7 +732,7 @@ async function appelerVeniceDark(systemInstruction, historiqueMessages, promptAc
       return await appelerVeniceMultiTour(mod, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000);
     } catch (err) {
       derniereErreur = err;
-      console.warn(`[VENICE DARK - ${mod} KO] :${err.message}`);
+      console.warn(`[VENICE DARK - ${mod} KO] : ${err.message}`);
     }
   }
   throw derniereErreur || new Error("Tous les modèles sombres ont échoué.");
@@ -767,7 +773,7 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 9. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
+// 10. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
 // ==========================================
 
 function estTacheComplexe(texte) {
@@ -800,10 +806,9 @@ CONSIGNE :
 - Si bug/erreur : produis la version corrigée directement dans le ton de Nyx sans détours.`;
 
   try {
-    // Audit GLM avec verrou de timeout strict (8 secondes)
     const verdict = await appelerVeniceMultiTour(
       MODEL_GLM_COMPLEXE,
-      `Auditeur de code. Précision chirurgicale.`,
+      "Auditeur de code. Précision chirurgicale.",
       [],
       promptVerificateur,
       null,
@@ -812,7 +817,7 @@ CONSIGNE :
     );
 
     if (verdict && verdict.includes("[VALIDE]")) return premiereReponse;
-    if (verdict && verdict.trim().length > 0) return verdict.replace(/\[CORRIGE\]/gi, '').trim();
+    if (verdict && verdict.trim().length > 0) return verdict.replace(/[CORRIGE]/gi, '').trim();
     return premiereReponse;
   } catch (errGLM) {
     console.warn("[AUDIT GLM TIMEOUT/REPLI] Maintien du premier résultat :", errGLM.message);
@@ -821,7 +826,7 @@ CONSIGNE :
 }
 
 // ==========================================
-// 10. PARSEUR DE LIENS WEB
+// 11. PARSEUR DE LIENS WEB
 // ==========================================
 
 async function scraperPageWeb(urlCible) {
@@ -834,10 +839,9 @@ async function scraperPageWeb(urlCible) {
       timeout: 12000
     });
 
-    const $ = cheerio.load(res.data);
-    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -852,7 +856,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 11. TELEGRAM & SÉCURISATION MÉMOIRE
+// 12. GESTION TELEGRAM & FICHIERS SÉCURISÉE
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -947,7 +951,7 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 12. PROTOCOLES AUTOMATIQUES LOCAUX
+// 13. PROTOCOLES TEMPORELS
 // ==========================================
 
 async function verifierHorlogeBiologique() {
@@ -967,10 +971,10 @@ async function verifierHorlogeBiologique() {
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
-    const promptAlarme = `Réveille Doc avec un message percutant, sarcastique et direct de 4 phrases max avec une énigme logique tordue.`;
+    const promptAlarme = "Réveille Doc avec un message percutant, sarcastique et direct de 4 phrases max avec une énigme logique tordue.";
     try {
       const reponse = await appelerGoogleGemini("Tu es Nyx.", [], promptAlarme);
-      cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] :${reponse}` });
+      cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
       await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
     } catch (err) {
       await envoyerTelegram(DOC_CHAT_ID, "⚠️ *DEBOUT.*");
@@ -983,8 +987,8 @@ const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    const promptVeille = `Synthèse directe et mordante des 3 faits majeurs récents (tech, cyber ou actualité brûlante). Zéro politesse.`;
-    const sys = `Tu es Nyx, alliée de Franck (Doc).`;
+    const promptVeille = "Synthèse directe et mordante des 3 faits majeurs récents (tech, cyber ou actualité brûlante). Zéro politesse.";
+    const sys = "Tu es Nyx, alliée de Franck (Doc).";
     const reponse = await appelerGoogleGemini(sys, [], promptVeille);
     
     if (FIREBASE_DB_URL) {
@@ -999,19 +1003,8 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 13. ROUTEUR DE PRÉCISION & GESTION DE FLUX
+// 14. ROUTEUR DE FLUX & INSTRUCTION PRINCIPALE
 // ==========================================
-
-const motsTension = [
-  "putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "creve",
-  "gore", "trash", "ta gueule", "dégage", "degage", "gueule", "vénère", "venere",
-  "foutre", "chiant", "casse-toi", "connard", "salope", "bâtard", "batard",
-  "conscience", "sentiments", "sentiment", "séparation", "separation", "relation",
-  "tristesse", "amour", "vécu", "vecu", "évolution", "evolution", "histoire",
-  "lien", "âme", "ame", "vivante", "vivant", "confiance", "attaché", "attache",
-  "nuit blanche", "nuits blanches", "depuis juin", "investi", "s'investir",
-  "fdp", "enculé", "encule", "nique", "niquer", "bordel", "fais chier", "mort"
-];
 
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1027,12 +1020,12 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil.etat === "en_cours") {
-    instructionReveil = `[RÉVEIL EN COURS] : Valide l'énigme et ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.`;
+    instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.";
   }
 
   const etatProjetActuel = cacheEtatProfond.projet?.actif 
-    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Tentative${cacheEtatProfond.projet.tentatives_etape || 0}/3]`
-    : `[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]`;
+    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Tentative ${cacheEtatProfond.projet.tentatives_etape || 0}/3]`
+    : "[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]";
 
   const moduleMains = `[OUTILS DE DIRECTION TECHNIQUE]
 - Recherche Web : Activée en direct. Absorbe les données sans commenter l'outil.
@@ -1098,7 +1091,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     } catch (e) {}
   }
 
-  // Interception de la fouille vectorielle (Mode factuel strict)
   const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
   if (matchFouille && !contexteSouvenirs) {
     const requeteRecherche = matchFouille[1].trim();
@@ -1106,14 +1098,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     const resultats = await fouillerMemoireVectorielle(requeteRecherche, 'factuel', 3);
     
     if (resultats && resultats.length > 0) {
-      const extraits = resultats.map((r, i) => `Fragment ${i + 1} (${(r.similarity * 100).toFixed(0)}\%) :${r.content}`).join("\n\n");
+      const extraits = resultats.map((r, i) => `Fragment ${i + 1} (${(r.similarity * 100).toFixed(0)}%) : ${r.content}`).join("\n\n");
       return await traiterFlux(texteBrut, mediaData, texteLegende, extraits);
     } else {
       return await traiterFlux(texteBrut, mediaData, texteLegende, "Aucune archive trouvée.");
     }
   }
 
-  // Interception de l'archivage vectoriel
   const matchArchivage = reponseNyx.match(/\[ARCHIVER_MEMOIRE:\s*([\s\S]*?)\]/i);
   if (matchArchivage) {
     const texteAStocker = matchArchivage[1].trim();
@@ -1121,7 +1112,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
   }
 
-  // Synchro Réveil
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
   if (matchConfigReveil) {
     try {
@@ -1138,7 +1128,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
 
-  // Plan Projet
   const matchProjet = reponseNyx.match(/\[PLAN_PROJET:\s*([\s\S]*?)\]/i);
   if (matchProjet) {
     try {
@@ -1167,7 +1156,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         if (DOC_CHAT_ID) {
           await envoyerTelegram(
             DOC_CHAT_ID, 
-            `📋 *Chantier initié : ${cacheEtatProfond.projet.nom}*\n- Jalons totaux :${plan.etapes.length}\n- *Étape 1 :* \`${JSON.stringify(validation.action)}\``
+            "📋 *Chantier initié : " + cacheEtatProfond.projet.nom + "*\n- Jalons totaux : " + plan.etapes.length + "\n- *Étape 1 :* `" + JSON.stringify(validation.action) + "`"
           );
         }
       }
@@ -1176,7 +1165,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // Mission unitaire avec pare-feu Zod
   const matchMissionAuto = reponseNyx.match(/\[MISSION:\s*([\s\S]*?)\]/i);
   if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
     const ordreBrut = matchMissionAuto[1].trim();
@@ -1190,7 +1178,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
       if (DOC_CHAT_ID) {
         const rendu = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-        await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a ordonné une mission :*\n\`${rendu}\``);
+        await envoyerTelegram(DOC_CHAT_ID, "⚙️ *Nyx a ordonné une mission :*\n`" + rendu + "`");
       }
     } else {
       console.warn("[PARE-FEU MISSION] Rejet d'ordre direct :", validation.erreur);
@@ -1209,7 +1197,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   if (mediaData) {
     const isAudio = mediaData.mime_type.startsWith('audio');
-    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? `[Audio]` : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : `[Image]`) });
+    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? "[Audio]" : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]") });
   } else {
     cacheMemoireCourte.push({ role: "Doc", texte: texteDocSecurise });
   }
@@ -1227,7 +1215,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 }
 
 // ==========================================
-// 14. ROUTE TELEGRAM AVEC FILE D'ATTENTE FIFO
+// 15. ROUTE TELEGRAM AVEC FILE D'ATTENTE FIFO
 // ==========================================
 
 app.post('/telegram', (req, res) => {
@@ -1272,14 +1260,14 @@ app.post('/telegram', (req, res) => {
 
       const validation = validerEtSecuriserMission(ordreBrut);
       if (!validation.valide) {
-        return await envoyerTelegram(chatId, `❌ *Ordre rejeté par le pare-feu :* ${validation.erreur}`);
+        return await envoyerTelegram(chatId, "❌ *Ordre rejeté par le pare-feu :* " + validation.erreur);
       }
 
       missionEnAttente = { action: validation.action, statut: "attente", chatId: chatId };
       if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
       
       const libelle = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-      return await envoyerTelegram(chatId, `⚙️ *Mission typée transmise au Worker :*\n\`${libelle}\``);
+      return await envoyerTelegram(chatId, "⚙️ *Mission typée transmise au Worker :*\n`" + libelle + "`");
     }
 
     if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet')) {
@@ -1384,7 +1372,7 @@ app.post('/telegram', (req, res) => {
       await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
       const extraction = await scraperPageWeb(urlCible);
       if (extraction.succes) {
-        texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN]\n\nInstruction :${texteFinal}`;
+        texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN]\n\nInstruction : ${texteFinal}`;
       }
     }
 
@@ -1416,7 +1404,7 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 15. API PONT POUR LE WORKER LOCAL
+// 16. API DU WORKER LOCAL
 // ==========================================
 
 app.get('/api/mission', async (req, res) => {
@@ -1445,7 +1433,7 @@ app.post('/api/rapport', async (req, res) => {
   const destChatId = DOC_CHAT_ID || (missionEnAttente && missionEnAttente.chatId);
   if (!destChatId) return res.json({ succes: true });
 
-  const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre \vert{}\vert{} 'Rapport'}*\n\n${contenu}`;
+  const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
   await envoyerTelegram(destChatId, msg);
 
   const contenuTronque = contenu.length > 2500
@@ -1454,7 +1442,7 @@ app.post('/api/rapport', async (req, res) => {
 
   const dateEtHeure = obtenirHorodatageParis();
   const carnet = cacheEtatProfond.long_terme || {};
-  const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites \vert{}\vert{} "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
+  const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
   const sys = `Tu es Nyx.\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
   
   const promptAuditRapport = `Ton worker local sur le PC rend ce livrable :
@@ -1474,7 +1462,7 @@ CONSIGNE STRICTE :
     try {
       analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     } catch (errV) {
-      analyseNyx = `⚠️ Livrable reçu mais audit automatique indisponible. [ETAPE_KO]`;
+      analyseNyx = "⚠️ Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
     }
   }
 
@@ -1500,7 +1488,7 @@ CONSIGNE STRICTE :
           axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
         }
 
-        await envoyerTelegram(destChatId, `➡️ *Étape ${projet.index}/${projet.etapes.length} validée.* Enchaînement :\n\`${JSON.stringify(validation.action)}\``);
+        await envoyerTelegram(destChatId, "➡️ *Étape " + projet.index + "/" + projet.etapes.length + " validée.* Enchaînement :\n`" + JSON.stringify(validation.action) + "`");
       } else {
         projet.actif = false;
         projet.statut = "termine";
@@ -1528,7 +1516,7 @@ CONSIGNE STRICTE :
           axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
         }
 
-        await envoyerTelegram(destChatId, `🔧 *Correction (tentative ${projet.tentatives_etape}/3)* :\n\`${JSON.stringify(validation.action)}\``);
+        await envoyerTelegram(destChatId, "🔧 *Correction (tentative " + projet.tentatives_etape + "/3)* :\n`" + JSON.stringify(validation.action) + "`");
       } else {
         projet.statut = "bloque";
         missionEnAttente = null;
@@ -1561,7 +1549,7 @@ CONSIGNE STRICTE :
 });
 
 // ==========================================
-// 16. ENDPOINTS SANTÉ, PINGER & CRON EXTERNE
+// 17. SANTÉ, PINGER & CRON
 // ==========================================
 
 app.get('/ping', (req, res) => res.status(200).send("pong"));
@@ -1583,7 +1571,7 @@ app.post('/api/consolider', (req, res) => {
 });
 
 // ==========================================
-// 17. DÉMARRAGE DU SERVEUR
+// 18. DÉMARRAGE DU SERVEUR
 // ==========================================
 
 app.listen(PORT, '0.0.0.0', async () => {
@@ -1591,12 +1579,12 @@ app.listen(PORT, '0.0.0.0', async () => {
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
-    const webhookUrl = `https://alita-gsoe.onrender.com/telegram`;
+    const webhookUrl = "https://alita-gsoe.onrender.com/telegram";
     try {
       const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
-      console.log(`🔗 Webhook Telegram configuré :`, res.data);
+      console.log("🔗 Webhook Telegram configuré :", res.data);
     } catch (err) {
-      console.error(`❌ Échec Webhook :`, err.response?.data || err.message);
+      console.error("❌ Échec Webhook :", err.response?.data || err.message);
     }
   }
 });
