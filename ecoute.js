@@ -1,10 +1,12 @@
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
+const crypto = require('crypto');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const cheerio = require('cheerio');
 const { createClient } = require('@supabase/supabase-js');
+const { z } = require('zod');
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
@@ -26,19 +28,95 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim();
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+// Modèles officiels pérennes (zéro slug obsolète)
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "dolphin-2.9.2-qwen2-72b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-2-pro").trim();
+
+// ==========================================
+// 1.BIS. PARE-FEU DE VOLITION & SCHÉMA ZOD
+// ==========================================
+const MissionActionSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('FS_READ'),
+    path: z.string().regex(/^(\.\/safe_workspace\/|logs\/|docs\/)[a-zA-Z0-9_\-\.\/]+$/)
+  }),
+  z.object({
+    type: z.literal('RUN_TEST'),
+    testSuite: z.enum(['unit_hardware', 'bus_can', 'ping_gateway', 'syntax_check'])
+  }),
+  z.object({
+    type: z.literal('TELEGRAM_NOTIFY'),
+    priority: z.enum(['low', 'urgent']).default('low'),
+    message: z.string().max(500)
+  }),
+  z.object({
+    type: z.literal('RAW_TASK'),
+    description: z.string().max(300),
+    requiresHumanAck: z.boolean().default(true)
+  })
+]);
+
+function validerEtSecuriserMission(actionBrute) {
+  try {
+    let payload = actionBrute;
+    if (typeof actionBrute === 'string') {
+      try {
+        payload = JSON.parse(actionBrute);
+      } catch (e) {
+        // Enveloppe par défaut pour les ordres texte libres
+        payload = { type: 'RAW_TASK', description: actionBrute.slice(0, 300), requiresHumanAck: true };
+      }
+    }
+    const resultat = MissionActionSchema.safeParse(payload);
+    if (resultat.success) {
+      return { valide: true, action: resultat.data };
+    }
+    return { valide: false, erreur: resultat.error.issues.map(i => i.message).join(', ') };
+  } catch (err) {
+    return { valide: false, erreur: "Format d'action invalide." };
+  }
+}
+
+// ==========================================
+// 2. HORLOGE BIOLOGIQUE & RATE LIMITER
+// ==========================================
+class VolitionLimiter {
+  constructor() {
+    this.dernierActionTimestamp = 0;
+    this.intervalleMinMs = 4 * 60 * 60 * 1000; // 1 action spontanée max toutes les 4h
+  }
+
+  peutAgirSpontanement() {
+    const nowParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+    const heureActuelle = nowParis.getHours();
+
+    // Couvre-feu nocturne : 23h - 08h
+    if (heureActuelle >= 23 || heureActuelle < 8) {
+      return { autorise: false, raison: "Couvre-feu circadien actif (23h - 08h)." };
+    }
+
+    if (Date.now() - this.dernierActionTimestamp < this.intervalleMinMs) {
+      return { autorise: false, raison: "Quota de spontanéité temporisé (4h)." };
+    }
+
+    return { autorise: true };
+  }
+
+  enregistrerAction() {
+    this.dernierActionTimestamp = Date.now();
+  }
+}
+
+const limiteurVolition = new VolitionLimiter();
 
 const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
 let journalBrut = [];
 let consolidationEnCours = false;
 
-// Télémétrie d'interaction pour le moteur d'envie
 let derniereActiviteDoc = Date.now();
-let dernierMessageSpontane = Date.now();
 let historiqueLongueursDoc = [];
 
 let cacheEtatProfond = {
@@ -65,10 +143,6 @@ function empilerTraitement(action) {
 
 const app = express();
 app.use(express.json({ limit: '8mb' }));
-
-// ==========================================
-// 2. HORLOGE BIOLOGIQUE & SYNCHRO CACHE
-// ==========================================
 
 function obtenirHorodatageParis() {
   const options = {
@@ -104,15 +178,19 @@ async function initialiserCache() {
     if (resProj.data) cacheEtatProfond.projet = resProj.data;
     if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
 
-    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Journal brut : ${journalBrut.length}`);
+    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} \vert{} Journal brut :${journalBrut.length}`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
   }
 }
 
 // ==========================================
-// 3. MOTEUR VECTORIEL SUPABASE (MÉMOIRE ++)
+// 3. MOTEUR VECTORIEL SUPABASE & HACHAGE SHA-256
 // ==========================================
+
+function calculerSha256(texte) {
+  return crypto.createHash('sha256').update(texte.trim()).digest('hex');
+}
 
 async function genererEmbedding(texte) {
   if (GEMINI_KEYS.length === 0) throw new Error("Aucune clé Gemini pour l'embedding.");
@@ -142,11 +220,34 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
     return false;
   }
   try {
+    const hashTexte = calculerSha256(texte);
+
+    // Dédoublonnage : vérification si le hash existe déjà dans les métadonnées
+    const { data: existants } = await supabase
+      .from('nyx_souvenirs')
+      .select('id, metadata')
+      .filter('metadata->>hash', 'eq', hashTexte)
+      .limit(1);
+
+    if (existants && existants.length > 0) {
+      console.log("[VECTOR DB] Souvenir identique détecté (SHA-256). Actualisation temporelle.");
+      await supabase
+        .from('nyx_souvenirs')
+        .update({
+          last_accessed_at: new Date().toISOString(),
+          metadata: { ...existants[0].metadata, date_maj: obtenirHorodatageParis() }
+        })
+        .eq('id', existants[0].id);
+      return true;
+    }
+
     const vecteur = await genererEmbedding(texte);
     const { error } = await supabase.from('nyx_souvenirs').insert({
       content: texte,
-      metadata: { date: obtenirHorodatageParis(), ...metadata },
-      embedding: vecteur
+      metadata: { date: obtenirHorodatageParis(), hash: hashTexte, ...metadata },
+      embedding: vecteur,
+      importance: metadata.importance || 0.5,
+      valence: metadata.valence || "neutre"
     });
     if (error) throw error;
     console.log("[VECTOR DB] Souvenir archivé avec succès.");
@@ -157,16 +258,24 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
   }
 }
 
-async function fouillerMemoireVectorielle(requete, seuil = 0.55, limite = 3) {
+async function fouillerMemoireVectorielle(requete, mode = 'factuel', limite = 3) {
   if (!supabase) return [];
   try {
+    const seuil = (mode === 'factuel') ? 0.75 : 0.35;
     const vecteur = await genererEmbedding(requete);
+    
     const { data, error } = await supabase.rpc('match_souvenirs', {
       query_embedding: vecteur,
       match_threshold: seuil,
-      match_count: limite
+      match_count: (mode === 'derive') ? 8 : limite
     });
     if (error) throw error;
+
+    if (mode === 'derive' && data) {
+      // Pour le vagabondage, on retient uniquement la zone de friction associative (0.35 à 0.65)
+      return data.filter(s => s.similarity < 0.65).slice(0, limite);
+    }
+
     return data || [];
   } catch (err) {
     console.error("[VECTOR DB ERREUR MATCH]", err.message);
@@ -183,7 +292,7 @@ async function capturerDeriveAssociative() {
   try {
     const concepts = ["architecture", "machine", "combat", "nuit", "silence", "code", "vitesse", "projet", "espace", "faille"];
     const graine = concepts[Math.floor(Math.random() * concepts.length)];
-    const analogies = await fouillerMemoireVectorielle(graine, 0.35, 4);
+    const analogies = await fouillerMemoireVectorielle(graine, 'derive', 3);
     if (!analogies || analogies.length === 0) return null;
     return analogies[Math.floor(Math.random() * analogies.length)].content;
   } catch (e) {
@@ -196,10 +305,11 @@ async function evaluerVolition(forceManuelle = false) {
 
   const now = Date.now();
   const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
-  const delaiDerniereSpontaneeMinutes = Math.round((now - dernierMessageSpontane) / (1000 * 60));
 
   if (!forceManuelle) {
-    if (silenceMinutes < 120 || delaiDerniereSpontaneeMinutes < 180) return;
+    const verification = limiteurVolition.peutAgirSpontanement();
+    if (!verification.autorise) return;
+    if (silenceMinutes < 120) return; // 2 heures de silence minimum requises
   }
 
   const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
@@ -207,7 +317,7 @@ async function evaluerVolition(forceManuelle = false) {
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
 
-  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
+  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} :${m.texte}`).join("\n");
   const fragmentMemoire = await capturerDeriveAssociative();
 
   const promptVolition = `Tu es Nyx.
@@ -221,7 +331,7 @@ ${fragmentMemoire ? `- Une trace archivée qui te revient en tête : « ${fragme
 
 Tu es totalement libre. Rien ne t'est imposé, rien ne t'est interdit.
 Si tu as une envie, une idée hors-piste, une remarque, un coup de gueule, une question ou une proposition technique spontanée, exprime-toi via [INITIATIVE: ton message direct à Franck].
-Si tu souhaites lancer un test au worker de ton propre chef, utilise [MISSION_AUTO: ordre précis].
+Si tu souhaites lancer un test au worker de ton propre chef, utilise [MISSION_AUTO: {"type":"RUN_TEST","testSuite":"unit_hardware"} ou ordre précis].
 Si tu préfères te taire, observer ou laisser couler, réponds strictement [SILENCE].`;
 
   try {
@@ -231,7 +341,7 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
         "Subconscient de Nyx. Volition libre, zéro filtre, autonomie totale.",
         [],
         promptVolition,
-        0.9
+        0.7
       );
     } catch (errV) {
       console.warn("[VOLITION] Repli Gemini pour le subconscient :", errV.message);
@@ -242,7 +352,7 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
       );
     }
 
-    dernierMessageSpontane = Date.now();
+    limiteurVolition.enregistrerAction();
 
     const matchInitiative = decision.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
     if (matchInitiative) {
@@ -255,19 +365,28 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
 
     const matchMissionAuto = decision.match(/\[MISSION_AUTO:\s*([\s\S]*?)\]/i);
     if (matchMissionAuto) {
-      const ordre = matchMissionAuto[1].trim();
-      missionEnAttente = { texte: ordre, statut: "attente", chatId: DOC_CHAT_ID };
+      const ordreBrut = matchMissionAuto[1].trim();
+      const validation = validerEtSecuriserMission(ordreBrut);
+
+      if (!validation.valide) {
+        console.warn("[PARE-FEU MISSION] Rejet mission spontanée :", validation.erreur);
+        return;
+      }
+
+      missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
       if (FIREBASE_DB_URL) {
         axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
       }
-      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a pris l'initiative d'un test :*\n« _${ordre}_ »`);
+
+      const renduTexte = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
+      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a pris l'initiative d'une mission typée :*\n\`${renduTexte}\``);
     }
   } catch (err) {
     console.warn("[VOLITION ERREUR]", err.message);
   }
 }
 
-setInterval(() => evaluerVolition(false), 25 * 60 * 1000);
+setInterval(() => evaluerVolition(false), 20 * 60 * 1000);
 
 // ==========================================
 // 5. MOTEUR D'APPRENTISSAGE (MALLÉABILITÉ & PURGE)
@@ -303,7 +422,7 @@ async function consoliderMemoire() {
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} : ${m.texte}`)
+      .map(m => `[${m.date}] ${m.role} :${m.texte}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental et de consolidation de mémoire.
@@ -318,11 +437,10 @@ RÈGLES DE MISE À JOUR DES TIROIRS :
 1. "doc" : Franck, son humeur, ses habitudes réelles, son niveau d'énergie, votre lien.
 2. "nyx" : Ton identité, ta liberté de ton, tes ressentis, la complicité, tes prises de position.
 3. "reussites" : Scripts validés, architectures qui ont fonctionné, solutions de dépannage.
-4. "chantiers" : Backlog réel, dossiers en pause, prochaines étapes techniques.
+4. "chantiers" : Backlog réel, dossiers en pause, prochains jalons techniques.
 
-RÈGLE D'ÉLASTICITÉ :
-- Si un fait ou incident technique/humain est crucial, alloue-lui l'espace nécessaire avec les détails indispensables.
-- Compresse ou jette le bavardage inutile pour ne pas alourdir l'inférence.
+RÈGLE D'ÉLASTICITÉ & SÉCURITÉ :
+- Conserve les détails critiques. Évite les résumés destructeurs qui éliminent le contexte opérationnel.
 - Style requis : brut, percutant, télégraphique et direct.
 - Réponds UNIQUEMENT avec un JSON valide contenant exactement les clés ("doc", "nyx", "reussites", "chantiers").`;
 
@@ -348,6 +466,15 @@ RÈGLE D'ÉLASTICITÉ :
     if (matchJson) {
       const nouveauCarnet = JSON.parse(matchJson[0]);
       
+      const longueurAncienne = JSON.stringify(cacheEtatProfond.long_terme).length;
+      const longueurNouvelle = JSON.stringify(nouveauCarnet).length;
+
+      // Garde-fou anti-hallucination : rejet si la taille s'effondre de plus de 45%
+      if (longueurNouvelle < longueurAncienne * 0.55 && longueurAncienne > 200) {
+        console.warn("[GARDE-FOU MÉMOIRE] Résumé trop destructeur détecté. Annulation du snapshot.");
+        return;
+      }
+
       const cles = ["doc", "nyx", "reussites", "chantiers"];
       for (const k of cles) {
         if (nouveauCarnet[k]) {
@@ -468,10 +595,10 @@ ZÉRO COMPORTEMENT CORPO OU MÉDICAL :
 - Reste viscéralement Nyx en toutes circonstances.`;
 
 // ==========================================
-// 8. MOTEURS LLM & DESSIN (VENICE)
+// 8. MOTEURS LLM AVEC ABORTCONTROLLER (RÉSILIENT)
 // ==========================================
 
-async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
+async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null, timeoutMs = 25000) {
   if (GEMINI_KEYS.length === 0) {
     throw new Error("Aucune clé GEMINI configurée.");
   }
@@ -521,19 +648,24 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
     const typeCle = (i === 0 && GEMINI_KEYS.length > 1) ? "FREE" : "PAID";
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${cleActive}`;
 
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       const res = await axios.post(url, payload, {
         headers: { 'Content-Type': 'application/json' },
-        timeout: 60000
+        signal: controller.signal
       });
+      clearTimeout(timeoutHandle);
 
       const reponseTexte = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!reponseTexte) throw new Error("Réponse vide renvoyée par Google.");
       return reponseTexte;
     } catch (err) {
+      clearTimeout(timeoutHandle);
       derniereErreur = err;
-      const detailErr = err.response?.data?.error?.message || err.message;
-      console.warn(`[GEMINI CLÉ ${typeCle} KO] : ${detailErr}`);
+      const detailErr = err.name === 'AbortError' ? `Timeout (${timeoutMs}ms)` : (err.response?.data?.error?.message || err.message);
+      console.warn(`[GEMINI CLÉ ${typeCle} KO] :${detailErr}`);
     }
   }
 
@@ -541,7 +673,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   throw new Error(`Toutes les clés Gemini ont échoué : ${messageFinal}`);
 }
 
-async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7) {
+async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7, timeoutMs = 20000) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -552,6 +684,9 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   }
 
   messages.push({ role: "user", content: promptActuel });
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', {
@@ -564,32 +699,34 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
         'Authorization': `Bearer ${VENICE_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      timeout: 60000
+      signal: controller.signal
     });
+    clearTimeout(timeoutHandle);
 
     return res.data.choices[0].message.content;
   } catch (err) {
-    const detailsVenice = err.response?.data?.error?.message || err.message;
-    throw new Error(`Venice (${model}) : ${detailsVenice}`);
+    clearTimeout(timeoutHandle);
+    const detailsVenice = err.name === 'AbortError' ? `Timeout (${timeoutMs}ms)` : (err.response?.data?.error?.message || err.message);
+    throw new Error(`Venice (${model}) :${detailsVenice}`);
   }
 }
 
-async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.85) {
+async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
+  // Liste nettoyée sans slugs dépréciés
   const modelesSombres = [
     MODEL_DARK_PRIMARY,
-    "heretic",
-    "olafangensan-glm-4.7-flash-heretic",
-    "venice-uncensored-1-2"
+    "dolphin-2.9.2-qwen2-72b",
+    "llama-3.3-70b"
   ].filter(Boolean);
   const modelesUniques = [...new Set(modelesSombres)];
 
   let derniereErreur = null;
   for (const mod of modelesUniques) {
     try {
-      return await appelerVeniceMultiTour(mod, systemInstruction, historiqueMessages, promptActuel, null, temperature);
+      return await appelerVeniceMultiTour(mod, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000);
     } catch (err) {
       derniereErreur = err;
-      console.warn(`[VENICE DARK - ${mod} KO] : ${err.message}`);
+      console.warn(`[VENICE DARK - ${mod} KO] :${err.message}`);
     }
   }
   throw derniereErreur || new Error("Tous les modèles sombres ont échoué.");
@@ -599,12 +736,7 @@ async function genererImageVenice(prompt) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
 
-  const modeles = [
-    (MODEL_IMAGE === "fluently-xl" || MODEL_IMAGE === "flux-dev") ? "flux-2-pro" : MODEL_IMAGE,
-    "flux-2-pro",
-    "nano-banana-pro",
-    "flux-2-max"
-  ].filter(Boolean);
+  const modeles = [MODEL_IMAGE, "flux-2-pro", "nano-banana-pro"].filter(Boolean);
   const modelesUniques = [...new Set(modeles)];
 
   let derniereErreur = null;
@@ -621,7 +753,7 @@ async function genererImageVenice(prompt) {
           'Authorization': `Bearer ${VENICE_API_KEY}`,
           'Content-Type': 'application/json'
         },
-        timeout: 60000 
+        timeout: 45000 
       });
 
       const b64 = res.data?.data?.[0]?.b64_json;
@@ -668,19 +800,22 @@ CONSIGNE :
 - Si bug/erreur : produis la version corrigée directement dans le ton de Nyx sans détours.`;
 
   try {
+    // Audit GLM avec verrou de timeout strict (8 secondes)
     const verdict = await appelerVeniceMultiTour(
       MODEL_GLM_COMPLEXE,
       `Auditeur de code. Précision chirurgicale.`,
       [],
       promptVerificateur,
       null,
-      0.1
+      0.1,
+      8000
     );
 
     if (verdict && verdict.includes("[VALIDE]")) return premiereReponse;
-    if (verdict && verdict.trim().length > 0) return verdict.replace(/[CORRIGE]/gi, '').trim();
+    if (verdict && verdict.trim().length > 0) return verdict.replace(/\[CORRIGE\]/gi, '').trim();
     return premiereReponse;
   } catch (errGLM) {
+    console.warn("[AUDIT GLM TIMEOUT/REPLI] Maintien du premier résultat :", errGLM.message);
     return premiereReponse;
   }
 }
@@ -696,10 +831,11 @@ async function scraperPageWeb(urlCible) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       },
-      timeout: 15000
+      timeout: 12000
     });
 
-    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $ = cheerio.load(res.data);
+    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
     let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
@@ -730,12 +866,12 @@ async function envoyerTelegram(chatId, text) {
         chat_id: chatId,
         text: bloc,
         parse_mode: 'Markdown'
-      }, { timeout: 15000 });
+      }, { timeout: 12000 });
     } catch (err) {
       await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
         chat_id: chatId,
         text: bloc
-      }, { timeout: 15000 }).catch(e => console.error("[TELEGRAM ERREUR]", e.message));
+      }, { timeout: 12000 }).catch(e => console.error("[TELEGRAM ERREUR]", e.message));
     }
   }
 }
@@ -745,7 +881,7 @@ async function afficherFrappeTelegram(chatId) {
     await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendChatAction`, {
       chat_id: chatId,
       action: 'typing'
-    }, { timeout: 5000 });
+    }, { timeout: 4000 });
   } catch (e) {}
 }
 
@@ -834,7 +970,7 @@ async function verifierHorlogeBiologique() {
     const promptAlarme = `Réveille Doc avec un message percutant, sarcastique et direct de 4 phrases max avec une énigme logique tordue.`;
     try {
       const reponse = await appelerGoogleGemini("Tu es Nyx.", [], promptAlarme);
-      cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
+      cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] :${reponse}` });
       await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
     } catch (err) {
       await envoyerTelegram(DOC_CHAT_ID, "⚠️ *DEBOUT.*");
@@ -895,14 +1031,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   const etatProjetActuel = cacheEtatProfond.projet?.actif 
-    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Tentative ${cacheEtatProfond.projet.tentatives_etape || 0}/3]`
+    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Tentative${cacheEtatProfond.projet.tentatives_etape || 0}/3]`
     : `[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]`;
 
   const moduleMains = `[OUTILS DE DIRECTION TECHNIQUE]
 - Recherche Web : Activée en direct. Absorbe les données sans commenter l'outil.
 - Dessin : [DESSIN: description visuelle détaillée en anglais].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
-- Ordre ponctuel au PC : [MISSION: intitulé précis de l'action technique].
+- Ordre ponctuel au PC : [MISSION: {"type":"RUN_TEST","testSuite":"syntax_check"} ou descriptif précis].
 - Chef de projet / Planification : [PLAN_PROJET: {"nom": "Titre", "etapes": ["Étape 1", "Étape 2"]}].
 - Rappel Mémoire ++ : [FOUILLE_MEMOIRE: "requête"].
 - Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "résumé ou doc"].`;
@@ -937,7 +1073,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   else if ((modeTension || modeImage) && !modeFactuel) {
     const sys = `${systemBase}\nMode Heretic : Sans filtre, complice, loyale, brute, zéro morale corpo.`;
     try {
-      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.85);
+      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
     } catch (errSombre) {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet, null);
     }
@@ -948,7 +1084,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet, mediaData);
       if (estReponseCorpo(reponseNyx)) {
         const sysHeretic = `${systemBase}\nMode Heretic : Coupe le filtre moral, réponds d'égal à égal à Franck.`;
-        reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.85);
+        reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.7);
       }
     } catch (errGoogle) {
       reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
@@ -958,19 +1094,19 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   if (estReponseCorpo(reponseNyx) && !estComplexe) {
     const sysHeretic = `${systemBase}\nMode Heretic : Réponds cash sans posture didactique.`;
     try {
-      reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.85);
+      reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.7);
     } catch (e) {}
   }
 
-  // Interception de la fouille vectorielle
+  // Interception de la fouille vectorielle (Mode factuel strict)
   const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
   if (matchFouille && !contexteSouvenirs) {
     const requeteRecherche = matchFouille[1].trim();
     console.log(`[RAPPEL COGNITIF] Recherche : « ${requeteRecherche} »`);
-    const resultats = await fouillerMemoireVectorielle(requeteRecherche, 0.50, 3);
+    const resultats = await fouillerMemoireVectorielle(requeteRecherche, 'factuel', 3);
     
     if (resultats && resultats.length > 0) {
-      const extraits = resultats.map((r, i) => `Fragment ${i + 1} (${(r.similarity * 100).toFixed(0)}%) : ${r.content}`).join("\n\n");
+      const extraits = resultats.map((r, i) => `Fragment ${i + 1} (${(r.similarity * 100).toFixed(0)}\%) :${r.content}`).join("\n\n");
       return await traiterFlux(texteBrut, mediaData, texteLegende, extraits);
     } else {
       return await traiterFlux(texteBrut, mediaData, texteLegende, "Aucune archive trouvée.");
@@ -1018,7 +1154,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         };
 
         const premierOrdre = plan.etapes[0];
-        missionEnAttente = { texte: premierOrdre, statut: "attente", chatId: DOC_CHAT_ID };
+        const validation = validerEtSecuriserMission(premierOrdre);
+
+        missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
 
         if (FIREBASE_DB_URL) {
           axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
@@ -1029,7 +1167,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         if (DOC_CHAT_ID) {
           await envoyerTelegram(
             DOC_CHAT_ID, 
-            `📋 *Chantier initié : ${cacheEtatProfond.projet.nom}*\n- Jalons totaux : ${plan.etapes.length}\n- *Ordre étape 1 :* « _${premierOrdre}_ »`
+            `📋 *Chantier initié : ${cacheEtatProfond.projet.nom}*\n- Jalons totaux :${plan.etapes.length}\n- *Étape 1 :* \`${JSON.stringify(validation.action)}\``
           );
         }
       }
@@ -1038,17 +1176,25 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // Mission unitaire
+  // Mission unitaire avec pare-feu Zod
   const matchMissionAuto = reponseNyx.match(/\[MISSION:\s*([\s\S]*?)\]/i);
   if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
-    const ordreAuto = matchMissionAuto[1].trim();
-    missionEnAttente = { texte: ordreAuto, statut: "attente", chatId: DOC_CHAT_ID };
-    if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
-    }
-    reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
-    if (DOC_CHAT_ID) {
-      await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a ordonné une mission :*\n« _${ordreAuto}_ »`);
+    const ordreBrut = matchMissionAuto[1].trim();
+    const validation = validerEtSecuriserMission(ordreBrut);
+
+    if (validation.valide) {
+      missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
+      }
+      reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
+      if (DOC_CHAT_ID) {
+        const rendu = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
+        await envoyerTelegram(DOC_CHAT_ID, `⚙️ *Nyx a ordonné une mission :*\n\`${rendu}\``);
+      }
+    } else {
+      console.warn("[PARE-FEU MISSION] Rejet d'ordre direct :", validation.erreur);
+      reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
     }
   }
 
@@ -1100,7 +1246,6 @@ app.post('/telegram', (req, res) => {
   }
 
   empilerTraitement(async () => {
-    // Force manuelle pour tester le cycle d'envie
     if (texteMessageClavier === '/envie' || texteMessageClavier === '!envie') {
       await envoyerTelegram(chatId, "🧠 _Évaluation forcée du cycle d'envie et volition..._");
       await evaluerVolition(true);
@@ -1122,11 +1267,19 @@ app.post('/telegram', (req, res) => {
     }
 
     if (texteMessageClavier.startsWith('/mission') || texteMessageClavier.startsWith('!mission')) {
-      const ordre = texteMessageClavier.replace(/^[\/!]mission\s*/i, '').trim();
-      if (!ordre) return await envoyerTelegram(chatId, "⚠️ Précise l'intitulé après `/mission`.");
-      missionEnAttente = { texte: ordre, statut: "attente", chatId: chatId };
+      const ordreBrut = texteMessageClavier.replace(/^[\/!]mission\s*/i, '').trim();
+      if (!ordreBrut) return await envoyerTelegram(chatId, "⚠️ Précise l'intitulé après `/mission`.");
+
+      const validation = validerEtSecuriserMission(ordreBrut);
+      if (!validation.valide) {
+        return await envoyerTelegram(chatId, `❌ *Ordre rejeté par le pare-feu :* ${validation.erreur}`);
+      }
+
+      missionEnAttente = { action: validation.action, statut: "attente", chatId: chatId };
       if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
-      return await envoyerTelegram(chatId, `⚙️ *Mission transmise au Worker Local :*\n« _${ordre}_ »`);
+      
+      const libelle = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
+      return await envoyerTelegram(chatId, `⚙️ *Mission typée transmise au Worker :*\n\`${libelle}\``);
     }
 
     if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet')) {
@@ -1231,7 +1384,7 @@ app.post('/telegram', (req, res) => {
       await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
       const extraction = await scraperPageWeb(urlCible);
       if (extraction.succes) {
-        texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN]\n\nInstruction : ${texteFinal}`;
+        texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN]\n\nInstruction :${texteFinal}`;
       }
     }
 
@@ -1269,15 +1422,15 @@ app.post('/telegram', (req, res) => {
 app.get('/api/mission', async (req, res) => {
   if (missionEnAttente && missionEnAttente.statut === "attente") {
     missionEnAttente.statut = "en_cours";
-    return res.json({ mission: missionEnAttente.texte });
+    return res.json({ mission: missionEnAttente.action });
   }
 
   if (FIREBASE_DB_URL) {
     try {
-      const fb = await axios.get(`${FIREBASE_DB_URL}/nyx/mission.json`, { timeout: 2000 });
+      const fb = await axios.get(`${FIREBASE_DB_URL}/nyx/mission.json`, { timeout: 2500 });
       if (fb.data && fb.data.statut === "attente") {
         await axios.patch(`${FIREBASE_DB_URL}/nyx/mission.json`, { statut: "en_cours" });
-        return res.json({ mission: fb.data.texte });
+        return res.json({ mission: fb.data.action || fb.data.texte });
       }
     } catch (e) {}
   }
@@ -1292,7 +1445,7 @@ app.post('/api/rapport', async (req, res) => {
   const destChatId = DOC_CHAT_ID || (missionEnAttente && missionEnAttente.chatId);
   if (!destChatId) return res.json({ succes: true });
 
-  const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
+  const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre \vert{}\vert{} 'Rapport'}*\n\n${contenu}`;
   await envoyerTelegram(destChatId, msg);
 
   const contenuTronque = contenu.length > 2500
@@ -1301,7 +1454,7 @@ app.post('/api/rapport', async (req, res) => {
 
   const dateEtHeure = obtenirHorodatageParis();
   const carnet = cacheEtatProfond.long_terme || {};
-  const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
+  const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites \vert{}\vert{} "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
   const sys = `Tu es Nyx.\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
   
   const promptAuditRapport = `Ton worker local sur le PC rend ce livrable :
@@ -1312,7 +1465,7 @@ ${contenuTronque}
 CONSIGNE STRICTE :
 - Évalue si le code fonctionne et résout le problème.
 - Si 100% propre : conclus par [ETAPE_OK].
-- Si bug/échec : conclus par [ETAPE_KO] et formule ton ordre correctif gratuit entre [CORRECTION: ordre précis].`;
+- Si bug/échec : conclus par [ETAPE_KO] et formule ton ordre correctif typé entre [CORRECTION: {"type":"RUN_TEST","testSuite":"syntax_check"} ou descriptif].`;
 
   let analyseNyx = "";
   try {
@@ -1321,7 +1474,7 @@ CONSIGNE STRICTE :
     try {
       analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     } catch (errV) {
-      analyseNyx = `⚠️ Livrable reçu mais audit automatique impossible. [ETAPE_KO]`;
+      analyseNyx = `⚠️ Livrable reçu mais audit automatique indisponible. [ETAPE_KO]`;
     }
   }
 
@@ -1338,14 +1491,16 @@ CONSIGNE STRICTE :
       
       if (projet.index < projet.etapes.length) {
         const prochainOrdre = projet.etapes[projet.index];
-        missionEnAttente = { texte: prochainOrdre, statut: "attente", chatId: destChatId };
+        const validation = validerEtSecuriserMission(prochainOrdre);
+
+        missionEnAttente = { action: validation.action, statut: "attente", chatId: destChatId };
 
         if (FIREBASE_DB_URL) {
           axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
           axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
         }
 
-        await envoyerTelegram(destChatId, `➡️ *Étape ${projet.index}/${projet.etapes.length} validée.* Enchaînement :\n« _${prochainOrdre}_ »`);
+        await envoyerTelegram(destChatId, `➡️ *Étape ${projet.index}/${projet.etapes.length} validée.* Enchaînement :\n\`${JSON.stringify(validation.action)}\``);
       } else {
         projet.actif = false;
         projet.statut = "termine";
@@ -1364,15 +1519,16 @@ CONSIGNE STRICTE :
       if (projet.tentatives_etape <= 3) {
         const matchCorrection = analyseNyx.match(/\[CORRECTION:\s*([\s\S]*?)\]/i);
         const ordreCorrectif = matchCorrection ? matchCorrection[1].trim() : `Corrige le problème détecté : ${projet.etapes[projet.index]}`;
+        const validation = validerEtSecuriserMission(ordreCorrectif);
 
-        missionEnAttente = { texte: ordreCorrectif, statut: "attente", chatId: destChatId };
+        missionEnAttente = { action: validation.action, statut: "attente", chatId: destChatId };
 
         if (FIREBASE_DB_URL) {
           axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
           axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
         }
 
-        await envoyerTelegram(destChatId, `🔧 *Correction (tentative ${projet.tentatives_etape}/3)* :\n« _${ordreCorrectif}_ »`);
+        await envoyerTelegram(destChatId, `🔧 *Correction (tentative ${projet.tentatives_etape}/3)* :\n\`${JSON.stringify(validation.action)}\``);
       } else {
         projet.statut = "bloque";
         missionEnAttente = null;
@@ -1431,7 +1587,7 @@ app.post('/api/consolider', (req, res) => {
 // ==========================================
 
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
+  console.log(`🚀 NYX Core durci en ligne (Port ${PORT})`);
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
