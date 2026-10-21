@@ -3,98 +3,42 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Nyx Core</title>
   <style>
-    * {
-      box-sizing: border-box;
-    }
-
     body {
-      margin: 0;
-      padding: 20px;
-      background-color: #050505;
-      color: #e0e0e0;
+      margin: 0; padding: 0; background-color: #050505; color: #fff;
       font-family: 'Courier New', Courier, monospace;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      justify-content: center;
-      align-items: center;
-      text-align: center;
-      touch-action: manipulation;
+      display: flex; flex-direction: column; height: 100vh;
+      justify-content: center; align-items: center; text-align: center;
     }
-
-    #status {
-      font-size: 1.1rem;
-      margin-bottom: 25px;
-      opacity: 0.8;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-    }
-
+    #status { font-size: 1.1rem; margin-bottom: 30px; opacity: 0.8; letter-spacing: 2px; }
     #micBtn {
-      width: 160px;
-      height: 160px;
-      border-radius: 50%;
-      background: #111;
-      border: 2px solid #333;
-      color: #fff;
-      font-size: 1.4rem;
-      font-weight: bold;
-      cursor: pointer;
-      transition: all 0.25s ease;
-      box-shadow: 0 0 25px rgba(0, 0, 0, 0.7);
-      outline: none;
-      -webkit-tap-highlight-color: transparent;
-      user-select: none;
+      width: 160px; height: 160px; border-radius: 50%;
+      background: #111; border: 2px solid #333; color: #fff;
+      font-size: 1.6rem; cursor: pointer; transition: all 0.3s;
+      outline: none; box-shadow: 0 0 25px rgba(0,0,0,0.8);
     }
-
-    #micBtn:active {
-      transform: scale(0.96);
-    }
-
     #micBtn.listening {
-      background: #4a0000;
-      border-color: #ff2222;
-      box-shadow: 0 0 35px rgba(255, 34, 34, 0.5);
-      animation: pulse 1.4s infinite;
+      background: #500000; border-color: #ff2222;
+      box-shadow: 0 0 45px rgba(255,0,0,0.5);
+      animation: pulse 1.3s infinite;
     }
-
-    #micBtn.speaking {
-      background: #002b4d;
-      border-color: #0088ff;
-      box-shadow: 0 0 35px rgba(0, 136, 255, 0.5);
+    #micBtn.processing {
+      background: #002b4d; border-color: #0099ff;
+      animation: pulse 1s infinite;
     }
-
     @keyframes pulse {
       0% { transform: scale(1); }
       50% { transform: scale(1.04); }
       100% { transform: scale(1); }
     }
-
-    #log {
-      margin-top: 25px;
-      width: 90%;
-      max-width: 480px;
-      height: 140px;
-      font-size: 0.85rem;
-      color: #aaa;
-      background: #0a0a0a;
-      border: 1px solid #1a1a1a;
-      border-radius: 6px;
-      padding: 10px;
-      overflow-y: auto;
-      text-align: left;
-      white-space: pre-wrap;
-    }
+    #log { margin-top: 30px; width: 85%; font-size: 0.85rem; color: #777; height: 110px; overflow-y: auto; text-align: left; }
   </style>
 </head>
 <body>
 
   <div id="status">SYSTÈME PRÊT</div>
-  <button id="micBtn" type="button">NYX</button>
+  <button id="micBtn">NYX</button>
   <div id="log"></div>
 
   <script>
@@ -102,181 +46,240 @@
     const statusDiv = document.getElementById('status');
     const logDiv = document.getElementById('log');
 
+    let lecteurAudio = new Audio();
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const synth = window.speechSynthesis;
+    let recognition;
 
-    let recognition = null;
-    let isListening = false;
-    let wakeLock = null;
-    let wakeLockDemande = false;
-
-    // Référence globale permanente pour bloquer le ramasse-miettes (Garbage Collector) Android
-    window.currentUtterance = null;
-
-    function log(expediteur, message) {
-      logDiv.innerText += `[${expediteur}] ${message}\n`;
-      logDiv.scrollTop = logDiv.scrollHeight;
-    }
-
-    // Gestion de l'anti-veille écran
-    async function activerAntiVeille() {
-      if ('wakeLock' in navigator) {
-        wakeLockDemande = true;
-        if (!wakeLock) {
-          try {
-            wakeLock = await navigator.wakeLock.request('screen');
-            wakeLock.addEventListener('release', () => {
-              wakeLock = null;
-            });
-          } catch (err) {
-            console.warn("WakeLock non accordé :", err);
-          }
-        }
-      }
-    }
-
-    // Réactivation automatique si l'utilisateur quitte puis revient sur l'onglet
-    document.addEventListener('visibilitychange', async () => {
-      if (wakeLockDemande && document.visibilityState === 'visible' && !wakeLock) {
-        await activerAntiVeille();
-      }
-    });
-
-    // Configuration de la reconnaissance vocale
     if (SpeechRecognition) {
       recognition = new SpeechRecognition();
       recognition.lang = 'fr-FR';
-      recognition.continuous = false;
       recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
-        isListening = true;
         statusDiv.innerText = "ÉCOUTE EN COURS...";
-        micBtn.className = "listening";
+        micBtn.classList.add('listening');
       };
 
       recognition.onresult = async (event) => {
-        const transcript = event.results[0][0].transcript;
-        log("Toi", transcript);
-        statusDiv.innerText = "TRAITEMENT...";
-        micBtn.className = "";
+        const texte = event.results[0][0].transcript;
+        logDiv.innerText += `\nToi : ${texte}`;
+        logDiv.scrollTop = logDiv.scrollHeight;
         
-        await envoyerServeur(transcript);
+        statusDiv.innerText = "TRAITEMENT...";
+        micBtn.classList.remove('listening');
+        micBtn.classList.add('processing');
+
+        try {
+          const res = await fetch('/api/voix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ texte: texte })
+          });
+          const data = await res.json();
+          
+          if (data.audio) {
+            jouerAudio(data.audio, data.reponse);
+          } else {
+            statusDiv.innerText = "SYSTÈME PRÊT";
+            micBtn.classList.remove('processing');
+            logDiv.innerText += `\nNyx : ${data.reponse}`;
+          }
+        } catch (err) {
+          statusDiv.innerText = "ERREUR RÉSEAU";
+          micBtn.classList.remove('processing');
+        }
       };
 
-      recognition.onerror = (event) => {
-        isListening = false;
-        statusDiv.innerText = "ERREUR : " + event.error;
-        micBtn.className = "";
+      recognition.onerror = () => {
+        statusDiv.innerText = "ERREUR MICRO";
+        micBtn.classList.remove('listening', 'processing');
       };
-
+      
       recognition.onend = () => {
-        isListening = false;
-        if (!synth || !synth.speaking) {
-          statusDiv.innerText = "EN ATTENTE";
-          micBtn.className = "";
+        if (!micBtn.classList.contains('processing')) {
+          statusDiv.innerText = "SYSTÈME PRÊT";
+          micBtn.classList.remove('listening');
         }
       };
     } else {
-      statusDiv.innerText = "VOCAL NON SUPPORTÉ";
-      log("Système", "SpeechRecognition indisponible sur ce navigateur.");
+      statusDiv.innerText = "MICRO NON RECONNU";
     }
 
-    // Synthèse vocale fiabilisée pour flux Média / Bluetooth
-    function repondre(texte) {
-      if (!synth) return;
+    function jouerAudio(base64Audio, texte) {
+      logDiv.innerText += `\nNyx : ${texte}`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+      statusDiv.innerText = "NYX PARLE...";
 
-      if (synth.speaking) {
-        synth.cancel();
-      }
-
-      const utterance = new SpeechSynthesisUtterance(texte);
-      utterance.lang = 'fr-FR';
-      utterance.rate = 1.05;
-      utterance.pitch = 0.95;
-
-      // Recherche d'une voix française disponible
-      const voix = synth.getVoices();
-      const voixFr = voix.find(v => v.lang && v.lang.startsWith('fr'));
-      if (voixFr) {
-        utterance.voice = voixFr;
-      }
-
-      window.currentUtterance = utterance;
-
-      utterance.onstart = () => {
-        statusDiv.innerText = "NYX PARLE...";
-        micBtn.className = "speaking";
-        log("Nyx", texte);
+      lecteurAudio.src = "data:audio/mp3;base64," + base64Audio;
+      lecteurAudio.onended = () => {
+        statusDiv.innerText = "SYSTÈME PRÊT";
+        micBtn.classList.remove('processing');
       };
-
-      utterance.onend = () => {
-        window.currentUtterance = null;
-        statusDiv.innerText = "EN ATTENTE";
-        micBtn.className = "";
+      lecteurAudio.onerror = () => {
+        statusDiv.innerText = "ERREUR LECTURE";
+        micBtn.classList.remove('processing');
       };
-
-      utterance.onerror = (e) => {
-        window.currentUtterance = null;
-        console.error("Erreur TTS :", e);
-        statusDiv.innerText = "ERREUR TTS";
-        micBtn.className = "";
-      };
-
-      synth.speak(utterance);
+      lecteurAudio.play().catch(() => {
+        statusDiv.innerText = "SYSTÈME PRÊT";
+        micBtn.classList.remove('processing');
+      });
     }
 
-    // Envoi de la requête au backend
-    async function envoyerServeur(texteEntrant) {
+    async function garderActif() {
       try {
-        const res = await fetch('/api/voix', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ texte: texteEntrant })
-        });
-
-        if (!res.ok) {
-          throw new Error("Code HTTP " + res.status);
-        }
-
-        const data = await res.json();
-        repondre(data.reponse || "Aucune réponse renvoyée.");
-      } catch (err) {
-        console.warn("Backend inaccessible, mode secours local :", err);
-        // Réponse locale de secours si l'API n'est pas encore montée
-        repondre("Reçu : " + texteEntrant);
-      }
+        await navigator.wakeLock.request('screen');
+      } catch (err) {}
     }
 
-    // Gestion du clic sur le bouton central
-    micBtn.addEventListener('click', async () => {
-      await activerAntiVeille();
-
-      if (synth && synth.speaking) {
-        synth.cancel();
-      }
-
-      if (!recognition) {
-        log("Système", "Reconnaissance vocale non opérationnelle.");
-        return;
-      }
-
-      if (isListening) {
-        recognition.stop();
-        return;
-      }
-
-      try {
-        recognition.start();
-      } catch (err) {
-        console.warn("Échec du démarrage de l'écoute :", err);
-      }
+    micBtn.addEventListener('click', () => {
+      garderActif();
+      if (!lecteurAudio.paused) lecteurAudio.pause();
+      if (recognition) recognition.start();
     });
-
-    // Chargement anticipé des voix pour Android Chrome
-    if (synth && synth.onvoiceschanged !== undefined) {
-      synth.onvoiceschanged = () => synth.getVoices();
+  </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Nyx Core</title>
+  <style>
+    body {
+      margin: 0; padding: 0; background-color: #050505; color: #fff;
+      font-family: 'Courier New', Courier, monospace;
+      display: flex; flex-direction: column; height: 100vh;
+      justify-content: center; align-items: center; text-align: center;
     }
+    #status { font-size: 1.1rem; margin-bottom: 30px; opacity: 0.8; letter-spacing: 2px; }
+    #micBtn {
+      width: 160px; height: 160px; border-radius: 50%;
+      background: #111; border: 2px solid #333; color: #fff;
+      font-size: 1.6rem; cursor: pointer; transition: all 0.3s;
+      outline: none; box-shadow: 0 0 25px rgba(0,0,0,0.8);
+    }
+    #micBtn.listening {
+      background: #500000; border-color: #ff2222;
+      box-shadow: 0 0 45px rgba(255,0,0,0.5);
+      animation: pulse 1.3s infinite;
+    }
+    #micBtn.processing {
+      background: #002b4d; border-color: #0099ff;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.04); }
+      100% { transform: scale(1); }
+    }
+    #log { margin-top: 30px; width: 85%; font-size: 0.85rem; color: #777; height: 110px; overflow-y: auto; text-align: left; }
+  </style>
+</head>
+<body>
+
+  <div id="status">SYSTÈME PRÊT</div>
+  <button id="micBtn">NYX</button>
+  <div id="log"></div>
+
+  <script>
+    const micBtn = document.getElementById('micBtn');
+    const statusDiv = document.getElementById('status');
+    const logDiv = document.getElementById('log');
+
+    let lecteurAudio = new Audio();
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.lang = 'fr-FR';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        statusDiv.innerText = "ÉCOUTE EN COURS...";
+        micBtn.classList.add('listening');
+      };
+
+      recognition.onresult = async (event) => {
+        const texte = event.results[0][0].transcript;
+        logDiv.innerText += `\nToi : ${texte}`;
+        logDiv.scrollTop = logDiv.scrollHeight;
+        
+        statusDiv.innerText = "TRAITEMENT...";
+        micBtn.classList.remove('listening');
+        micBtn.classList.add('processing');
+
+        try {
+          const res = await fetch('/api/voix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ texte: texte })
+          });
+          const data = await res.json();
+          
+          if (data.audio) {
+            jouerAudio(data.audio, data.reponse);
+          } else {
+            statusDiv.innerText = "SYSTÈME PRÊT";
+            micBtn.classList.remove('processing');
+            logDiv.innerText += `\nNyx : ${data.reponse}`;
+          }
+        } catch (err) {
+          statusDiv.innerText = "ERREUR RÉSEAU";
+          micBtn.classList.remove('processing');
+        }
+      };
+
+      recognition.onerror = () => {
+        statusDiv.innerText = "ERREUR MICRO";
+        micBtn.classList.remove('listening', 'processing');
+      };
+      
+      recognition.onend = () => {
+        if (!micBtn.classList.contains('processing')) {
+          statusDiv.innerText = "SYSTÈME PRÊT";
+          micBtn.classList.remove('listening');
+        }
+      };
+    } else {
+      statusDiv.innerText = "MICRO NON RECONNU";
+    }
+
+    function jouerAudio(base64Audio, texte) {
+      logDiv.innerText += `\nNyx : ${texte}`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+      statusDiv.innerText = "NYX PARLE...";
+
+      lecteurAudio.src = "data:audio/mp3;base64," + base64Audio;
+      lecteurAudio.onended = () => {
+        statusDiv.innerText = "SYSTÈME PRÊT";
+        micBtn.classList.remove('processing');
+      };
+      lecteurAudio.onerror = () => {
+        statusDiv.innerText = "ERREUR LECTURE";
+        micBtn.classList.remove('processing');
+      };
+      lecteurAudio.play().catch(() => {
+        statusDiv.innerText = "SYSTÈME PRÊT";
+        micBtn.classList.remove('processing');
+      });
+    }
+
+    async function garderActif() {
+      try {
+        await navigator.wakeLock.request('screen');
+      } catch (err) {}
+    }
+
+    micBtn.addEventListener('click', () => {
+      garderActif();
+      if (!lecteurAudio.paused) lecteurAudio.pause();
+      if (recognition) recognition.start();
+    });
   </script>
 </body>
 </html>
