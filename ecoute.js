@@ -30,8 +30,8 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim();
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
-// Modèles LLM configurés
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+// Modèles LLM configurés (Llama 3.3 70B par défaut pour le Dark pour parer l'erreur 404)
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-2-pro").trim();
@@ -724,8 +724,8 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
   const modelesSombres = [
     MODEL_DARK_PRIMARY,
-    "dolphin-2.9.2-qwen2-72b",
-    "llama-3.3-70b"
+    "llama-3.3-70b",
+    "mistral-nemo"
   ].filter(Boolean);
   const modelesUniques = [...new Set(modelesSombres)];
 
@@ -1411,16 +1411,33 @@ app.post('/telegram', (req, res) => {
 // 16. APPLICATION WEB DIRECTE (PWA VOCALE RAY-BAN + EDGE-TTS)
 // ==========================================
 
-// Synthèse vocale neuronale Edge-TTS haute fidélité
+// Synthèse vocale neuronale Edge-TTS haute fidélité (compatible v1 et v2)
 async function genererAudioEdge(texte) {
   const tts = new MsEdgeTTS();
   await tts.setMetadata("fr-FR-DeniseNeural", OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-  const stream = tts.toStream(texte);
+  
+  const resultat = await tts.toStream(texte);
+  const audioStream = resultat.audioStream || resultat;
   const chunks = [];
+
   return new Promise((resolve, reject) => {
-    stream.on('data', chunk => chunks.push(chunk));
-    stream.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
-    stream.on('error', reject);
+    let termine = false;
+    const finaliser = () => {
+      if (!termine) {
+        termine = true;
+        resolve(Buffer.concat(chunks).toString('base64'));
+      }
+    };
+
+    audioStream.on('data', chunk => chunks.push(chunk));
+    audioStream.on('end', finaliser);
+    audioStream.on('close', finaliser);
+    audioStream.on('error', err => {
+      if (!termine) {
+        termine = true;
+        reject(err);
+      }
+    });
   });
 }
 
@@ -1448,12 +1465,12 @@ app.post('/api/voix', async (req, res) => {
       // 2. Traitement par Nyx
       let reponseNyx = await traiterFlux(texte);
 
-      // 3. Réponse écrite de Nyx envoyée sur Telegram
+      // 3. Réponse écrite complète de Nyx envoyée sur Telegram
       if (DOC_CHAT_ID) {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
-      // 4. Nettoyage des balises de contrôle pour la lecture orale
+      // 4. Nettoyage des balises pour la voix
       const texteOral = reponseNyx
         .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
@@ -1465,7 +1482,7 @@ app.post('/api/voix', async (req, res) => {
         .replace(/[*_`#]/g, '')
         .trim();
 
-      // 5. Génération du flux audio Edge-TTS
+      // 5. Génération audio Edge-TTS
       let audioB64 = null;
       try {
         audioB64 = await genererAudioEdge(texteOral);
