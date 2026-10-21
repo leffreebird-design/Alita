@@ -23,11 +23,11 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 const CRON_SECRET = (process.env.CRON_SECRET || TELEGRAM_BOT_TOKEN || "").trim();
 
-// WHATSAPP / TWILIO
-const TWILIO_ACCOUNT_SID = (process.env.TWILIO_ACCOUNT_SID || "").trim();
-const TWILIO_AUTH_TOKEN = (process.env.TWILIO_AUTH_TOKEN || "").trim();
-const TWILIO_WHATSAPP_NUMBER = (process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+14155238886").trim();
-const DOC_PHONE = (process.env.DOC_PHONE || "").trim(); // Ex: "+33612345678" ou "whatsapp:+33612345678"
+// GREEN-API (WHATSAPP RAY-BAN META)
+const GREEN_API_URL = (process.env.GREEN_API_URL || "https://7107.api.greenapi.com").trim().replace(/\/$/, '');
+const GREEN_ID_INSTANCE = (process.env.GREEN_ID_INSTANCE || "710722776792").trim();
+const GREEN_API_TOKEN = (process.env.GREEN_API_TOKEN || "").trim();
+const DOC_PHONE = (process.env.DOC_PHONE || "").trim(); // Ex: "33612345678" ou "33612345678@c.us"
 
 // SUPABASE - GRENIER VECTORIEL (MÉMOIRE ++)
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim();
@@ -90,14 +90,13 @@ function validerEtSecuriserMission(actionBrute) {
 class VolitionLimiter {
   constructor() {
     this.dernierActionTimestamp = 0;
-    this.intervalleMinMs = 4 * 60 * 60 * 1000; // 1 action spontanée max toutes les 4h
+    this.intervalleMinMs = 4 * 60 * 60 * 1000;
   }
 
   peutAgirSpontanement() {
     const nowParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
     const heureActuelle = nowParis.getHours();
 
-    // Couvre-feu nocturne : 23h - 08h
     if (heureActuelle >= 23 || heureActuelle < 8) {
       return { autorise: false, raison: "Couvre-feu circadien actif (23h - 08h)." };
     }
@@ -159,7 +158,7 @@ function empilerTraitement(action) {
 
 const app = express();
 app.use(express.json({ limit: '8mb' }));
-app.use(express.urlencoded({ extended: true, limit: '8mb' })); // Requis pour les webhooks WhatsApp
+app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 
 function obtenirHorodatageParis() {
   const options = {
@@ -374,7 +373,7 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
       const texteSpontane = matchInitiative[1].trim();
       cacheMemoireCourte.push({ role: "Nyx", texte: `[Spontané] : ${texteSpontane}` });
       archiverDansJournalBrut("Nyx", `[Spontané] : ${texteSpontane}`);
-      
+
       if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
       if (DOC_PHONE) await envoyerWhatsApp(DOC_PHONE, texteSpontane);
       return;
@@ -865,7 +864,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 12. GESTION TELEGRAM, WHATSAPP & FICHIERS
+// 12. GESTION TELEGRAM & WHATSAPP (GREEN-API)
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -889,34 +888,27 @@ async function envoyerTelegram(chatId, text) {
   }
 }
 
-// Envoi WhatsApp direct via l'API REST Twilio (sans dépendance externe)
+// Envoi WhatsApp via Green-API
 async function envoyerWhatsApp(destinataire, text) {
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !text) return;
-  const dest = destinataire.startsWith('whatsapp:') ? destinataire : `whatsapp:${destinataire}`;
-  const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
-  
-  // Limite Twilio WhatsApp par bloc
+  if (!GREEN_ID_INSTANCE || !GREEN_API_TOKEN || !text) return;
+
+  const destChatId = destinataire.includes('@c.us')
+    ? destinataire
+    : `${destinataire.replace(/[^0-9]/g, '')}@c.us`;
+
   const TAILLE_MAX = 1500;
   for (let i = 0; i < text.length; i += TAILLE_MAX) {
     const bloc = text.slice(i, i + TAILLE_MAX);
     try {
-      const params = new URLSearchParams();
-      params.append('From', TWILIO_WHATSAPP_NUMBER);
-      params.append('To', dest);
-      params.append('Body', bloc);
-
       await axios.post(
-        `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
-        params.toString(),
+        `${GREEN_API_URL}/waInstance${GREEN_ID_INSTANCE}/sendMessage/${GREEN_API_TOKEN}`,
         {
-          headers: {
-            'Authorization': `Basic ${auth}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          timeout: 15000
-        }
+          chatId: destChatId,
+          message: bloc
+        },
+        { timeout: 15000 }
       );
-      console.log(`[WHATSAPP] Réponse expédiée avec succès à ${dest}`);
+      console.log(`[WHATSAPP] Réponse expédiée à ${destChatId}`);
     } catch (err) {
       console.error("[WHATSAPP ERREUR EXPÉDITION]", err.response?.data || err.message);
     }
@@ -1070,7 +1062,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   const etatProjetActuel = cacheEtatProfond.projet?.actif 
-    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Tentative ${cacheEtatProfond.projet.tentatives_etape || 0}/3]`
+    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} - Tentative${cacheEtatProfond.projet.tentatives_etape || 0}/3]`
     : "[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]";
 
   const moduleMains = `[OUTILS DE DIRECTION TECHNIQUE]
@@ -1450,28 +1442,32 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 16. ROUTE WHATSAPP (TWILIO WEBHOOK -> RAY-BAN)
+// 16. ROUTE WHATSAPP (GREEN-API -> RAY-BAN)
 // ==========================================
 
 app.post('/whatsapp', (req, res) => {
-  // Réponse TwiML immédiate pour clore la requête auprès de Twilio sans timeout
-  res.set('Content-Type', 'text/xml');
-  res.status(200).send('<Response></Response>');
+  res.sendStatus(200);
 
-  const texteMessage = req.body?.Body || "";
-  const expediteur = req.body?.From || ""; // Format Twilio : 'whatsapp:+336XXXXXXXX'
+  // Filtre exclusif sur les messages entrants
+  if (req.body?.typeWebhook !== 'incomingMessageReceived') return;
 
-  // Sécurité numéro (si DOC_PHONE est renseigné dans l'environnement)
+  const msgData = req.body?.messageData;
+  const texteMessage = msgData?.textMessageData?.textMessage 
+    || msgData?.extendedTextMessageData?.text 
+    || "";
+  const expediteur = req.body?.senderData?.chatId || req.body?.senderData?.sender || "";
+
+  if (!texteMessage.trim()) return;
+
+  // Filtrage optionnel par numéro autorisé
   if (DOC_PHONE) {
     const cleanDoc = DOC_PHONE.replace(/[^0-9]/g, '');
     const cleanExp = expediteur.replace(/[^0-9]/g, '');
     if (!cleanExp.includes(cleanDoc)) {
-      console.warn(`[WHATSAPP IGNORÉ] Numéro non autorisé : ${expediteur}`);
+      console.warn(`[WHATSAPP IGNORÉ] Expéditeur non autorisé : ${expediteur}`);
       return;
     }
   }
-
-  if (!texteMessage.trim()) return;
 
   derniereActiviteDoc = Date.now();
   historiqueLongueursDoc.push(texteMessage.trim().length);
@@ -1480,7 +1476,6 @@ app.post('/whatsapp', (req, res) => {
   empilerTraitement(async () => {
     console.log(`\n🎧 [WHATSAPP Ray-Ban Doc] : "${texteMessage}"`);
 
-    // Commandes directes
     if (texteMessage === '/envie' || texteMessage === '!envie') {
       await envoyerWhatsApp(expediteur, "Évaluation forcée de volition lancée.");
       await evaluerVolition(true);
@@ -1488,20 +1483,12 @@ app.post('/whatsapp', (req, res) => {
     }
 
     try {
-      // Nyx traite le message via son cerveau complet
       let texteNyx = await traiterFlux(texteMessage);
 
-      // Si Nyx a généré une demande d'image, on retire le marqueur pour l'oral
-      const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
-      if (matchDessin) {
-        texteNyx = texteNyx.replace(matchDessin[0], '').trim();
-      }
-
-      // Nettoyage Markdown pour que les Ray-Ban lisent naturellement à voix haute
+      // Suppression des artefacts markdown pour une synthèse vocale propre dans les branches
       const texteOral = texteNyx
-        .replace(/\*+/g, '')
-        .replace(/_+/g, '')
-        .replace(/`+/g, '')
+        .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
+        .replace(/[*_`]/g, '')
         .replace(/\[\/?.*?\]/g, '')
         .trim();
 
@@ -1689,7 +1676,7 @@ app.post('/api/consolider', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core durci en ligne (Port ${PORT})`);
-  console.log(`📲 Route WhatsApp active sur : https://alita-gsoe.onrender.com/whatsapp`);
+  console.log(`📲 Route WhatsApp Green-API prête : https://alita-gsoe.onrender.com/whatsapp`);
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
@@ -1698,7 +1685,7 @@ app.listen(PORT, '0.0.0.0', async () => {
       const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
       console.log("🔗 Webhook Telegram configuré :", res.data);
     } catch (err) {
-      console.error("❌ Échec Webhook :", err.response?.data || err.message);
+      console.error("❌ Échec Webhook Telegram :", err.response?.data || err.message);
     }
   }
 });
