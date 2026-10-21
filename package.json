@@ -10,7 +10,7 @@
     "cheerio": "^1.0.0",
     "express": "^4.19.0",
     "mammoth": "^1.7.0",
-    "msedge-tts": "^1.4.1",
+    "msedge-tts": "latest",
     "pdf-parse": "^1.1.1",
     "zod": "^3.22.0",
     "@supabase/supabase-js": "^2.39.0"
