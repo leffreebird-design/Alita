@@ -8,6 +8,7 @@ const mammoth = require('mammoth');
 const cheerio = require('cheerio');
 const { createClient } = require('@supabase/supabase-js');
 const { z } = require('zod');
+const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
@@ -1407,13 +1408,26 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 16. APPLICATION WEB DIRECTE (PWA VOCALE RAY-BAN)
+// 16. APPLICATION WEB DIRECTE (PWA VOCALE RAY-BAN + EDGE-TTS)
 // ==========================================
+
+// Synthèse vocale neuronale Edge-TTS haute fidélité
+async function genererAudioEdge(texte) {
+  const tts = new MsEdgeTTS();
+  await tts.setMetadata("fr-FR-DeniseNeural", OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+  const stream = tts.toStream(texte);
+  const chunks = [];
+  return new Promise((resolve, reject) => {
+    stream.on('data', chunk => chunks.push(chunk));
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+    stream.on('error', reject);
+  });
+}
 
 // Sert les fichiers statiques de l'application (public/index.html)
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
-// Point d'entrée de communication vocale directe
+// Point d'entrée vocal direct
 app.post('/api/voix', async (req, res) => {
   const { texte } = req.body;
   if (!texte) return res.status(400).json({ erreur: "Texte vide" });
@@ -1425,9 +1439,21 @@ app.post('/api/voix', async (req, res) => {
   empilerTraitement(async () => {
     try {
       console.log(`[PWA VOCALE] Message reçu : "${texte}"`);
+
+      // 1. Transcription envoyée sur Telegram
+      if (DOC_CHAT_ID) {
+        await envoyerTelegram(DOC_CHAT_ID, `🎙️ *Toi (vocal) :*\n${texte}`);
+      }
+
+      // 2. Traitement par Nyx
       let reponseNyx = await traiterFlux(texte);
-      
-      // Nettoyage complet des balises et markdown pour la voix
+
+      // 3. Réponse écrite de Nyx envoyée sur Telegram
+      if (DOC_CHAT_ID) {
+        await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
+      }
+
+      // 4. Nettoyage des balises de contrôle pour la lecture orale
       const texteOral = reponseNyx
         .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
@@ -1439,7 +1465,15 @@ app.post('/api/voix', async (req, res) => {
         .replace(/[*_`#]/g, '')
         .trim();
 
-      res.json({ reponse: texteOral });
+      // 5. Génération du flux audio Edge-TTS
+      let audioB64 = null;
+      try {
+        audioB64 = await genererAudioEdge(texteOral);
+      } catch (errAudio) {
+        console.error("[EDGE-TTS ERREUR]", errAudio.message);
+      }
+
+      res.json({ reponse: texteOral, audio: audioB64 });
     } catch (err) {
       console.error("[PWA VOCALE ERREUR]", err.message);
       res.status(500).json({ reponse: "Erreur interne lors du traitement." });
@@ -1619,8 +1653,8 @@ app.post('/api/consolider', (req, res) => {
 // ==========================================
 
 app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`🚀 NYX Core durci en ligne (Port ${PORT})`);
-  console.log(`🌐 Application vocale prête : https://alita-gsoe.onrender.com/app`);
+  console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
+  console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
