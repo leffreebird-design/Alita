@@ -23,6 +23,12 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 const CRON_SECRET = (process.env.CRON_SECRET || TELEGRAM_BOT_TOKEN || "").trim();
 
+// WHATSAPP / TWILIO
+const TWILIO_ACCOUNT_SID = (process.env.TWILIO_ACCOUNT_SID || "").trim();
+const TWILIO_AUTH_TOKEN = (process.env.TWILIO_AUTH_TOKEN || "").trim();
+const TWILIO_WHATSAPP_NUMBER = (process.env.TWILIO_WHATSAPP_NUMBER || "whatsapp:+14155238886").trim();
+const DOC_PHONE = (process.env.DOC_PHONE || "").trim(); // Ex: "+33612345678" ou "whatsapp:+33612345678"
+
 // SUPABASE - GRENIER VECTORIEL (MÉMOIRE ++)
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim();
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
@@ -143,16 +149,17 @@ let cacheEtatProfond = {
 
 let missionEnAttente = null;
 
-let fileAttenteTelegram = Promise.resolve();
+let fileAttenteTraitement = Promise.resolve();
 function empilerTraitement(action) {
-  fileAttenteTelegram = fileAttenteTelegram
+  fileAttenteTraitement = fileAttenteTraitement
     .then(() => action())
-    .catch(err => console.error("[FILE TELEGRAM ERREUR]", err.message));
-  return fileAttenteTelegram;
+    .catch(err => console.error("[FILE TRAITEMENT ERREUR]", err.message));
+  return fileAttenteTraitement;
 }
 
 const app = express();
 app.use(express.json({ limit: '8mb' }));
+app.use(express.urlencoded({ extended: true, limit: '8mb' })); // Requis pour les webhooks WhatsApp
 
 function obtenirHorodatageParis() {
   const options = {
@@ -309,7 +316,7 @@ async function capturerDeriveAssociative() {
 }
 
 async function evaluerVolition(forceManuelle = false) {
-  if (!DOC_CHAT_ID) return;
+  if (!DOC_CHAT_ID && !DOC_PHONE) return;
 
   const now = Date.now();
   const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
@@ -367,7 +374,9 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
       const texteSpontane = matchInitiative[1].trim();
       cacheMemoireCourte.push({ role: "Nyx", texte: `[Spontané] : ${texteSpontane}` });
       archiverDansJournalBrut("Nyx", `[Spontané] : ${texteSpontane}`);
-      await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
+      
+      if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
+      if (DOC_PHONE) await envoyerWhatsApp(DOC_PHONE, texteSpontane);
       return;
     }
 
@@ -387,7 +396,7 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
       }
 
       const renduTexte = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-      await envoyerTelegram(DOC_CHAT_ID, "⚙️ *Nyx a pris l'initiative d'une mission typée :*\n`" + renduTexte + "`");
+      if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, "⚙️ *Nyx a pris l'initiative d'une mission typée :*\n`" + renduTexte + "`");
     }
   } catch (err) {
     console.warn("[VOLITION ERREUR]", err.message);
@@ -841,7 +850,7 @@ async function scraperPageWeb(urlCible) {
 
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -856,7 +865,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 12. GESTION TELEGRAM & FICHIERS SÉCURISÉE
+// 12. GESTION TELEGRAM, WHATSAPP & FICHIERS
 // ==========================================
 
 async function envoyerTelegram(chatId, text) {
@@ -876,6 +885,40 @@ async function envoyerTelegram(chatId, text) {
         chat_id: chatId,
         text: bloc
       }, { timeout: 12000 }).catch(e => console.error("[TELEGRAM ERREUR]", e.message));
+    }
+  }
+}
+
+// Envoi WhatsApp direct via l'API REST Twilio (sans dépendance externe)
+async function envoyerWhatsApp(destinataire, text) {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !text) return;
+  const dest = destinataire.startsWith('whatsapp:') ? destinataire : `whatsapp:${destinataire}`;
+  const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+  
+  // Limite Twilio WhatsApp par bloc
+  const TAILLE_MAX = 1500;
+  for (let i = 0; i < text.length; i += TAILLE_MAX) {
+    const bloc = text.slice(i, i + TAILLE_MAX);
+    try {
+      const params = new URLSearchParams();
+      params.append('From', TWILIO_WHATSAPP_NUMBER);
+      params.append('To', dest);
+      params.append('Body', bloc);
+
+      await axios.post(
+        `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+        params.toString(),
+        {
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          timeout: 15000
+        }
+      );
+      console.log(`[WHATSAPP] Réponse expédiée avec succès à ${dest}`);
+    } catch (err) {
+      console.error("[WHATSAPP ERREUR EXPÉDITION]", err.response?.data || err.message);
     }
   }
 }
@@ -965,7 +1008,7 @@ async function verifierHorlogeBiologique() {
     consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
   }
 
-  if (!DOC_CHAT_ID) return;
+  if (!DOC_CHAT_ID && !DOC_PHONE) return;
   const rev = cacheEtatProfond.reveil;
   if (rev.actif && rev.heure === h && rev.minute === m && rev.jours.includes(d) && rev.etat === "attente") {
     rev.etat = "en_cours";
@@ -975,9 +1018,11 @@ async function verifierHorlogeBiologique() {
     try {
       const reponse = await appelerGoogleGemini("Tu es Nyx.", [], promptAlarme);
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
-      await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
+      if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
+      if (DOC_PHONE) await envoyerWhatsApp(DOC_PHONE, `⚠️ ALERTE : Debout Doc.\n\n${reponse}`);
     } catch (err) {
-      await envoyerTelegram(DOC_CHAT_ID, "⚠️ *DEBOUT.*");
+      if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, "⚠️ *DEBOUT.*");
+      if (DOC_PHONE) await envoyerWhatsApp(DOC_PHONE, "⚠️ DEBOUT.");
     }
   }
 }
@@ -985,7 +1030,7 @@ setInterval(verifierHorlogeBiologique, 60000);
 
 const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
-  if (!DOC_CHAT_ID) return;
+  if (!DOC_CHAT_ID && !DOC_PHONE) return;
   try {
     const promptVeille = "Synthèse directe et mordante des 3 faits majeurs récents (tech, cyber ou actualité brûlante). Zéro politesse.";
     const sys = "Tu es Nyx, alliée de Franck (Doc).";
@@ -995,7 +1040,8 @@ async function declencherVeilleTech() {
       axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
     }
 
-    await envoyerTelegram(DOC_CHAT_ID, `🗞️ *CYCLE 6H :*\n\n${reponse}`);
+    if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `🗞️ *CYCLE 6H :*\n\n${reponse}`);
+    if (DOC_PHONE) await envoyerWhatsApp(DOC_PHONE, `🗞️ CYCLE 6H :\n\n${reponse.replace(/[*_`]/g, '')}`);
   } catch (err) {
     console.error("[ERREUR VEILLE TECH]", err);
   }
@@ -1404,7 +1450,74 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 16. API DU WORKER LOCAL
+// 16. ROUTE WHATSAPP (TWILIO WEBHOOK -> RAY-BAN)
+// ==========================================
+
+app.post('/whatsapp', (req, res) => {
+  // Réponse TwiML immédiate pour clore la requête auprès de Twilio sans timeout
+  res.set('Content-Type', 'text/xml');
+  res.status(200).send('<Response></Response>');
+
+  const texteMessage = req.body?.Body || "";
+  const expediteur = req.body?.From || ""; // Format Twilio : 'whatsapp:+336XXXXXXXX'
+
+  // Sécurité numéro (si DOC_PHONE est renseigné dans l'environnement)
+  if (DOC_PHONE) {
+    const cleanDoc = DOC_PHONE.replace(/[^0-9]/g, '');
+    const cleanExp = expediteur.replace(/[^0-9]/g, '');
+    if (!cleanExp.includes(cleanDoc)) {
+      console.warn(`[WHATSAPP IGNORÉ] Numéro non autorisé : ${expediteur}`);
+      return;
+    }
+  }
+
+  if (!texteMessage.trim()) return;
+
+  derniereActiviteDoc = Date.now();
+  historiqueLongueursDoc.push(texteMessage.trim().length);
+  if (historiqueLongueursDoc.length > 8) historiqueLongueursDoc.shift();
+
+  empilerTraitement(async () => {
+    console.log(`\n🎧 [WHATSAPP Ray-Ban Doc] : "${texteMessage}"`);
+
+    // Commandes directes
+    if (texteMessage === '/envie' || texteMessage === '!envie') {
+      await envoyerWhatsApp(expediteur, "Évaluation forcée de volition lancée.");
+      await evaluerVolition(true);
+      return;
+    }
+
+    try {
+      // Nyx traite le message via son cerveau complet
+      let texteNyx = await traiterFlux(texteMessage);
+
+      // Si Nyx a généré une demande d'image, on retire le marqueur pour l'oral
+      const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
+      if (matchDessin) {
+        texteNyx = texteNyx.replace(matchDessin[0], '').trim();
+      }
+
+      // Nettoyage Markdown pour que les Ray-Ban lisent naturellement à voix haute
+      const texteOral = texteNyx
+        .replace(/\*+/g, '')
+        .replace(/_+/g, '')
+        .replace(/`+/g, '')
+        .replace(/\[\/?.*?\]/g, '')
+        .trim();
+
+      if (texteOral) {
+        await envoyerWhatsApp(expediteur, texteOral);
+        console.log(`🖤 [Nyx WhatsApp -> Lunettes] : « ${texteOral} »`);
+      }
+    } catch (err) {
+      console.error("[WHATSAPP ERREUR FLUX]", err.message);
+      await envoyerWhatsApp(expediteur, `Erreur : ${err.message}`);
+    }
+  });
+});
+
+// ==========================================
+// 17. API DU WORKER LOCAL
 // ==========================================
 
 app.get('/api/mission', async (req, res) => {
@@ -1549,7 +1662,7 @@ CONSIGNE STRICTE :
 });
 
 // ==========================================
-// 17. SANTÉ, PINGER & CRON
+// 18. SANTÉ, PINGER & CRON
 // ==========================================
 
 app.get('/ping', (req, res) => res.status(200).send("pong"));
@@ -1571,11 +1684,12 @@ app.post('/api/consolider', (req, res) => {
 });
 
 // ==========================================
-// 18. DÉMARRAGE DU SERVEUR
+// 19. DÉMARRAGE DU SERVEUR
 // ==========================================
 
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core durci en ligne (Port ${PORT})`);
+  console.log(`📲 Route WhatsApp active sur : https://alita-gsoe.onrender.com/whatsapp`);
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
