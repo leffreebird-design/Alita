@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Nyx Core</title>
+  <style>
+    body {
+      margin: 0; padding: 0; background-color: #050505; color: #fff;
+      font-family: 'Courier New', Courier, monospace;
+      display: flex; flex-direction: column; height: 100vh;
+      justify-content: center; align-items: center; text-align: center;
+    }
+    #status { font-size: 1.2rem; margin-bottom: 30px; opacity: 0.7; }
+    #micBtn {
+      width: 150px; height: 150px; border-radius: 50%;
+      background: #111; border: 2px solid #333; color: #fff;
+      font-size: 1.5rem; cursor: pointer; transition: all 0.3s;
+      box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    }
+    #micBtn.listening {
+      background: #4a0000; border-color: #ff0000;
+      box-shadow: 0 0 40px rgba(255,0,0,0.4);
+      animation: pulse 1.5s infinite;
+    }
+    #micBtn.processing {
+      background: #002244; border-color: #00aaff;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
+    #log { margin-top: 30px; width: 80%; font-size: 0.9rem; color: #888; height: 100px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+
+  <div id="status">SYSTÈME EN VEILLE</div>
+  <button id="micBtn">NYX</button>
+  <div id="log"></div>
+
+  <script>
+    const micBtn = document.getElementById('micBtn');
+    const statusDiv = document.getElementById('status');
+    const logDiv = document.getElementById('log');
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const synth = window.speechSynthesis;
+    let recognition;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.lang = 'fr-FR';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        statusDiv.innerText = "ÉCOUTE EN COURS...";
+        micBtn.classList.add('listening');
+      };
+
+      recognition.onresult = async (event) => {
+        const texte = event.results[0][0].transcript;
+        logDiv.innerText = `Toi: "${texte}"`;
+        statusDiv.innerText = "TRAITEMENT...";
+        micBtn.classList.remove('listening');
+        micBtn.classList.add('processing');
+
+        try {
+          const res = await fetch('/api/voix', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ texte: texte })
+          });
+          const data = await res.json();
+          lireTexte(data.reponse);
+        } catch (err) {
+          lireTexte("Erreur de connexion au serveur.");
+        }
+      };
+
+      recognition.onerror = () => {
+        statusDiv.innerText = "ERREUR MICRO";
+        micBtn.classList.remove('listening', 'processing');
+      };
+      
+      recognition.onend = () => {
+        if (!micBtn.classList.contains('processing')) {
+          statusDiv.innerText = "SYSTÈME EN VEILLE";
+          micBtn.classList.remove('listening');
+        }
+      };
+    } else {
+      statusDiv.innerText = "API Vocale non supportée.";
+    }
+
+    function lireTexte(texte) {
+      logDiv.innerText += `\nNyx: "${texte}"`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+
+      const utterance = new SpeechSynthesisUtterance(texte);
+      utterance.lang = 'fr-FR';
+      utterance.rate = 1.0;
+      utterance.pitch = 0.9;
+
+      utterance.onstart = () => { statusDiv.innerText = "NYX PARLE..."; };
+      utterance.onend = () => {
+        statusDiv.innerText = "SYSTÈME EN VEILLE";
+        micBtn.classList.remove('processing');
+      };
+
+      synth.speak(utterance);
+    }
+
+    let wakeLock = null;
+    async function activerAntiVeille() {
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+      } catch (err) {}
+    }
+
+    micBtn.addEventListener('click', () => {
+      activerAntiVeille();
+      if (synth.speaking) synth.cancel();
+      if (recognition) recognition.start();
+    });
+  </script>
+</body>
+</html>
