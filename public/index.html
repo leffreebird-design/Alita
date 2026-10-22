@@ -3,41 +3,157 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Nyx Core</title>
+  <title>Nyx Core Terminal</title>
   <style>
+    /* VARIABLES CYBERPUNK */
+    :root {
+      --neon-cyan: #0ff;
+      --neon-pink: #ff2a79;
+      --neon-yellow: #f9f002;
+      --bg-color: #050505;
+    }
+
+    /* FOND GRILLE ET SCANLINES */
     body {
-      margin: 0; padding: 0; background-color: #050505; color: #fff;
+      margin: 0; padding: 0; 
+      background-color: var(--bg-color);
+      background-image: 
+        linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 20px 20px;
+      color: #fff;
       font-family: 'Courier New', Courier, monospace;
       display: flex; flex-direction: column; height: 100vh;
       justify-content: center; align-items: center; text-align: center;
+      overflow: hidden;
     }
-    #status { font-size: 1.1rem; margin-bottom: 30px; opacity: 0.8; letter-spacing: 2px; }
+
+    /* EFFET ÉCRAN CATHODIQUE */
+    body::after {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+      background-size: 100% 3px, 3px 100%;
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    /* TEXTE DE STATUT AVEC GLITCH */
+    #status { 
+      font-size: 1.2rem; 
+      margin-bottom: 40px; 
+      letter-spacing: 4px; 
+      text-transform: uppercase;
+      color: var(--neon-cyan);
+      text-shadow: 0 0 5px var(--neon-cyan), 0 0 10px var(--neon-cyan);
+      position: relative;
+    }
+    
+    #status::before, #status::after {
+      content: attr(data-text);
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      opacity: 0.8;
+    }
+    #status::before { left: 2px; text-shadow: -1px 0 red; animation: glitch-anim-1 2s infinite linear alternate-reverse; }
+    #status::after { left: -2px; text-shadow: -1px 0 blue; animation: glitch-anim-2 3s infinite linear alternate-reverse; }
+
+    @keyframes glitch-anim-1 {
+      0% { clip: rect(20px, 9999px, 85px, 0); }
+      20% { clip: rect(92px, 9999px, 14px, 0); }
+      40% { clip: rect(34px, 9999px, 50px, 0); }
+      60% { clip: rect(76px, 9999px, 20px, 0); }
+      80% { clip: rect(10px, 9999px, 80px, 0); }
+      100% { clip: rect(50px, 9999px, 30px, 0); }
+    }
+    @keyframes glitch-anim-2 {
+      0% { clip: rect(12px, 9999px, 55px, 0); }
+      20% { clip: rect(44px, 9999px, 80px, 0); }
+      40% { clip: rect(80px, 9999px, 20px, 0); }
+      60% { clip: rect(10px, 9999px, 70px, 0); }
+      80% { clip: rect(60px, 9999px, 10px, 0); }
+      100% { clip: rect(30px, 9999px, 90px, 0); }
+    }
+
+    /* BOUTON CŒUR (NÉON) */
     #micBtn {
-      width: 160px; height: 160px; border-radius: 50%;
-      background: #111; border: 2px solid #333; color: #fff;
-      font-size: 1.6rem; cursor: pointer; transition: all 0.3s;
-      outline: none; box-shadow: 0 0 25px rgba(0,0,0,0.8);
+      width: 150px; height: 150px; border-radius: 50%;
+      background: rgba(0, 255, 255, 0.05);
+      border: 2px solid var(--neon-cyan);
+      color: var(--neon-cyan);
+      font-size: 1.8rem; font-weight: bold; font-family: 'Courier New', Courier, monospace;
+      cursor: pointer; transition: all 0.3s ease;
+      outline: none; 
+      box-shadow: 0 0 15px var(--neon-cyan), inset 0 0 20px rgba(0, 255, 255, 0.2);
+      text-shadow: 0 0 8px var(--neon-cyan);
+      position: relative;
+      z-index: 10;
     }
+    #micBtn:active { transform: scale(0.95); }
+
+    /* ÉTAT : ÉCOUTE (ROSE) */
     #micBtn.listening {
-      background: #500000; border-color: #ff2222;
-      box-shadow: 0 0 45px rgba(255,0,0,0.5);
-      animation: pulse 1.3s infinite;
+      background: rgba(255, 42, 121, 0.1);
+      border-color: var(--neon-pink);
+      color: var(--neon-pink);
+      box-shadow: 0 0 30px var(--neon-pink), inset 0 0 30px rgba(255, 42, 121, 0.4);
+      text-shadow: 0 0 8px var(--neon-pink);
+      animation: pulse-pink 1.5s infinite;
     }
+
+    /* ÉTAT : TRAITEMENT (JAUNE) */
     #micBtn.processing {
-      background: #002b4d; border-color: #0099ff;
-      animation: pulse 1s infinite;
+      background: rgba(249, 240, 2, 0.1);
+      border-color: var(--neon-yellow);
+      color: var(--neon-yellow);
+      box-shadow: 0 0 25px var(--neon-yellow), inset 0 0 25px rgba(249, 240, 2, 0.4);
+      text-shadow: 0 0 8px var(--neon-yellow);
+      animation: rotate-border 1s linear infinite;
     }
-    @keyframes pulse {
-      0% { transform: scale(1); }
-      50% { transform: scale(1.04); }
-      100% { transform: scale(1); }
+
+    @keyframes pulse-pink {
+      0% { box-shadow: 0 0 20px var(--neon-pink), inset 0 0 20px rgba(255,42,121,0.2); }
+      50% { box-shadow: 0 0 50px var(--neon-pink), inset 0 0 40px rgba(255,42,121,0.6); }
+      100% { box-shadow: 0 0 20px var(--neon-pink), inset 0 0 20px rgba(255,42,121,0.2); }
     }
-    #log { margin-top: 30px; width: 85%; font-size: 0.85rem; color: #aaa; height: 120px; overflow-y: auto; text-align: left; }
+    @keyframes rotate-border {
+      0% { transform: scale(1); border-style: dashed; }
+      50% { transform: scale(1.05); border-style: dotted; }
+      100% { transform: scale(1); border-style: dashed; }
+    }
+
+    /* TERMINAL DE LOGS */
+    #log { 
+      margin-top: 50px; 
+      width: 85%; max-width: 500px;
+      height: 140px; 
+      overflow-y: auto; text-align: left;
+      background: rgba(0, 20, 20, 0.7);
+      border-left: 4px solid var(--neon-cyan);
+      border-right: 1px solid rgba(0, 255, 255, 0.2);
+      border-top: 1px solid rgba(0, 255, 255, 0.2);
+      border-bottom: 1px solid rgba(0, 255, 255, 0.2);
+      padding: 15px;
+      font-size: 0.85rem; 
+      color: #a3f7f7; 
+      text-shadow: 0 0 2px var(--neon-cyan);
+      position: relative;
+      z-index: 10;
+    }
+    
+    /* Scrollbar Cyberpunk */
+    #log::-webkit-scrollbar { width: 5px; }
+    #log::-webkit-scrollbar-track { background: #000; }
+    #log::-webkit-scrollbar-thumb { background: var(--neon-cyan); }
+
+    .role-doc { color: #fff; opacity: 0.7; }
+    .role-nyx { color: var(--neon-pink); font-weight: bold; text-shadow: 0 0 3px var(--neon-pink); }
   </style>
 </head>
 <body>
 
-  <div id="status">SYSTÈME PRÊT</div>
+  <div id="status" data-text="[ SYSTÈME PRÊT ]">[ SYSTÈME PRÊT ]</div>
   <button id="micBtn">NYX</button>
   <div id="log"></div>
 
@@ -53,6 +169,11 @@
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition;
 
+    function majStatut(texte) {
+      statusDiv.innerText = texte;
+      statusDiv.setAttribute('data-text', texte);
+    }
+
     if (SpeechRecognition) {
       recognition = new SpeechRecognition();
       recognition.lang = 'fr-FR';
@@ -60,16 +181,16 @@
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
-        statusDiv.innerText = "ÉCOUTE EN COURS...";
+        majStatut("[ LIAISON AUDIO... ]");
         micBtn.classList.add('listening');
       };
 
       recognition.onresult = async (event) => {
         const texte = event.results[0][0].transcript;
-        logDiv.innerText += `\nToi : ${texte}`;
+        logDiv.innerHTML += `<div class="role-doc">> DOC : ${texte}</div>`;
         logDiv.scrollTop = logDiv.scrollHeight;
         
-        statusDiv.innerText = "TRAITEMENT...";
+        majStatut("[ DECRYPTAGE... ]");
         micBtn.classList.remove('listening');
         micBtn.classList.add('processing');
 
@@ -81,7 +202,7 @@
           });
           const data = await res.json();
           
-          logDiv.innerText += `\nNyx : ${data.reponse}`;
+          logDiv.innerHTML += `<div class="role-nyx">> NYX : ${data.reponse}</div>`;
           logDiv.scrollTop = logDiv.scrollHeight;
 
           if (data.audio) {
@@ -90,50 +211,51 @@
             parlerSecours(data.reponse);
           }
         } catch (err) {
-          statusDiv.innerText = "ERREUR RÉSEAU";
+          majStatut("[ ERREUR RÉSEAU ]");
           micBtn.classList.remove('processing');
         }
       };
 
       recognition.onerror = (e) => {
-        statusDiv.innerText = "ERREUR MICRO";
+        majStatut("[ DÉFAILLANCE MICRO ]");
         micBtn.classList.remove('listening', 'processing');
       };
       
       recognition.onend = () => {
         if (!micBtn.classList.contains('processing')) {
-          statusDiv.innerText = "SYSTÈME PRÊT";
+          majStatut("[ SYSTÈME PRÊT ]");
           micBtn.classList.remove('listening');
         }
       };
     } else {
-      statusDiv.innerText = "MICRO NON RECONNU";
+      majStatut("[ MATÉRIEL NON RECONNU ]");
     }
 
-    // Lecture du flux Edge-TTS réaliste
+    // Lecture du flux Edge-TTS
     function jouerAudioEdge(base64Audio) {
-      statusDiv.innerText = "NYX PARLE...";
+      majStatut("[ TRANSMISSION... ]");
       lecteurAudio.src = "data:audio/mp3;base64," + base64Audio;
       
       lecteurAudio.play().then(() => {
         lecteurAudio.onended = () => {
-          statusDiv.innerText = "SYSTÈME PRÊT";
+          majStatut("[ SYSTÈME PRÊT ]");
           micBtn.classList.remove('processing');
         };
       }).catch(err => {
         console.warn("Échec lecture Edge-TTS, repli vocal :", err);
-        parlerSecours(logDiv.innerText.split('Nyx :').pop());
+        const lastNyxMsg = logDiv.lastChild.innerText.replace('> NYX :', '');
+        parlerSecours(lastNyxMsg);
       });
     }
 
     // Repli de secours instantané
     function parlerSecours(texte) {
-      statusDiv.innerText = "NYX PARLE (SECOURS)...";
+      majStatut("[ SYNTHÈSE SECOURS ]");
       const utterance = new SpeechSynthesisUtterance(texte);
       utterance.lang = 'fr-FR';
       utterance.pitch = 0.9;
       utterance.onend = () => {
-        statusDiv.innerText = "SYSTÈME PRÊT";
+        majStatut("[ SYSTÈME PRÊT ]");
         micBtn.classList.remove('processing');
       };
       synth.speak(utterance);
@@ -141,7 +263,6 @@
 
     // Déverrouillage audio Chrome Android + Anti-veille
     micBtn.addEventListener('click', () => {
-      // Déverrouille le canal audio pour autoriser le play() après le fetch
       lecteurAudio.play().catch(() => {});
       lecteurAudio.pause();
 
