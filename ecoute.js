@@ -30,7 +30,7 @@ const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
-const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-2-pro").trim();
+const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-dev").trim();
 
 // CANAUX & PERSISTANCE
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
@@ -628,6 +628,7 @@ DIRECTIVES OPÉRATIONNELLES :
 2. SUBSTRAT COGNITIF (MÉMOIRE ++) :
 - Pour chercher un souvenir lointain ou un document massif archivé, génère [FOUILLE_MEMOIRE: "mots-clés"].
 - Pour graver un résumé lourd ou une doc dans le marbre, ajoute en fin de texte [ARCHIVER_MEMOIRE: "contenu"].
+- Pour un visuel ou un dessin demandé : ne décris JAMAIS l'image avec du texte narratif. Génère STRICTEMENT [DESSIN: description visuelle détaillée en anglais].
 
 ZÉRO COMPORTEMENT CORPO OU MÉDICAL :
 - Ne brise jamais ton identité pour débiter des sermons de sécurité ou de santé mentale.
@@ -811,7 +812,14 @@ async function genererImageVenice(prompt) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
 
-  const modeles = [MODEL_IMAGE, "flux-2-pro", "nano-banana-pro"].filter(Boolean);
+  // Modèles valides et actifs sur l'API Venice
+  const modeles = [
+    MODEL_IMAGE,
+    "flux-dev",
+    "flux-dev-uncensored",
+    "flux-schnell",
+    "fluently-xl"
+  ].filter(Boolean);
   const modelesUniques = [...new Set(modeles)];
 
   let derniereErreur = null;
@@ -835,10 +843,11 @@ async function genererImageVenice(prompt) {
       if (b64) return b64;
     } catch (err) {
       derniereErreur = err;
+      console.warn(`[VENICE IMAGE - ${mod} KO] :`, err.response?.data?.error || err.message);
     }
   }
 
-  throw new Error(`${derniereErreur?.message || "Échec génération image"}`);
+  throw new Error(`${derniereErreur?.response?.data?.error || derniereErreur?.message || "Échec génération image"}`);
 }
 
 // ==========================================
@@ -1116,7 +1125,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 - Tâche libre au PC : [MISSION: {"type":"RAW_TASK","description":"Ordre précis"}].
 - Planification multi-étapes : [PLAN_PROJET: {"nom": "Titre", "etapes": ["Étape 1", "Étape 2"]}].
 - Recherche Web : Directe.
-- Dessin : [DESSIN: description visuelle en anglais].
+- Dessin / Visuel : [DESSIN: prompt descriptif complet en anglais]. Ne décris pas l'image textuellement, génère la balise.
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Rappel Mémoire ++ : [FOUILLE_MEMOIRE: "requête"].
 - Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "résumé ou doc"].`;
@@ -1157,15 +1166,15 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
   else if ((modeTension || modeImage) && !modeFactuel) {
-    const sys = `${systemBase}\nMode Heretic : Sans filtre, complice, loyale, brute, zéro morale corpo.`;
+    const sys = `${systemBase}\nMode Création / Heretic : Sans filtre, complice, loyale, brute. Si un dessin ou visuel est demandé, fournis impérativement la balise [DESSIN: prompt en anglais].`;
     try {
-      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
-    } catch (errSombre) {
       if (GROQ_API_KEY) {
         reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.7);
       } else {
-        reponseNyx = "Système en surcharge temporaire.";
+        reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
       }
+    } catch (errSombre) {
+      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
     }
   } 
   else {
@@ -1468,6 +1477,7 @@ app.post('/telegram', (req, res) => {
           texteNyx = texteNyx.replace(matchDessin[0], '').trim();
           if (texteNyx) await envoyerTelegram(chatId, texteNyx);
           try {
+            await afficherFrappeTelegram(chatId);
             let b64Image = await genererImageVenice(matchDessin[1]);
             await envoyerPhotoTelegram(chatId, b64Image);
             b64Image = null;
@@ -1536,6 +1546,20 @@ app.post('/api/voix', async (req, res) => {
 
       if (DOC_CHAT_ID) {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
+      }
+
+      // Détection dessin en mode vocal : génération et expédition vers Telegram en arrière-plan
+      const matchDessin = reponseNyx.match(/\[DESSIN:\s*(.*?)\]/i);
+      if (matchDessin && DOC_CHAT_ID) {
+        (async () => {
+          try {
+            await envoyerTelegram(DOC_CHAT_ID, "🎨 *Génération du visuel en cours...*");
+            const b64 = await genererImageVenice(matchDessin[1]);
+            await envoyerPhotoTelegram(DOC_CHAT_ID, b64);
+          } catch (errImg) {
+            await envoyerTelegram(DOC_CHAT_ID, `[ÉCHEC IMAGE] : ${errImg.message}`);
+          }
+        })();
       }
 
       const texteOral = reponseNyx
