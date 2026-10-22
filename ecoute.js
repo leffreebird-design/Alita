@@ -22,7 +22,7 @@ const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 // GEMINI (CONSERVÉ POUR EMBEDDINGS ET VISION SI CLÉ FOURNIE)
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 
 // VENICE AI
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
