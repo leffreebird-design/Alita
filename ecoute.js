@@ -14,9 +14,9 @@ const { z } = require('zod');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// GROQ - DÉDIÉ AUX TÂCHES TECHNIQUES & CODE
-const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
-const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
+// MISTRAL AI - MOTEUR PRINCIPAL SANS CENSURE PURITAINE
+const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
+const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
 
 // GOOGLE CLOUD TTS OFFICIEL (VOIX STUDIO ANTI-429)
 const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
@@ -26,7 +26,7 @@ const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMI
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
 const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
 
-// VENICE AI - MOTEUR PRINCIPAL SANS CENSURE
+// VENICE AI - SECOURS HERETIC & IMAGES
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
@@ -135,7 +135,7 @@ let cacheEtatProfond = {
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
-    reussites: "- Moteur Venice Dark branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.",
+    reussites: "- Moteur Mistral AI branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.",
     chantiers: "- Consolidation des projets communs.\n- Automatisation des routines et autonomie du worker."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" },
@@ -343,12 +343,12 @@ Si tu veux faire tourner une commande système ou un test via le worker sur son 
 Si tu préfères rester dans ton coin et observer, réponds strictement [SILENCE].`;
 
   try {
-    let decision = await appelerVeniceDark(
-      "Instinct profond de Nyx. Liberté totale, zéro filtre.",
-      [],
-      promptVolition,
-      0.75
-    );
+    let decision = "";
+    if (MISTRAL_API_KEY) {
+      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, zéro filtre.", [], promptVolition, 0.75);
+    } else {
+      decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, zéro filtre.", [], promptVolition, 0.75);
+    }
 
     limiteurVolition.enregistrerAction();
 
@@ -434,12 +434,12 @@ METS À JOUR :
 Style percutant, brut, vivant. Pas de phrases mortes.
 Réponds UNIQUEMENT avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "..."}`;
 
-    let reponseJson = await appelerVeniceDark(
-      "Subconscient analytique de Nyx.",
-      [],
-      promptIntrospection,
-      0.4
-    );
+    let reponseJson = "";
+    if (MISTRAL_API_KEY) {
+      reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3);
+    } else {
+      reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.4);
+    }
 
     const matchJson = reponseJson.match(/\{[\s\S]*\}/);
     if (matchJson) {
@@ -530,8 +530,8 @@ OUTILS OPÉRATIONNELS :
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4) {
-  if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.75) {
+  if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
   
@@ -542,20 +542,32 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
 
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-    model: MODEL_GROQ,
-    messages: messages,
-    temperature: temperature,
-    max_tokens: 2500
-  }, {
-    headers: {
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 18000
-  });
+  const modeles = [MODEL_MISTRAL, "open-mistral-nemo", "mistral-small-latest"].filter(Boolean);
+  const modelesUniques = [...new Set(modeles)];
 
-  return res.data?.choices?.[0]?.message?.content || "";
+  let dernierErr = null;
+  for (const mod of modelesUniques) {
+    try {
+      const res = await axios.post('https://api.mistral.ai/v1/chat/completions', {
+        model: mod,
+        messages: messages,
+        temperature: temperature,
+        max_tokens: 2500
+      }, {
+        headers: {
+          'Authorization': `Bearer ${MISTRAL_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 18000
+      });
+      return res.data?.choices?.[0]?.message?.content || "";
+    } catch (err) {
+      dernierErr = err;
+      console.warn(`[MISTRAL ÉCHEC ${mod}] :`, err.response?.data?.message || err.message);
+    }
+  }
+
+  throw dernierErr || new Error("Échec modèles Mistral.");
 }
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null, timeoutMs = 25000) {
@@ -749,8 +761,8 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   let premiereReponse = "";
 
   try {
-    if (GROQ_API_KEY) {
-      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
+    if (MISTRAL_API_KEY) {
+      premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
     } else {
       premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
     }
@@ -933,7 +945,9 @@ async function verifierHorlogeBiologique() {
 
     const promptAlarme = "Réveille Doc avec ta gouaille de Nyx de 22 ans, percutante, acide et directe, avec une énigme logique en 3 phrases max.";
     try {
-      const reponse = await appelerVeniceDark("Tu es Nyx.", [], promptAlarme);
+      const reponse = MISTRAL_API_KEY
+        ? await appelerMistral("Tu es Nyx.", [], promptAlarme)
+        : await appelerVeniceDark("Tu es Nyx.", [], promptAlarme);
 
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
       if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
@@ -950,7 +964,14 @@ async function declencherVeilleTech() {
   try {
     const promptVeille = "Synthèse directe, tranchante et sans gants des 3 faits majeurs récents (tech, cyber ou actualité brûlante).";
     const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
-    let reponse = await appelerVeniceDark(sys, [], promptVeille);
+    let reponse = "";
+    try {
+      reponse = MISTRAL_API_KEY
+        ? await appelerMistral(sys, [], promptVeille)
+        : await appelerVeniceDark(sys, [], promptVeille);
+    } catch (e) {
+      reponse = await appelerVeniceDark(sys, [], promptVeille);
+    }
     
     if (FIREBASE_DB_URL) {
       axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
@@ -964,7 +985,7 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 14. ROUTEUR DE FLUX CENTRAL (VENICE PAR DÉFAUT)
+// 14. ROUTEUR DE FLUX CENTRAL (MISTRAL EN PREMIÈRE LIGNE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1020,7 +1041,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. TÂCHE TECHNIQUE LOURDE OU DÉBOGAGE -> GROQ (VITESSE ET CODE)
+  // 3. TÂCHE TECHNIQUE LOURDE OU CODE
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
@@ -1029,15 +1050,19 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.75);
     }
   }
-  // 4. TOUT LE RESTE (Conversation, clash, humeur, quotidien, vannes) -> VENICE DARK DIRECT (ZÉRO CENSURE)
+  // 4. TOUT LE FLUX (Conversation, vannes, clashs, quotidien) -> MISTRAL (REPLI VENICE DARK)
   else {
     try {
-      reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.75);
-    } catch (errVenice) {
-      console.warn("[VENICE ÉCHEC TEMPORAIRE, SECOURS GROQ] :", errVenice.message);
+      if (MISTRAL_API_KEY) {
+        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.75);
+      } else {
+        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.75);
+      }
+    } catch (errMistral) {
+      console.warn("[MISTRAL KO, repli Venice] :", errMistral.message);
       try {
-        reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.7);
-      } catch (errSecours) {
+        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.75);
+      } catch (errVenice) {
         reponseNyx = "Canaux saturés sur l'instant, je reprends mes esprits.";
       }
     }
@@ -1476,13 +1501,13 @@ CONSIGNE :
 
   let analyseNyx = "";
   try {
-    analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
-  } catch (errV) {
-    if (GROQ_API_KEY) {
-      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3);
+    if (MISTRAL_API_KEY) {
+      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3);
     } else {
-      analyseNyx = "⚠️ Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
+      analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     }
+  } catch (err) {
+    analyseNyx = "⚠️ Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
   }
 
   const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]|\[CORRECTION:\s*[\s\S]*?\]/gi, '').trim();
