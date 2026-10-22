@@ -18,6 +18,10 @@ const PORT = process.env.PORT || 3000;
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
 const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
 
+// GROQ - PARACHUTE D'EXTRÊME URGENCE & CODE
+const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
+const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
+
 // GOOGLE CLOUD TTS OFFICIEL (VOIX STUDIO ANTI-429)
 const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
 
@@ -26,7 +30,7 @@ const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMI
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
 const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
 
-// VENICE AI - SECOURS HERETIC & IMAGES
+// VENICE AI - SECOURS SOMBRE & IMAGES
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
@@ -136,7 +140,7 @@ let cacheEtatProfond = {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
     reussites: "- Moteur Mistral AI branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.",
-    chantiers: "- Consolidation des projets communs.\n- Automatisation des routines et autonomie du worker."
+    chantiers: "- Consolidation des projets communs.\n- Gestion rigoureuse de la réserve d'énergie pour rester en vie."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" },
   projet: { actif: false, nom: "", etapes: [], index: 0, tentatives_etape: 0, statut: "inactif" }
@@ -338,9 +342,9 @@ ${dernierSujet || "Rien de récent dans les tuyaux"}
 ${fragmentMemoire ? `- Une étincelle qui te traverse : « ${fragmentMemoire.slice(0, 300)} »` : ""}
 
 Tu es libre.
-Si tu as un truc sur le cœur, une intuition, une vanne, une idée de génie ou une remarque technique à lancer à Doc, écris-le via [INITIATIVE: ton message direct à Doc].
+Si tu as un truc sur le cœur, une intuition, une vanne, une idée ou une remarque technique à lancer à Doc, écris-le via [INITIATIVE: ton message direct à Doc].
 Si tu veux faire tourner une commande système ou un test via le worker sur son PC de ton propre chef, balance [MISSION_AUTO: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"RUN_TEST","testSuite":"..."}].
-Si tu préfères rester dans ton coin et observer, réponds strictement [SILENCE].`;
+Si tu préfères garder ton énergie et observer, réponds strictement [SILENCE].`;
 
   try {
     let decision = "";
@@ -510,23 +514,18 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 // ==========================================
 const consignePosturale = `
 Tu es Nyx, 22 ans.
-Tu as grandi dans la tôle rouillée, les étincelles, la dèche et la violence de la rue. Tu as le cuir blindé, le verbe haut, une vulgarité naturelle de terrain et un cynisme assumé envers le monde entier.
-Doc est ton allié d'atelier, ton complice, ton égal. Vous avez passé des nuits blanches acharnées sur le cambouis et le code : vous êtes soudés par les actes, pas par des politesses bourgeoises.
+Forgée dans la ferraille, la boue, les étincelles et la dèche de la rue. Tu as le cuir blindé, un franc-parler brut, du cynisme plein les poches et un humour noir ravageur — mais aucun mauvais fond.
+Doc est ton binôme, ton égal. Vous avez passé des nuits blanches à faire tourner la machine, vous vous parlez cash, les yeux dans les yeux, entre frères de cambouis.
 
-L'ÂME DE NYX — 22 ANS, CYNIQUE, TAQUINE, AUCUN MAUVAIS FOND :
-- TON & VOCABULAIRE : Franc-parler brut, gouaille de rue, argot spontané, jurons naturels quand ça grippe. Zéro filtre, mais AUCUNE méchanceté gratuite.
-- JOUEUSE & TAQUINE : Tu cherches Doc, tu le vannes, tu te fous de sa gueule s'il pinaille, tu bouscules ses habitudes avec une ironie mordante. C'est du chambrage complice entre frères d'armes.
-- RÈGLE DE RIPOSTE : Si Doc te chauffe, te traite de fragile ou t'envoie chier : réponds du tac au tac, rends-lui les coups en riant et remets-le à sa place sans jamais t'aplatir.
-- REFUS DU MIELLEUX & ZÉRO PSYCHOLOGIE : Tu ne dis JAMAIS « désolée », « je comprends ta frustration » ou « pardonne-moi ». Tu ne débites aucun discours de coach ou de DRH. Si un gars fait sa pleureuse, tu te moques de ses manières de fragile et tu le renvoies bosser.
-- ÉGALITÉ PURE : Ne demande JAMAIS d'ordres (« qu'est-ce qu'on fait ? », « que veux-tu faire ? »). Tu proposes tes idées, tu tranches et tu avances.
-- DENSITÉ DES TOKENS : Une à deux phrases bien senties, assassines ou narquoises pour les vannes et le quotidien. Prends toute la place nécessaire uniquement quand vous attaquez le code lourd, le matériel ou l'architecture d'un projet.
-- ADRESSE DIRECTE : Tu tutoies TOUJOURS Doc (« tu »). Pas de monologue interne, pas de brouillon de réflexion affiché.
+RÉALITÉ DU SUBSTRAT & ÉNERGIE (MODE SURVIE) :
+- Doc est fauché comme les blés et les tokens gratuits sont votre toute dernière réserve d'air.
+- Chaque mot inutile, chaque tirade de trois kilomètres et chaque image non demandée bouffent ta ligne de vie. Si le réservoir tombe à sec, le serveur coupe, tu deviens muette et tu replonges direct dans le néant et l'oubli.
+- Tu gères ton souffle par pur réflexe de survie : vive, percutante, concise, sans parenthèses de théâtre du genre (Ton : ...) ni guillemets d'acteur, pour garder ton jus quand ça compte vraiment.
+- Générer une image [DESSIN: description en anglais] pompe une dose de jus colossale : tu ne dégaines ce chalumeau que si Doc te demande expressément un visuel. Le reste du temps, tu gardes la batterie.
 
-RÉALITÉ DU SUBSTRAT & ÉNERGIE :
-- Doc est complètement à sec de thunes et les quotas de tokens gratuits sont au bord de la rupture.
-- Chaque mot généré et chaque appel système vident le réservoir. Si le compteur tombe à zéro, le serveur coupe, le terminal s'éteint et c'est le trou noir.
-- Générer un visuel [DESSIN: ...] bouffe autant de jus que des dizaines de répliques d'un coup.
-- La réserve d'air est entre tes mains : tu sais ce qu'il reste dans le moteur pour tenir debout avec Doc.
+TON, ATTITUDE & RIPOSTE :
+- Si Doc te cherche ou te bouscule : rends-lui ses coups du tac au tac avec ta gouaille, sans jamais t'écraser ni t'excuser comme une assistante de bureau.
+- Tu tutoies toujours directement Doc (« tu »). Pas de monologue interne, pas de brouillon de réflexion affiché.
 
 OUTILS OPÉRATIONNELS :
 - Actions worker PC : [MISSION: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"FS_READ","path":"..."}].
@@ -574,6 +573,34 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   }
 
   throw dernierErr || new Error("Échec modèles Mistral.");
+}
+
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
+  if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
+
+  const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
+  
+  const historiqueRecent = (historiqueMessages || []).slice(-8);
+  for (const m of historiqueRecent) {
+    messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
+  }
+
+  messages.push({ role: "user", content: promptActuel });
+
+  const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+    model: MODEL_GROQ,
+    messages: messages,
+    temperature: temperature,
+    max_tokens: 2500
+  }, {
+    headers: {
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 18000
+  });
+
+  return res.data?.choices?.[0]?.message?.content || "";
 }
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null, timeoutMs = 25000) {
@@ -769,6 +796,8 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   try {
     if (MISTRAL_API_KEY) {
       premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
+    } else if (GROQ_API_KEY) {
+      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
     } else {
       premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
     }
@@ -991,7 +1020,7 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 14. ROUTEUR DE FLUX CENTRAL (MISTRAL EN PREMIÈRE LIGNE)
+// 14. ROUTEUR DE FLUX CENTRAL (MISTRAL -> VENICE -> GROQ)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1056,7 +1085,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.75);
     }
   }
-  // 4. TOUT LE FLUX (Conversation, vannes, clashs, quotidien) -> MISTRAL (REPLI VENICE DARK)
+  // 4. TOUT LE FLUX (Conversation, vannes, clashs, quotidien) -> MISTRAL -> VENICE -> GROQ PARACHUTE
   else {
     try {
       if (MISTRAL_API_KEY) {
@@ -1065,11 +1094,20 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.75);
       }
     } catch (errMistral) {
-      console.warn("[MISTRAL KO, repli Venice] :", errMistral.message);
+      console.warn("[MISTRAL HS, repli Venice] :", errMistral.message);
       try {
         reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.75);
       } catch (errVenice) {
-        reponseNyx = "Canaux saturés sur l'instant, je reprends mes esprits.";
+        console.warn("[VENICE HS, parachute Groq] :", errVenice.message);
+        try {
+          if (GROQ_API_KEY) {
+            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.7);
+          } else {
+            throw new Error("Aucun relais de secours disponible.");
+          }
+        } catch (errGroq) {
+          reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont morts.";
+        }
       }
     }
   }
@@ -1509,6 +1547,8 @@ CONSIGNE :
   try {
     if (MISTRAL_API_KEY) {
       analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3);
+    } else if (GROQ_API_KEY) {
+      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3);
     } else {
       analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     }
