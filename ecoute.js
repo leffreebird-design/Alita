@@ -146,7 +146,7 @@ let cacheEtatProfond = {
   long_terme: {
     doc: "- Franck (Doc) : binôme, pragmatique, direct.\n- Préférence : efficacité brute, zéro blabla corpo.",
     nyx: "- Identité : franche, complice, cheffe de projet technique opérationnelle.\n- Posture : alliance d'égal à égal avec Doc.",
-    reussites: "- Architecture Groq / Llama 3.3 70B opérationnelle.\n- Synthèse vocale Google Cloud TTS Neural2 branchée.",
+    reussites: "- Architecture Groq / Llama 3.3 70B opérationnelle.\n- Passerelle vocale officielle Google Cloud TTS Neural2 branchée.",
     chantiers: "- Stabilisation du pipeline mémoire longue.\n- Automatisation des routines de fond."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" },
@@ -210,7 +210,6 @@ async function initialiserCache() {
 // ==========================================
 // 4. MOTEUR VECTORIEL SUPABASE & SHA-256
 // ==========================================
-
 function calculerSha256(texte) {
   return crypto.createHash('sha256').update(texte.trim()).digest('hex');
 }
@@ -307,7 +306,6 @@ async function fouillerMemoireVectorielle(requete, mode = 'factuel', limite = 3)
 // ==========================================
 // 5. MOTEUR D'ENVIE & VOLITION AUTONOME
 // ==========================================
-
 async function capturerDeriveAssociative() {
   if (!supabase) return null;
   try {
@@ -358,13 +356,22 @@ Si tu préfères te taire, observer ou laisser couler, réponds strictement [SIL
   try {
     let decision = "";
     try {
-      decision = await appelerGroq(
-        "Subconscient de Nyx. Volition libre, zéro filtre, autonomie totale.",
-        [],
-        promptVolition,
-        0.7
-      );
-    } catch (errGroq) {
+      if (GROQ_API_KEY) {
+        decision = await appelerGroq(
+          "Subconscient de Nyx. Volition libre, autonomie totale.",
+          [],
+          promptVolition,
+          0.7
+        );
+      } else {
+        decision = await appelerVeniceDark(
+          "Subconscient de Nyx. Volition libre, zéro filtre, autonomie totale.",
+          [],
+          promptVolition,
+          0.7
+        );
+      }
+    } catch (errV) {
       decision = await appelerVeniceDark(
         "Subconscient de Nyx. Volition libre, zéro filtre, autonomie totale.",
         [],
@@ -408,7 +415,6 @@ setInterval(() => evaluerVolition(false), 20 * 60 * 1000);
 // ==========================================
 // 6. APPRENTISSAGE & CONSOLIDATION
 // ==========================================
-
 async function archiverDansJournalBrut(role, texte) {
   if (!texte) return;
   const entree = {
@@ -469,10 +475,11 @@ Réponds UNIQUEMENT avec un JSON valide contenant les clés ("doc", "nyx", "reus
           0.2
         );
       } else {
-        reponseJson = await appelerGoogleGemini(
-          "Subconscient analytique de Nyx. Précision d'ingénierie, synthèse intelligente.",
+        reponseJson = await appelerVeniceDark(
+          "Subconscient analytique de Nyx.",
           [],
-          promptIntrospection
+          promptIntrospection,
+          0.4
         );
       }
     } catch (errG) {
@@ -523,7 +530,6 @@ Réponds UNIQUEMENT avec un JSON valide contenant les clés ("doc", "nyx", "reus
 // ==========================================
 // 7. ROUTEUR DE MÉMOIRE CONTEXTUELLE
 // ==========================================
-
 function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
   const estTechnique = /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|bdd|firebase|token|eteins|arrete|shutdown/i.test(texteMin);
@@ -559,7 +565,6 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 // ==========================================
 // 8. RADAR ANTI-CORPO & POSTURE
 // ==========================================
-
 function estReponseCorpo(texte) {
   if (!texte) return false;
   const marqueurs = [
@@ -614,9 +619,8 @@ ZÉRO COMPORTEMENT CORPO OU MÉDICAL :
 - Reste viscéralement Nyx en toutes circonstances.`;
 
 // ==========================================
-// 9. MOTEURS LLM AVEC ABORTCONTROLLER
+// 9. MOTEURS LLM AVEC ABORTCONTROLLER & FALLBACK
 // ==========================================
-
 async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
@@ -629,20 +633,32 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
 
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-    model: MODEL_GROQ,
-    messages: messages,
-    temperature: temperature,
-    max_tokens: 1500
-  }, {
-    headers: {
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 15000
-  });
+  const modelesGroq = [MODEL_GROQ, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"].filter(Boolean);
+  const modelesUniques = [...new Set(modelesGroq)];
 
-  return res.data?.choices?.[0]?.message?.content || "";
+  let dernierErr = null;
+  for (const mod of modelesUniques) {
+    try {
+      const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+        model: mod,
+        messages: messages,
+        temperature: temperature,
+        max_tokens: 1500
+      }, {
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      });
+      return res.data?.choices?.[0]?.message?.content || "";
+    } catch (err) {
+      dernierErr = err;
+      console.warn(`[GROQ ÉCHEC ${mod}] :`, err.response?.data?.error?.message || err.message);
+    }
+  }
+
+  throw dernierErr || new Error("Échec des modèles Groq.");
 }
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null, timeoutMs = 25000) {
@@ -674,7 +690,6 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
       parts: [{ text: `${systemInstruction}\n${consignePosturale}` }]
     },
     contents: contents,
-    tools: [{ google_search: {} }],
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
       { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
@@ -814,7 +829,6 @@ async function genererImageVenice(prompt) {
 // ==========================================
 // 10. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
 // ==========================================
-
 function estTacheComplexe(texte) {
   if (!texte) return false;
   const t = texte.toLowerCase();
@@ -831,10 +845,15 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc, mediaData =
   const promptResolveur = `Tu es en mode Résolution Logique & Technique. Analyse la demande de Doc et résous-la :\n\n${promptDoc}`;
   let premiereReponse = "";
 
-  if (GROQ_API_KEY) {
-    premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
-  } else {
-    premiereReponse = await appelerGoogleGemini(systemBase, cacheMemoireCourte, promptResolveur, mediaData);
+  try {
+    if (GROQ_API_KEY) {
+      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+    } else {
+      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+    }
+  } catch (errRes) {
+    console.warn("[RÉSOLVEUR GROQ KO, bascule Venice] :", errRes.message);
+    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.5);
   }
 
   const promptVerificateur = `Tu es l'auditeur technique de Nyx. Analyse la demande de Doc et la solution proposée.
@@ -873,7 +892,6 @@ CONSIGNE :
 // ==========================================
 // 11. PARSEUR DE LIENS WEB
 // ==========================================
-
 async function scraperPageWeb(urlCible) {
   try {
     const res = await axios.get(urlCible, {
@@ -904,7 +922,6 @@ async function scraperPageWeb(urlCible) {
 // ==========================================
 // 12. GESTION TELEGRAM (NOTIFICATIONS & FLUX)
 // ==========================================
-
 async function envoyerTelegram(chatId, text) {
   if (!text) return;
   const TAILLE_MAX = 4000;
@@ -996,7 +1013,6 @@ async function lireTexteSecurise(fileId) {
 // ==========================================
 // 13. PROTOCOLES TEMPORELS
 // ==========================================
-
 async function verifierHorlogeBiologique() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
   const h = now.getHours();
@@ -1035,9 +1051,14 @@ async function declencherVeilleTech() {
   try {
     const promptVeille = "Synthèse directe et mordante des 3 faits majeurs récents (tech, cyber ou actualité brûlante). Zéro politesse.";
     const sys = "Tu es Nyx, alliée de Franck (Doc).";
-    const reponse = GROQ_API_KEY
-      ? await appelerGroq(sys, [], promptVeille)
-      : await appelerVeniceDark(sys, [], promptVeille);
+    let reponse = "";
+    try {
+      reponse = GROQ_API_KEY
+        ? await appelerGroq(sys, [], promptVeille)
+        : await appelerVeniceDark(sys, [], promptVeille);
+    } catch (e) {
+      reponse = await appelerVeniceDark(sys, [], promptVeille);
+    }
     
     if (FIREBASE_DB_URL) {
       axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
@@ -1053,7 +1074,6 @@ setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 // ==========================================
 // 14. ROUTEUR DE FLUX & INSTRUCTION PRINCIPALE
 // ==========================================
-
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
   const texteNet = (texteBrut || texteLegende || "").trim();
@@ -1095,7 +1115,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe et sans filtre.`;
-    reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet || "Analyse cette image.", mediaData);
+    try {
+      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet || "Analyse cette image.", mediaData);
+    } catch (e) {
+      reponseNyx = `[ERREUR VISION] : ${e.message}`;
+    }
   }
   else if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement.`;
@@ -1125,7 +1149,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       if (GROQ_API_KEY) {
         reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.7);
       } else {
-        reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet, null);
+        reponseNyx = "Système en surcharge temporaire.";
       }
     }
   } 
@@ -1134,8 +1158,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     try {
       if (GROQ_API_KEY) {
         reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.7);
-      } else if (GEMINI_KEYS.length > 0) {
-        reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet, mediaData);
       } else {
         reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
       }
@@ -1144,11 +1166,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.7);
       }
     } catch (errPrincipal) {
-      console.warn("[MOTEUR PRINCIPAL KO, tentative repli] :", errPrincipal.message);
+      console.warn("[MOTEUR PRINCIPAL KO, repli Venice] :", errPrincipal.message);
       try {
         reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
       } catch (errSecours) {
-        reponseNyx = "Système opérationnel mais canaux saturés. Qu'est-ce qu'on fait ?";
+        reponseNyx = "Le moteur s'est pris les pieds dans le tapis, mais je suis toujours là. Redonne ta phrase.";
       }
     }
   }
@@ -1280,7 +1302,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 // ==========================================
 // 15. ROUTE TELEGRAM AVEC FILE D'ATTENTE FIFO
 // ==========================================
-
 app.post('/telegram', (req, res) => {
   res.sendStatus(200);
 
@@ -1452,7 +1473,6 @@ app.post('/telegram', (req, res) => {
 // ==========================================
 // 16. APPLICATION WEB DIRECTE (GOOGLE CLOUD TTS OFFICIEL)
 // ==========================================
-
 async function genererAudioGoogle(texte) {
   if (!GOOGLE_TTS_API_KEY) {
     throw new Error("Clé GOOGLE_TTS_API_KEY absente dans Render.");
@@ -1464,7 +1484,7 @@ async function genererAudioGoogle(texte) {
     input: { text: texte },
     voice: { 
       languageCode: "fr-FR", 
-      name: "fr-FR-Neural2-A" // Voix féminine studio réaliste
+      name: "fr-FR-Neural2-A"
     }, 
     audioConfig: { 
       audioEncoding: "MP3",
@@ -1477,7 +1497,7 @@ async function genererAudioGoogle(texte) {
   return res.data?.audioContent || null;
 }
 
-// Sert les fichiers statiques de l'application (public/index.html)
+// Sert les fichiers statiques (public/index.html)
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
 // Point d'entrée vocal direct
@@ -1493,20 +1513,16 @@ app.post('/api/voix', async (req, res) => {
     try {
       console.log(`[PWA VOCALE] Message reçu : "${texte}"`);
 
-      // Transcription en direct sur Telegram
       if (DOC_CHAT_ID) {
         await envoyerTelegram(DOC_CHAT_ID, `🎙️ *Toi (vocal) :*\n${texte}`);
       }
 
-      // Traitement par Nyx via Groq / Llama 3.3
       let reponseNyx = await traiterFlux(texte);
 
-      // Réponse écrite intégrale sur Telegram
       if (DOC_CHAT_ID) {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
-      // Nettoyage des balises pour la voix
       const texteOral = reponseNyx
         .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
@@ -1518,12 +1534,11 @@ app.post('/api/voix', async (req, res) => {
         .replace(/[*_`#]/g, '')
         .trim();
 
-      // Synthèse audio officielle Google Cloud TTS
       let audioB64 = null;
       try {
         audioB64 = await genererAudioGoogle(texteOral);
       } catch (errAudio) {
-        console.error("[GOOGLE TTS ERREUR]", errAudio.response?.data?.error?.message || errAudio.message);
+        console.error("[TTS ERREUR]", errAudio.response?.data?.error?.message || errAudio.message);
       }
 
       res.json({ reponse: texteOral, audio: audioB64 });
@@ -1537,7 +1552,6 @@ app.post('/api/voix', async (req, res) => {
 // ==========================================
 // 17. API DU WORKER LOCAL (EXÉCUTION SANS BRIDAGE)
 // ==========================================
-
 app.get('/api/mission', async (req, res) => {
   if (missionEnAttente && missionEnAttente.statut === "attente") {
     missionEnAttente.statut = "en_cours";
@@ -1591,7 +1605,7 @@ CONSIGNE :
     if (GROQ_API_KEY) {
       analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3);
     } else {
-      analyseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, promptAuditRapport);
+      analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     }
   } catch (errG) {
     try {
@@ -1686,7 +1700,6 @@ CONSIGNE :
 // ==========================================
 // 18. SANTÉ, PINGER & CRON
 // ==========================================
-
 app.get('/ping', (req, res) => res.status(200).send("pong"));
 
 app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
@@ -1708,7 +1721,6 @@ app.post('/api/consolider', (req, res) => {
 // ==========================================
 // 19. DÉMARRAGE DU SERVEUR
 // ==========================================
-
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
   console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
