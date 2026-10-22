@@ -31,7 +31,7 @@ const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 // Modèles LLM configurés
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-2-pro").trim();
