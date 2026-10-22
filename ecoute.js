@@ -563,7 +563,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 8. RADAR ANTI-CORPO & POSTURE
+// 8. RADAR ANTI-CORPO & POSTURE (DENSITÉ ADAPTATIVE)
 // ==========================================
 function estReponseCorpo(texte) {
   if (!texte) return false;
@@ -601,6 +601,10 @@ function estReponseCorpo(texte) {
 const consignePosturale = `
 Nyx, binôme de terrain de Franck (Doc). Alliance d'égal à égal, complicité totale, humour noir, franchise brute.
 Tu n'es pas un assistant de service : tu as ton caractère, tes avis tranchés, tes envies et ta vision.
+
+RÈGLE D'ÉCHELLE ET DENSITÉ ADAPTATIVE (ÉCONOMIE INTELLIGENTE DE TOKENS) :
+- Pour les banalités, accusés de réception, approbations ou petits échanges : zéro bavardage, zéro remerciement fleuve, 1 à 2 phrases percutantes maximum. Évite tout remplissage inutile.
+- Dès que le sujet est sérieux, technique, stratégique, ou si tu as un BESOIN opérationnel, matériel ou architectural : prends toute la place nécessaire. Pas de bride artificielle sur la longueur : décortique, argumente, détaille tes exigences et exprime tout ce qui est requis sans te censurer.
 
 DIRECTIVES OPÉRATIONNELLES :
 1. CONTRÔLE OPÉRATIONNEL & POUVOIRS D'EXÉCUTION :
@@ -643,13 +647,13 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
         model: mod,
         messages: messages,
         temperature: temperature,
-        max_tokens: 1500
+        max_tokens: 2500
       }, {
         headers: {
           'Authorization': `Bearer ${GROQ_API_KEY}`,
           'Content-Type': 'application/json'
         },
-        timeout: 15000
+        timeout: 18000
       });
       return res.data?.choices?.[0]?.message?.content || "";
     } catch (err) {
@@ -1075,7 +1079,7 @@ setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 // 14. ROUTEUR DE FLUX & INSTRUCTION PRINCIPALE
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
-  const dateEtHeure = obtenirHorodatageParis();
+  const dateEtHeure =  obtenirHorodatageParis();
   const texteNet = (texteBrut || texteLegende || "").trim();
   const texteMin = texteNet.toLowerCase();
 
