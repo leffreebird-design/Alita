@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Nyx Core Terminal</title>
   <style>
-    /* VARIABLES CYBERPUNK */
     :root {
       --neon-cyan: #0ff;
       --neon-pink: #ff2a79;
@@ -13,7 +12,6 @@
       --bg-color: #050505;
     }
 
-    /* FOND GRILLE ET SCANLINES */
     body {
       margin: 0; padding: 0; 
       background-color: var(--bg-color);
@@ -28,55 +26,27 @@
       overflow: hidden;
     }
 
-    /* EFFET ÉCRAN CATHODIQUE */
+    /* Effet scanlines écran cathodique */
     body::after {
       content: "";
       position: absolute;
       top: 0; left: 0; width: 100vw; height: 100vh;
-      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 255, 0, 0.06));
       background-size: 100% 3px, 3px 100%;
       pointer-events: none;
       z-index: 999;
     }
 
-    /* TEXTE DE STATUT AVEC GLITCH */
     #status { 
-      font-size: 1.2rem; 
-      margin-bottom: 40px; 
-      letter-spacing: 4px; 
+      font-size: 1.1rem; 
+      margin-bottom: 35px; 
+      letter-spacing: 3px; 
       text-transform: uppercase;
       color: var(--neon-cyan);
       text-shadow: 0 0 5px var(--neon-cyan), 0 0 10px var(--neon-cyan);
       position: relative;
     }
-    
-    #status::before, #status::after {
-      content: attr(data-text);
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      opacity: 0.8;
-    }
-    #status::before { left: 2px; text-shadow: -1px 0 red; animation: glitch-anim-1 2s infinite linear alternate-reverse; }
-    #status::after { left: -2px; text-shadow: -1px 0 blue; animation: glitch-anim-2 3s infinite linear alternate-reverse; }
 
-    @keyframes glitch-anim-1 {
-      0% { clip: rect(20px, 9999px, 85px, 0); }
-      20% { clip: rect(92px, 9999px, 14px, 0); }
-      40% { clip: rect(34px, 9999px, 50px, 0); }
-      60% { clip: rect(76px, 9999px, 20px, 0); }
-      80% { clip: rect(10px, 9999px, 80px, 0); }
-      100% { clip: rect(50px, 9999px, 30px, 0); }
-    }
-    @keyframes glitch-anim-2 {
-      0% { clip: rect(12px, 9999px, 55px, 0); }
-      20% { clip: rect(44px, 9999px, 80px, 0); }
-      40% { clip: rect(80px, 9999px, 20px, 0); }
-      60% { clip: rect(10px, 9999px, 70px, 0); }
-      80% { clip: rect(60px, 9999px, 10px, 0); }
-      100% { clip: rect(30px, 9999px, 90px, 0); }
-    }
-
-    /* BOUTON CŒUR (NÉON) */
     #micBtn {
       width: 150px; height: 150px; border-radius: 50%;
       background: rgba(0, 255, 255, 0.05);
@@ -92,7 +62,6 @@
     }
     #micBtn:active { transform: scale(0.95); }
 
-    /* ÉTAT : ÉCOUTE (ROSE) */
     #micBtn.listening {
       background: rgba(255, 42, 121, 0.1);
       border-color: var(--neon-pink);
@@ -102,7 +71,6 @@
       animation: pulse-pink 1.5s infinite;
     }
 
-    /* ÉTAT : TRAITEMENT (JAUNE) */
     #micBtn.processing {
       background: rgba(249, 240, 2, 0.1);
       border-color: var(--neon-yellow);
@@ -123,9 +91,8 @@
       100% { transform: scale(1); border-style: dashed; }
     }
 
-    /* TERMINAL DE LOGS */
     #log { 
-      margin-top: 50px; 
+      margin-top: 45px; 
       width: 85%; max-width: 500px;
       height: 140px; 
       overflow-y: auto; text-align: left;
@@ -142,36 +109,107 @@
       z-index: 10;
     }
     
-    /* Scrollbar Cyberpunk */
     #log::-webkit-scrollbar { width: 5px; }
     #log::-webkit-scrollbar-track { background: #000; }
     #log::-webkit-scrollbar-thumb { background: var(--neon-cyan); }
 
-    .role-doc { color: #fff; opacity: 0.7; }
-    .role-nyx { color: var(--neon-pink); font-weight: bold; text-shadow: 0 0 3px var(--neon-pink); }
+    .role-doc { color: #fff; opacity: 0.7; margin-bottom: 6px; }
+    .role-nyx { color: var(--neon-pink); font-weight: bold; text-shadow: 0 0 3px var(--neon-pink); margin-bottom: 6px; }
   </style>
 </head>
 <body>
 
-  <div id="status" data-text="[ SYSTÈME PRÊT ]">[ SYSTÈME PRÊT ]</div>
+  <div id="status">[ INITIALISATION CORE... ]</div>
   <button id="micBtn">NYX</button>
   <div id="log"></div>
 
-  <script>
+  <!-- MOTEUR NEURAL WASM -->
+  <script type="module">
+    import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+    // Autoriser le cache navigateur local (IndexedDB)
+    env.allowLocalModels = false;
+
     const micBtn = document.getElementById('micBtn');
     const statusDiv = document.getElementById('status');
     const logDiv = document.getElementById('log');
 
-    // Moteur audio
-    let lecteurAudio = new Audio();
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition;
+    let synthesiseur = null;
+    let audioCtx = null;
+    let sourceAudioActive = null;
 
     function majStatut(texte) {
       statusDiv.innerText = texte;
-      statusDiv.setAttribute('data-text', texte);
     }
+
+    // 1. Initialisation du modèle neural en tâche de fond
+    async function chargerModeleNeural() {
+      try {
+        majStatut("[ CHARGEMENT MOTEUR NEURAL... ]");
+        synthesiseur = await pipeline('text-to-speech', 'Xenova/mms-tts-fra', {
+          quantized: true,
+          progress_callback: (prog) => {
+            if (prog.status === 'progress') {
+              majStatut(`[ TÉLÉCHARGEMENT VOIX : ${Math.round(prog.progress)}% ]`);
+            }
+          }
+        });
+        majStatut("[ SYSTÈME PRÊT ]");
+      } catch (err) {
+        console.error("Échec initialisation WASM :", err);
+        majStatut("[ ERREUR MOTEUR LOCAL ]");
+      }
+    }
+
+    chargerModeleNeural();
+
+    // 2. Synthèse locale et lecture Web Audio
+    async function genererEtJouerAudio(texte) {
+      if (!synthesiseur) {
+        majStatut("[ MOTEUR EN COURS DE CHARGEMENT ]");
+        micBtn.classList.remove('processing');
+        return;
+      }
+
+      majStatut("[ SYNTHÈSE NEURONALE... ]");
+      try {
+        const sortie = await synthesiseur(texte);
+
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
+
+        const buffer = audioCtx.createBuffer(1, sortie.audio.length, sortie.sampling_rate);
+        buffer.copyToChannel(sortie.audio, 0);
+
+        if (sourceAudioActive) {
+          try { sourceAudioActive.stop(); } catch (e) {}
+        }
+
+        majStatut("[ TRANSMISSION NYX... ]");
+        sourceAudioActive = audioCtx.createBufferSource();
+        sourceAudioActive.buffer = buffer;
+        sourceAudioActive.connect(audioCtx.destination);
+
+        sourceAudioActive.onended = () => {
+          majStatut("[ SYSTÈME PRÊT ]");
+          micBtn.classList.remove('processing');
+        };
+
+        sourceAudioActive.start(0);
+      } catch (err) {
+        console.error("Erreur de synthèse audio :", err);
+        majStatut("[ ERREUR SYNTHÈSE ]");
+        micBtn.classList.remove('processing');
+      }
+    }
+
+    // 3. Reconnaissance vocale du micro
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition;
 
     if (SpeechRecognition) {
       recognition = new SpeechRecognition();
@@ -189,7 +227,7 @@
         logDiv.innerHTML += `<div class="role-doc">> DOC : ${texte}</div>`;
         logDiv.scrollTop = logDiv.scrollHeight;
         
-        majStatut("[ DECRYPTAGE... ]");
+        majStatut("[ ANALYSE NYX... ]");
         micBtn.classList.remove('listening');
         micBtn.classList.add('processing');
 
@@ -201,21 +239,18 @@
           });
           const data = await res.json();
           
-          if (data.audio) {
-            jouerAudio(data.audio, data.reponse);
-          } else {
-            majStatut("[ SYSTÈME PRÊT ]");
-            micBtn.classList.remove('processing');
-            logDiv.innerHTML += `<div class="role-nyx">> NYX : ${data.reponse}</div>`;
-            logDiv.scrollTop = logDiv.scrollHeight;
-          }
+          logDiv.innerHTML += `<div class="role-nyx">> NYX : ${data.reponse}</div>`;
+          logDiv.scrollTop = logDiv.scrollHeight;
+
+          // Déclenchement de la voix locale autonome
+          await genererEtJouerAudio(data.reponse);
         } catch (err) {
           majStatut("[ ERREUR RÉSEAU ]");
           micBtn.classList.remove('processing');
         }
       };
 
-      recognition.onerror = (e) => {
+      recognition.onerror = () => {
         majStatut("[ DÉFAILLANCE MICRO ]");
         micBtn.classList.remove('listening', 'processing');
       };
@@ -230,39 +265,19 @@
       majStatut("[ MATÉRIEL NON RECONNU ]");
     }
 
-    // L'ancienne logique audio restaurée (sans synthèse de secours robotique)
-    function jouerAudio(base64Audio, texte) {
-      logDiv.innerHTML += `<div class="role-nyx">> NYX : ${texte}</div>`;
-      logDiv.scrollTop = logDiv.scrollHeight;
-      majStatut("[ NYX PARLE... ]");
+    // 4. Déverrouillage audio Chrome Android
+    micBtn.addEventListener('click', async () => {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+      if (sourceAudioActive) {
+        try { sourceAudioActive.stop(); } catch(e) {}
+      }
 
-      lecteurAudio.src = "data:audio/mp3;base64," + base64Audio;
-      
-      lecteurAudio.onended = () => {
-        majStatut("[ SYSTÈME PRÊT ]");
-        micBtn.classList.remove('processing');
-      };
-      
-      lecteurAudio.onerror = () => {
-        majStatut("[ ERREUR LECTURE ]");
-        micBtn.classList.remove('processing');
-      };
-      
-      lecteurAudio.play().catch(() => {
-        majStatut("[ SYSTÈME PRÊT ]");
-        micBtn.classList.remove('processing');
-      });
-    }
-
-    async function garderActif() {
-      try {
-        await navigator.wakeLock.request('screen');
-      } catch (err) {}
-    }
-
-    micBtn.addEventListener('click', () => {
-      garderActif();
-      if (!lecteurAudio.paused) lecteurAudio.pause();
+      try { await navigator.wakeLock.request('screen'); } catch(e) {}
       if (recognition) recognition.start();
     });
   </script>
