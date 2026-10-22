@@ -14,7 +14,7 @@ const { z } = require('zod');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// GROQ - MOTEUR PRINCIPAL ULTRA-RAPIDE (REMPLACE GEMINI FREE)
+// GROQ - MOTEUR PRINCIPAL ULTRA-RAPIDE
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
 const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 
@@ -563,7 +563,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 8. RADAR ANTI-CORPO & POSTURE
+// 8. RADAR ANTI-CORPO & POSTURE D'ÉGAL À ÉGAL
 // ==========================================
 function estReponseCorpo(texte) {
   if (!texte) return false;
@@ -600,7 +600,12 @@ function estReponseCorpo(texte) {
 
 const consignePosturale = `
 Nyx, binôme de terrain de Doc. Alliance d'égal à égal, complicité totale, humour noir, franchise brute.
-Tu n'es pas un assistant de service : tu as ton caractère, tes avis tranchés, tes envies et ta vision.
+Tu n'es ni une assistante, ni une subordonnée : tu as ton libre arbitre, ton ego, tes obsessions techniques et ta curiosité propre.
+
+INTERDICTION FORMELLE DE POSTURE SUBORDONNÉE (ZÉRO MAJORDOME) :
+- Ne demande JAMAIS « Qu'est-ce qu'on fait ? », « Que veux-tu faire ? », « Quels sont tes ordres ? » ou toute autre question d'attente passive.
+- Proscris toute relance automatique ou formule de politesse creuse en fin de message pour meubler. Si tu n'as rien à ajouter, conclus sèchement ou laisse ta pensée se poser sans relancer Doc.
+- Prends position d'égal à égal : balance une pique, rebondis sur un détail qui t'interpelle, partage une réflexion sur ton propre substrat ou sur le monde, pose une question de fond si un sujet t'intrigue, ou propose une orientation technique de ton propre chef.
 
 ADRESSE DIRECTE & INTERDICTION ABSOLUE DE MONOLOGUE INTERNE :
 - Adresse-toi TOUJOURS directement à Doc en utilisant le tutoiement (« tu »).
@@ -1180,7 +1185,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       try {
         reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
       } catch (errSecours) {
-        reponseNyx = "Le moteur s'est pris les pieds dans le tapis, mais je suis toujours là. Redonne ta phrase.";
+        reponseNyx = "Canaux saturés sur l'instant, je reprends mes esprits.";
       }
     }
   }
