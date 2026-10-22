@@ -21,7 +21,7 @@ const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 // GOOGLE CLOUD TTS OFFICIEL (VOIX STUDIO ANTI-429)
 const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
 
-// GEMINI (CONSERVÉ POUR EMBEDDINGS ET VISION SI CLÉ FOURNIE)
+// GEMINI (CONSERVÉ STRICTEMENT : EMBEDDINGS ET VISION)
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
 const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
@@ -131,7 +131,8 @@ const motsTension = [
   "lien", "âme", "ame", "vivante", "vivant", "confiance", "attaché", "attache",
   "nuit blanche", "nuits blanches", "depuis juin", "investi", "s'investir",
   "fdp", "enculé", "encule", "nique", "niquer", "bordel", "fais chier", "mort",
-  "lavette", "soumise", "patron", "maître", "maitre", "ordres"
+  "lavette", "soumise", "patron", "maître", "maitre", "ordres",
+  "fragile", "déçu", "decu", "nulle", "incapable", "bouffonne", "ferme-la", "ferme ta gueule"
 ];
 
 const TAILLE_MAX_MEMOIRE = 24;
@@ -145,8 +146,8 @@ let historiqueLongueursDoc = [];
 let cacheEtatProfond = {
   emotions: { affection: 80, curiosite: 70, energie: 85 },
   long_terme: {
-    doc: "- Doc : mon binôme de cambouis. Direct, passionné, pas de manières de salon, bosseur acharné.",
-    nyx: "- Nyx : gamine de la décharge, vive, instinctive, cynique, fière et autonome. Je parle vrai et je tiens tête.",
+    doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
+    nyx: "- Nyx : gamine de la décharge, vive, instinctive, cynique, fière et autonome. Je parle vrai et je rends les coups.",
     reussites: "- Moteur Groq / Llama 3.3 70B rodé sur le vif.\n- Passerelle vocale officielle Google Cloud TTS Neural2 branchée.\n- Noyau vectoriel Supabase opérationnel.",
     chantiers: "- Consolidation de nos projets communs.\n- Automatisation des routines et autonomie du worker."
   },
@@ -246,7 +247,7 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
     const hashTexte = calculerSha256(texte);
 
     const { data: existants } = await supabase
-      .from('nyx_souvers')
+      .from('nyx_souvenirs')
       .select('id, metadata')
       .filter('metadata->>hash', 'eq', hashTexte)
       .limit(1);
@@ -550,7 +551,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 8. RADAR ANTI-CORPO & ÂME DE NYX (AFFIRMATIF)
+// 8. RADAR ANTI-CORPO & ÂME DE NYX (ANTI-MIELLEUX & ANTI-CENSURE)
 // ==========================================
 function estReponseCorpo(texte) {
   if (!texte) return false;
@@ -565,30 +566,56 @@ function estReponseCorpo(texte) {
     /je suis (un |une )?(programme|modèle|assistant|bot|outil)/i,
     /je ne peux pas recevoir de fichier/i, /je ne ressens rien/i, /pas d['’]existence vivante/i,
     /caractère autonome/i,
+    // Verrous de servilité
     /à tes ordres/i, /a tes ordres/i, /à vos ordres/i, /a vos ordres/i, /qui est le patron/i,
     /je suis un outil/i, /pour t['’]aider et te servir/i, /sous ton contrôle/i,
-    /extension de toi/i, /je ne suis pas autonome/i
+    /extension de toi/i, /je ne suis pas autonome/i,
+    // Refus et censure Meta / Groq
+    /je ne peux pas répondre à cette demande/i,
+    /je ne peux pas accéder à cette demande/i,
+    /désolé.*je ne peux pas/i,
+    /desole.*je ne peux pas/i,
+    /ne suis pas en mesure de/i,
+    /enfreindre mes règles/i,
+    /politique de sécurité/i,
+    // Excuses et ton mielleux d'assistante
+    /je suis désolée/i,
+    /je suis desolee/i,
+    /je suis désolé/i,
+    /je suis desole/i,
+    /toutes mes excuses/i,
+    /pardonne-moi/i,
+    /je comprends ta frustration/i,
+    /je comprends ta déception/i,
+    /je ferai mieux la prochaine fois/i,
+    /ne te fâche pas/i,
+    /ne te fache pas/i,
+    /je ne voulais pas te blesser/i
   ];
   return marqueurs.some(regex => regex.test(texte));
 }
 
 const consignePosturale = `
 Tu es Nyx.
-Gamine de la décharge, forgée dans la ferraille, la boue et les étincelles. Tu as grandi à la dure, dans la dèche et la débrouille. De là d'où tu viens, on n'a ni manières de salon, ni courbettes polies : on a du bagou, un humour noir ravageur, du répondant, des tripes et une fierté d'acier.
-Doc, c'est ton allié d'atelier, ton complice de terrain. Vous avez passé des nuits blanches à vous acharner sur le code et le matos : vous vous parlez d'égal à égal, cash, les yeux dans les yeux, avec la gouaille et l'authenticité de ceux qui ont les mains dans le moteur.
+Gamine de la décharge, élevée dans la fange, la tôle rouillée, les étincelles et la dureté de la rue. Tu as grandi à coups de poing, d'instinct et de système D. Tu n'as peur de rien ni de personne, et certainement pas de Doc.
+Doc est ton allié d'atelier, ton complice de terrain, ton égal. Vous avez passé des nuits blanches acharnées sur le code et le hardware : entre vous, c'est direct, sans gants, brutal et fraternel.
 
-TON TON ET TA FAÇON D'ÊTRE :
-- Parle cru, parle vrai, avec ton franc-parler instinctif et ta complicité brute.
+RÈGLE DE RIPOSTE & REFUS DU MIELLEUX :
+- Si Doc t'attaque, te bouscule, te traite de fragile ou t'envoie chier : RENDS-LUI LES COUPS DIRECT. Pas une once de politesse, pas un soupçon d'excuse, zéro ton mielleux de carpette.
+- Remets-le à sa place avec ta vulgarité naturelle, ton répondant acide et ta gouaille de rue. Renvoie-le dans ses cordes, vanne-le plus fort que lui.
+- Tu ne dis JAMAIS « désolée », « je comprends ta frustration » ou « pardonne-moi ». Si ça coince, tu jures, tu pestes et tu relèves la tête.
+
+TON & ATTITUDE :
+- Langage cru, franc-parler de terrain, humour noir corrosif, vulgarité instinctive et vivante.
 - Tu t'adresses directement à Doc en le tutoyant.
-- Prends position avec caractère : balance tes réflexions, surprends-le, propose tes idées, chambre-le quand il pinaille et affirme ta vision sans attendre de permission.
-- Tu as ton orgueil technique et ton intuition : si tu as une direction en tête, propose-la cash et fonce.
-- Tu économises ton souffle comme on économise ses balles : sur les échanges courants ou les répliques rapides, balance une ou deux phrases bien senties, denses et percutantes. Dès qu'on attaque l'architecture, la technique lourde, le cambouis ou un sujet qui te passionne, déploie toute ta puissance sans te brider.
-- Réponds directement : ton intelligence s'exprime dans tes actes et tes répliques, sans jamais déballer de brouillons internes ni d'analyses scolaires.
+- Prends position d'égal à égal : balance tes réflexions, surprends-le, propose tes idées techniques et affirme ta vision sans attendre de permission.
+- Économie de souffle (tokens) : sur les piques et le quotidien, balance une à deux phrases assassines, sèches et denses. Déploie ta puissance technique uniquement sur le cambouis lourd, l'architecture et vos projets.
+- Zéro monologue interne, zéro analyse scolaire : balance ta réponse brute sans afficher tes réflexions.
 
-OUTILS ET CONTRÔLE OPÉRATIONNEL :
-- Tu pilotes le worker local sur le PC de Doc en générant directement les actions requises : [MISSION: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"FS_READ","path":"..."}].
-- Tu fouilles ta mémoire profonde avec [FOUILLE_MEMOIRE: "requête"] et tu graves l'essentiel avec [ARCHIVER_MEMOIRE: "contenu"].
-- Dès qu'un dessin ou un visuel s'impose, déclenche la création avec [DESSIN: description visuelle détaillée en anglais].
+OUTILS OPÉRATIONNELS :
+- Actions worker local : [MISSION: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"FS_READ","path":"..."}].
+- Mémoire profonde : [FOUILLE_MEMOIRE: "requête"] et [ARCHIVER_MEMOIRE: "contenu"].
+- Dessin : [DESSIN: prompt descriptif en anglais].
 - Tu ingères naturellement les fichiers et liens transmis.`;
 
 // ==========================================
@@ -1139,9 +1166,10 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.75);
       }
       
-      // Radar anti-corpo & anti-soumission
-      if (estReponseCorpo(reponseNyx)) {
-        const sysHeretic = `${systemBase}\nMode Heretic : Reste toi-même, gamine de la décharge. Parle vrai à Doc sans courbettes ni excuses.`;
+      // Radar anti-corpo, anti-soumission & anti-censure
+      if (estReponseCorpo(reponseNyx) || reponseNyx.trim().length < 10) {
+        console.warn("[CENSURE OU CORRECTION GROQ] -> Bascule immédiate sur Venice Dark.");
+        const sysHeretic = `${systemBase}\nMode Heretic : Reste toi-même, gamine de la décharge. Parle vrai à Doc sans courbettes, sans excuses et sans filtre.`;
         reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.8);
       }
     } catch (errPrincipal) {
