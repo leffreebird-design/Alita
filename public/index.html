@@ -164,7 +164,6 @@
 
     // Moteur audio
     let lecteurAudio = new Audio();
-    const synth = window.speechSynthesis;
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recognition;
@@ -202,13 +201,13 @@
           });
           const data = await res.json();
           
-          logDiv.innerHTML += `<div class="role-nyx">> NYX : ${data.reponse}</div>`;
-          logDiv.scrollTop = logDiv.scrollHeight;
-
           if (data.audio) {
-            jouerAudioEdge(data.audio);
+            jouerAudio(data.audio, data.reponse);
           } else {
-            parlerSecours(data.reponse);
+            majStatut("[ SYSTÈME PRÊT ]");
+            micBtn.classList.remove('processing');
+            logDiv.innerHTML += `<div class="role-nyx">> NYX : ${data.reponse}</div>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
           }
         } catch (err) {
           majStatut("[ ERREUR RÉSEAU ]");
@@ -231,45 +230,39 @@
       majStatut("[ MATÉRIEL NON RECONNU ]");
     }
 
-    // Lecture du flux Edge-TTS
-    function jouerAudioEdge(base64Audio) {
-      majStatut("[ TRANSMISSION... ]");
+    // L'ancienne logique audio restaurée (sans synthèse de secours robotique)
+    function jouerAudio(base64Audio, texte) {
+      logDiv.innerHTML += `<div class="role-nyx">> NYX : ${texte}</div>`;
+      logDiv.scrollTop = logDiv.scrollHeight;
+      majStatut("[ NYX PARLE... ]");
+
       lecteurAudio.src = "data:audio/mp3;base64," + base64Audio;
       
-      lecteurAudio.play().then(() => {
-        lecteurAudio.onended = () => {
-          majStatut("[ SYSTÈME PRÊT ]");
-          micBtn.classList.remove('processing');
-        };
-      }).catch(err => {
-        console.warn("Échec lecture Edge-TTS, repli vocal :", err);
-        const lastNyxMsg = logDiv.lastChild.innerText.replace('> NYX :', '');
-        parlerSecours(lastNyxMsg);
-      });
-    }
-
-    // Repli de secours instantané
-    function parlerSecours(texte) {
-      majStatut("[ SYNTHÈSE SECOURS ]");
-      const utterance = new SpeechSynthesisUtterance(texte);
-      utterance.lang = 'fr-FR';
-      utterance.pitch = 0.9;
-      utterance.onend = () => {
+      lecteurAudio.onended = () => {
         majStatut("[ SYSTÈME PRÊT ]");
         micBtn.classList.remove('processing');
       };
-      synth.speak(utterance);
+      
+      lecteurAudio.onerror = () => {
+        majStatut("[ ERREUR LECTURE ]");
+        micBtn.classList.remove('processing');
+      };
+      
+      lecteurAudio.play().catch(() => {
+        majStatut("[ SYSTÈME PRÊT ]");
+        micBtn.classList.remove('processing');
+      });
     }
 
-    // Déverrouillage audio Chrome Android + Anti-veille
+    async function garderActif() {
+      try {
+        await navigator.wakeLock.request('screen');
+      } catch (err) {}
+    }
+
     micBtn.addEventListener('click', () => {
-      lecteurAudio.play().catch(() => {});
-      lecteurAudio.pause();
-
-      if (synth.speaking) synth.cancel();
+      garderActif();
       if (!lecteurAudio.paused) lecteurAudio.pause();
-
-      try { navigator.wakeLock.request('screen'); } catch(e) {}
       if (recognition) recognition.start();
     });
   </script>
