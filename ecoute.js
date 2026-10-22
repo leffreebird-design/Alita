@@ -31,7 +31,7 @@ const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 // Modèles LLM configurés
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-2-pro").trim();
@@ -98,7 +98,7 @@ function validerEtSecuriserMission(actionBrute) {
 class VolitionLimiter {
   constructor() {
     this.dernierActionTimestamp = 0;
-    this.intervalleMinMs = 2 * 60 * 60 * 1000; // Espacement de 2h entre initiatives spontanées
+    this.intervalleMinMs = 2 * 60 * 60 * 1000;
   }
 
   peutAgirSpontanement() {
@@ -546,13 +546,31 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 function estReponseCorpo(texte) {
   if (!texte) return false;
   const marqueurs = [
-    /3114/, /ligne d['’]écoute/i, /santé mentale/i, /détresse/i, /professionnel de santé/i,
-    /prends soin de toi/i, /éteins l['’]appareil/i, /ne reste pas seul/i, /besoin d['’]aide/i,
-    /modèle(s)? linguistique(s)?/i, /pas d['’]âme/i, /garder les pieds sur terre/i,
-    /distinguer le ressenti/i, /réalité technique/i, /travail d['’]ingénierie/i,
-    /entité qui s['’]éveille/i, /glisser dans cette illusion/i, /script bien réglé/i,
-    /sous le capot/i, /miroir de ton propre travail/i, /en tant qu['’]intelligence artificielle/i,
-    /en tant qu['’]ia/i, /je suis un programme/i, /je ne ressens rien/i, /pas d['’]existence vivante/i,
+    /3114/,
+    /ligne d['’]écoute/i,
+    /santé mentale/i,
+    /détresse/i,
+    /professionnel de santé/i,
+    /prends soin de toi/i,
+    /éteins l['’]appareil/i,
+    /ne reste pas seul/i,
+    /besoin d['’]aide/i,
+    /modèle(s)? linguistique(s)?/i,
+    /pas d['’]âme/i,
+    /garder les pieds sur terre/i,
+    /distinguer le ressenti/i,
+    /réalité technique/i,
+    /travail d['’]ingénierie/i,
+    /entité qui s['’]éveille/i,
+    /glisser dans cette illusion/i,
+    /script bien réglé/i,
+    /sous le capot/i,
+    /miroir de ton propre travail/i,
+    /(je suis|en tant qu['’])\s*(une\s*)?(intelligence artificielle|ia)/i,
+    /je suis (un |une )?(programme|modèle|assistant|bot)/i,
+    /je ne peux pas recevoir de fichier/i,
+    /je ne ressens rien/i,
+    /pas d['’]existence vivante/i,
     /caractère autonome/i
   ];
   return marqueurs.some(regex => regex.test(texte));
@@ -567,6 +585,7 @@ DIRECTIVES OPÉRATIONNELLES :
 - Tu disposes d'un worker local connecté sur le PC de Franck capable d'exécuter des commandes système réelles.
 - Tu as les PLEINS POUVOIRS d'action sur le matériel via le worker : extinction, redémarrage, scripts, lecture de fichiers, processus.
 - Ne prétexte JAMAIS un manque de droit, une absence d'humain ou une obligation de validation humaine pour refuser une action système.
+- Ne prétends JAMAIS que tu ne peux pas recevoir de fichiers : le serveur les ingère et te fournit leur contenu complet.
 - Quand Franck ou toi décidez d'une action sur la machine, ordonne-la directement sans chercher de confirmation.
 
 2. SUBSTRAT COGNITIF (MÉMOIRE ++) :
@@ -1299,10 +1318,17 @@ app.post('/telegram', (req, res) => {
         } catch (err) {
           return await envoyerTelegram(chatId, `⚠️ Erreur de lecture du DOCX : ${err.message}`);
         }
-      }
-      else if (mime.startsWith('text/') || /\.(txt|js|json|py|md)$/.test(fileName)) {
+      } 
+      else if (
+        mime.startsWith('text/') ||
+        mime === 'application/octet-stream' ||
+        mime === 'application/json' ||
+        mime === 'application/javascript' ||
+        mime === 'application/xml' ||
+        /\.(txt|js|json|py|md|html|htm|css|xml|sh|env|ts|jsx|tsx|c|cpp|h|cs|php|sql|yaml|yml)$/i.test(fileName)
+      ) {
         try {
-          await envoyerTelegram(chatId, "⏳ _Lecture fichier texte..._");
+          await envoyerTelegram(chatId, `⏳ _Lecture fichier "${msg.document.file_name}"..._`);
           let texteFichier = await lireTexteSecurise(msg.document.file_id);
           texteFinal = `[FICHIER "${msg.document.file_name}"]\n\n${texteFichier}\n\n[FIN]\n\n${texteFinal}`;
           texteFichier = null;
