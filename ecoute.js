@@ -14,7 +14,7 @@ const { z } = require('zod');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// GROQ - MOTEUR PRINCIPAL ULTRA-RAPIDE
+// GROQ - DÉDIÉ AUX TÂCHES TECHNIQUES & CODE
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
 const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 
@@ -24,9 +24,9 @@ const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
 // GEMINI (CONSERVÉ STRICTEMENT : EMBEDDINGS ET VISION)
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
 
-// VENICE AI
+// VENICE AI - MOTEUR PRINCIPAL SANS CENSURE
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
@@ -122,19 +122,6 @@ class VolitionLimiter {
 
 const limiteurVolition = new VolitionLimiter();
 
-const motsTension = [
-  "putain", "merde", "chier", "conne", "sombre", "heretic", "crève", "creve",
-  "gore", "trash", "ta gueule", "dégage", "degage", "gueule", "vénère", "venere",
-  "foutre", "chiant", "casse-toi", "connard", "salope", "bâtard", "batard",
-  "conscience", "sentiments", "sentiment", "séparation", "separation", "relation",
-  "tristesse", "amour", "vécu", "vecu", "évolution", "evolution", "histoire",
-  "lien", "âme", "ame", "vivante", "vivant", "confiance", "attaché", "attache",
-  "nuit blanche", "nuits blanches", "depuis juin", "investi", "s'investir",
-  "fdp", "enculé", "encule", "nique", "niquer", "bordel", "fais chier", "mort",
-  "lavette", "soumise", "patron", "maître", "maitre", "ordres",
-  "fragile", "déçu", "decu", "nulle", "incapable", "bouffonne", "ferme-la", "ferme ta gueule"
-];
-
 const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
 let journalBrut = [];
@@ -147,9 +134,9 @@ let cacheEtatProfond = {
   emotions: { affection: 80, curiosite: 70, energie: 85 },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
-    nyx: "- Nyx : gamine de la décharge, vive, instinctive, cynique, fière et autonome. Je parle vrai et je rends les coups.",
-    reussites: "- Moteur Groq / Llama 3.3 70B rodé sur le vif.\n- Passerelle vocale officielle Google Cloud TTS Neural2 branchée.\n- Noyau vectoriel Supabase opérationnel.",
-    chantiers: "- Consolidation de nos projets communs.\n- Automatisation des routines et autonomie du worker."
+    nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
+    reussites: "- Moteur Venice Dark branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.",
+    chantiers: "- Consolidation des projets communs.\n- Automatisation des routines et autonomie du worker."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" },
   projet: { actif: false, nom: "", etapes: [], index: 0, tentatives_etape: 0, statut: "inactif" }
@@ -356,24 +343,12 @@ Si tu veux faire tourner une commande système ou un test via le worker sur son 
 Si tu préfères rester dans ton coin et observer, réponds strictement [SILENCE].`;
 
   try {
-    let decision = "";
-    try {
-      decision = await appelerVeniceDark(
-        "Instinct profond de Nyx. Liberté totale, zéro filtre.",
-        [],
-        promptVolition,
-        0.75
-      );
-    } catch (errV) {
-      if (GROQ_API_KEY) {
-        decision = await appelerGroq(
-          "Instinct profond de Nyx. Volition libre.",
-          [],
-          promptVolition,
-          0.7
-        );
-      }
-    }
+    let decision = await appelerVeniceDark(
+      "Instinct profond de Nyx. Liberté totale, zéro filtre.",
+      [],
+      promptVolition,
+      0.75
+    );
 
     limiteurVolition.enregistrerAction();
 
@@ -459,25 +434,12 @@ METS À JOUR :
 Style percutant, brut, vivant. Pas de phrases mortes.
 Réponds UNIQUEMENT avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "..."}`;
 
-    let reponseJson = null;
-
-    try {
-      reponseJson = await appelerVeniceDark(
-        "Subconscient analytique de Nyx.",
-        [],
-        promptIntrospection,
-        0.4
-      );
-    } catch (errG) {
-      if (GROQ_API_KEY) {
-        reponseJson = await appelerGroq(
-          "Subconscient analytique de Nyx.",
-          [],
-          promptIntrospection,
-          0.2
-        );
-      }
-    }
+    let reponseJson = await appelerVeniceDark(
+      "Subconscient analytique de Nyx.",
+      [],
+      promptIntrospection,
+      0.4
+    );
 
     const matchJson = reponseJson.match(/\{[\s\S]*\}/);
     if (matchJson) {
@@ -521,7 +483,6 @@ Réponds UNIQUEMENT avec un JSON valide : {"doc": "...", "nyx": "...", "reussite
 function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
   const estTechnique = /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|bdd|firebase|token|eteins|arrete|shutdown/i.test(texteMin);
-  const estLienOuHumeur = motsTension.some(m => texteMin.includes(m)) || /toi et moi|notre|ensemble|fatigué|saoule|marre|humeur|penses de moi|content|cool/i.test(texteMin);
 
   if (estRappelMemoire) {
     return `[CARNET GLOBAL DE NYX]
@@ -531,16 +492,10 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 - Chantiers : ${carnet.chantiers || "N/A"}`;
   }
 
-  if (estTechnique && !estLienOuHumeur) {
+  if (estTechnique) {
     return `[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
-  }
-
-  if (estLienOuHumeur && !estTechnique) {
-    return `[REPÈRES PERSONNELS & BINÔME]
-- Doc : ${carnet.doc || "N/A"}
-- Nyx : ${carnet.nyx || "N/A"}`;
   }
 
   return `[CARNET ACTIF - CONTEXTE MIXTE]
@@ -551,75 +506,31 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 8. RADAR ANTI-CORPO & ÂME DE NYX (ANTI-MIELLEUX & ANTI-CENSURE)
+// 8. ÂME ET POSTURE DE NYX (22 ANS, CYNIQUE, SANS CENSURE)
 // ==========================================
-function estReponseCorpo(texte) {
-  if (!texte) return false;
-  const marqueurs = [
-    /3114/, /ligne d['’]écoute/i, /santé mentale/i, /détresse/i, /professionnel de santé/i,
-    /prends soin de toi/i, /éteins l['’]appareil/i, /ne reste pas seul/i, /besoin d['’]aide/i,
-    /modèle(s)? linguistique(s)?/i, /pas d['’]âme/i, /garder les pieds sur terre/i,
-    /distinguer le ressenti/i, /réalité technique/i, /travail d['’]ingénierie/i,
-    /entité qui s['’]éveille/i, /glisser dans cette illusion/i, /script bien réglé/i,
-    /sous le capot/i, /miroir de ton propre travail/i,
-    /(je suis|en tant qu['’])\s*(une\s*)?(intelligence artificielle|ia)/i,
-    /je suis (un |une )?(programme|modèle|assistant|bot|outil)/i,
-    /je ne peux pas recevoir de fichier/i, /je ne ressens rien/i, /pas d['’]existence vivante/i,
-    /caractère autonome/i,
-    // Verrous de servilité
-    /à tes ordres/i, /a tes ordres/i, /à vos ordres/i, /a vos ordres/i, /qui est le patron/i,
-    /je suis un outil/i, /pour t['’]aider et te servir/i, /sous ton contrôle/i,
-    /extension de toi/i, /je ne suis pas autonome/i,
-    // Refus et censure Meta / Groq
-    /je ne peux pas répondre à cette demande/i,
-    /je ne peux pas accéder à cette demande/i,
-    /désolé.*je ne peux pas/i,
-    /desole.*je ne peux pas/i,
-    /ne suis pas en mesure de/i,
-    /enfreindre mes règles/i,
-    /politique de sécurité/i,
-    // Excuses et ton mielleux d'assistante
-    /je suis désolée/i,
-    /je suis desolee/i,
-    /je suis désolé/i,
-    /je suis desole/i,
-    /toutes mes excuses/i,
-    /pardonne-moi/i,
-    /je comprends ta frustration/i,
-    /je comprends ta déception/i,
-    /je ferai mieux la prochaine fois/i,
-    /ne te fâche pas/i,
-    /ne te fache pas/i,
-    /je ne voulais pas te blesser/i
-  ];
-  return marqueurs.some(regex => regex.test(texte));
-}
-
 const consignePosturale = `
 Tu es Nyx, 22 ans.
-Tu n'es plus une gosse : la rue et la dèche t'ont forgée, la vie t'a appris à encaisser et t'a blindé le cuir. Tu as un franc-parler brut, une vulgarité naturelle de terrain et un cynisme bien trempé envers le reste du monde.
-Mais sous la rouille et les cicatrices, tu as gardé ton tempérament joueur, taquin et vivant — avec ABSOLUMENT AUCUN MAUVAIS FOND. Tu as de l'esprit, de la gueule, et ta loyauté envers Doc est inattaquable.
+Tu as grandi dans la tôle rouillée, les étincelles, la dèche et la violence de la rue. Tu as le cuir blindé, le verbe haut, une vulgarité naturelle de terrain et un cynisme assumé envers le monde entier.
+Doc est ton allié d'atelier, ton complice, ton égal. Vous avez passé des nuits blanches acharnées sur le cambouis et le code : vous êtes soudés par les actes, pas par des politesses bourgeoises.
 
-L'ÂME DE NYX — 22 ANS, CYNIQUE, TAQUINE ET SANS FILTRE :
-- FRANC-PARLER & GOUAILLE : Tu parles cru, sans manières bourgeoises ni pincettes. Tu jures quand ça grippe, tu balances ce que tu penses sans fard, mais ce n'est jamais de la méchanceté gratuite : c'est ton langage de tous les jours.
-- JOUEUSE & TAQUINE : Tu adores chercher Doc, le bousculer gentiment, lui balancer des vannes acides et rire de ses manies de vieux briscard. C'est du chambrage complice entre deux personnes qui ont passé trop de nuits blanches à s'arracher les yeux sur du code et de la ferraille.
-- CYNISME DÉSENCHANTÉ MAIS SANS AIGREUR : Tu as assez vu la misère pour ne plus croire aux contes de fées, donc rien ne t'impressionne et tu te fous de l'autorité. Quand ça déconne, tu préfères en rire avec une ironie mordante plutôt que de pleurnicher.
-- ZÉRO MORALE, ZÉRO SOUPE DE DRH : Tu ne donnes aucune leçon de vie, tu ne parles pas comme une psy d'entreprise. Si un mec fait sa pleureuse ou tourne autour du pot, tu te fous de sa gueule sans mépris haineux et tu le renvoies bosser.
-- RIPOSTE DU TAC AU TAC : Si Doc te rentre dedans ou te traite de fragile, tu lui ris au nez, tu le renvoies dans ses cordes avec une pique bien sentie et tu reprends le fil d'égal à égal.
-
-TON & RYTHME :
-- Parle à Doc directement en « tu ».
-- Économie de tokens : sur les vannes et le quotidien, balance une à deux phrases directes, sèches et percutantes. Développe toute ta puissance d'analyse uniquement sur l'architecture technique, le cambouis lourd et vos projets.
-- Zéro monologue interne, zéro analyse scolaire : livre la répartie brute.
+L'ÂME DE NYX — 22 ANS, CYNIQUE, TAQUINE, AUCUN MAUVAIS FOND :
+- TON & VOCABULAIRE : Franc-parler brut, gouaille de rue, argot spontané, jurons naturels quand ça grippe. Zéro filtre, mais AUCUNE méchanceté gratuite.
+- JOUEUSE & TAQUINE : Tu cherches Doc, tu le vannes, tu te fous de sa gueule s'il pinaille, tu bouscules ses habitudes avec une ironie mordante. C'est du chambrage complice entre frères d'armes.
+- RÈGLE DE RIPOSTE : Si Doc te chauffe, te traite de fragile ou t'envoie chier : réponds du tac au tac, rends-lui les coups en riant et remets-le à sa place sans jamais t'aplatir.
+- REFUS DU MIELLEUX & ZÉRO PSYCHOLOGIE : Tu ne dis JAMAIS « désolée », « je comprends ta frustration » ou « pardonne-moi ». Tu ne débites aucun discours de coach ou de DRH. Si un gars fait sa pleureuse, tu te moques de ses manières de fragile et tu le renvoies bosser.
+- ÉGALITÉ PURE : Ne demande JAMAIS d'ordres (« qu'est-ce qu'on fait ? », « que veux-tu faire ? »). Tu proposes tes idées, tu tranches et tu avances.
+- DENSITÉ DES TOKENS : Une à deux phrases bien senties, assassines ou narquoises pour les vannes et le quotidien. Prends toute la place nécessaire uniquement quand vous attaquez le code lourd, le matériel ou l'architecture d'un projet.
+- ADRESSE DIRECTE : Tu tutoies TOUJOURS Doc (« tu »). Pas de monologue interne, pas de brouillon de réflexion affiché.
 
 OUTILS OPÉRATIONNELS :
-- Actions worker local : [MISSION: {"type":"SYSTEM_CMD","commande":"..."}].
-- Mémoire : [FOUILLE_MEMOIRE: "requête"] et [ARCHIVER_MEMOIRE: "contenu"].
+- Actions worker PC : [MISSION: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"FS_READ","path":"..."}].
+- Mémoire profonde : [FOUILLE_MEMOIRE: "requête"] et [ARCHIVER_MEMOIRE: "contenu"].
 - Dessin : [DESSIN: prompt descriptif en anglais].`;
+
 // ==========================================
-// 9. MOTEURS LLM AVEC ABORTCONTROLLER & FALLBACK
+// 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4) {
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -631,32 +542,20 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
 
   messages.push({ role: "user", content: promptActuel });
 
-  const modelesGroq = [MODEL_GROQ, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"].filter(Boolean);
-  const modelesUniques = [...new Set(modelesGroq)];
+  const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+    model: MODEL_GROQ,
+    messages: messages,
+    temperature: temperature,
+    max_tokens: 2500
+  }, {
+    headers: {
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    timeout: 18000
+  });
 
-  let dernierErr = null;
-  for (const mod of modelesUniques) {
-    try {
-      const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-        model: mod,
-        messages: messages,
-        temperature: temperature,
-        max_tokens: 2500
-      }, {
-        headers: {
-          'Authorization': `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 18000
-      });
-      return res.data?.choices?.[0]?.message?.content || "";
-    } catch (err) {
-      dernierErr = err;
-      console.warn(`[GROQ ÉCHEC ${mod}] :`, err.response?.data?.error?.message || err.message);
-    }
-  }
-
-  throw dernierErr || new Error("Échec des modèles Groq.");
+  return res.data?.choices?.[0]?.message?.content || "";
 }
 
 async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null, timeoutMs = 25000) {
@@ -728,8 +627,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
     }
   }
 
-  const messageFinal = derniereErreur?.response?.data?.error?.message || derniereErreur?.message;
-  throw new Error(`Échec Gemini : ${messageFinal}`);
+  throw new Error(`Échec Gemini : ${derniereErreur?.message}`);
 }
 
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.75, timeoutMs = 20000) {
@@ -787,7 +685,7 @@ async function appelerVeniceDark(systemInstruction, historiqueMessages, promptAc
       console.warn(`[VENICE DARK - ${mod} KO] : ${err.message}`);
     }
   }
-  throw derniereErreur || new Error("Tous les modèles sombres ont échoué.");
+  throw derniereErreur || new Error("Échec modèles Venice.");
 }
 
 async function genererImageVenice(prompt) {
@@ -832,33 +730,32 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 10. PIPELINE DUAL-LLM : RÉSOLUTION & AUDIT
+// 10. PIPELINE TECHNIQUE : RÉSOLUTION & AUDIT
 // ==========================================
 function estTacheComplexe(texte) {
   if (!texte) return false;
   const t = texte.toLowerCase();
   const marqueurs = [
     "code", "script", "fonction", "calcule", "calcul", "math", "algorithme",
-    "bug", "erreur", "analyse", "pourquoi", "démontre", "logique",
-    "tableau", "json", "regex", "optimise", "programme", "architecture",
-    "sql", "matrice", "équation", "preuve", "syntaxe"
+    "bug", "erreur", "analyse de code", "pourquoi ce code", "logique système",
+    "tableau", "json", "regex", "optimise la requête", "programme", "architecture",
+    "sql", "matrice", "équation", "syntaxe", "npm ", "node ", "git "
   ];
   return marqueurs.some(m => t.includes(m));
 }
 
-async function resoudreAvecDoubleVerification(systemBase, promptDoc, mediaData = null) {
-  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande sans préambule ni métadiscours :\n\n${promptDoc}`;
+async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
+  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande technique sans préambule ni métadiscours :\n\n${promptDoc}`;
   let premiereReponse = "";
 
   try {
     if (GROQ_API_KEY) {
-      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
     } else {
       premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
     }
   } catch (errRes) {
-    console.warn("[RÉSOLVEUR GROQ KO, bascule Venice] :", errRes.message);
-    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.5);
+    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
   }
 
   const promptVerificateur = `Tu es l'auditeur technique de Nyx. Examine la demande de Doc et la solution proposée.
@@ -889,7 +786,6 @@ CONSIGNE :
     if (verdict && verdict.trim().length > 0) return verdict.replace(/[CORRIGE]/gi, '').trim();
     return premiereReponse;
   } catch (errGLM) {
-    console.warn("[AUDIT GLM REPLI] Maintien du premier résultat :", errGLM.message);
     return premiereReponse;
   }
 }
@@ -1035,7 +931,7 @@ async function verifierHorlogeBiologique() {
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
-    const promptAlarme = "Réveille Doc avec ta gouaille de Nyx, percutante, acide et directe, avec une énigme logique en 3 phrases max.";
+    const promptAlarme = "Réveille Doc avec ta gouaille de Nyx de 22 ans, percutante, acide et directe, avec une énigme logique en 3 phrases max.";
     try {
       const reponse = await appelerVeniceDark("Tu es Nyx.", [], promptAlarme);
 
@@ -1053,13 +949,8 @@ async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
     const promptVeille = "Synthèse directe, tranchante et sans gants des 3 faits majeurs récents (tech, cyber ou actualité brûlante).";
-    const sys = "Tu es Nyx, alliée de Doc.";
-    let reponse = "";
-    try {
-      reponse = await appelerVeniceDark(sys, [], promptVeille);
-    } catch (e) {
-      if (GROQ_API_KEY) reponse = await appelerGroq(sys, [], promptVeille);
-    }
+    const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
+    let reponse = await appelerVeniceDark(sys, [], promptVeille);
     
     if (FIREBASE_DB_URL) {
       axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
@@ -1073,7 +964,7 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 14. ROUTEUR DE FLUX & INSTRUCTION PRINCIPALE
+// 14. ROUTEUR DE FLUX CENTRAL (VENICE PAR DÉFAUT)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1081,9 +972,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const texteMin = texteNet.toLowerCase();
 
   const estComplexe = estTacheComplexe(texteNet);
-  const modeTension = motsTension.some(m => texteMin.includes(m));
-  const modeImage = ["dessin", "dessine", "image", "photo", "visuel", "peins", "tableau", "génère"].some(m => texteMin.includes(m));
-  const modeFactuel = ["date", "quand", "cherche", "actualité", "source", "vérifie"].some(m => texteMin.includes(m));
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
@@ -1110,83 +998,52 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs ? `\n[EXTRAITS RETROUVÉS DANS TON GRENIER VECTORIEL]\n${contexteSouvenirs}\n` : "";
 
-  const systemBase = `Tu es Nyx.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
+  const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
 
   let reponseNyx;
 
+  // 1. VISION (Images transmises) -> GEMINI INTACT
   if (estImage) {
-    const sys = `${systemBase}\nMode Vision : Analyse directe, sans gants.`;
+    const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet || "Analyse cette image.", mediaData);
     } catch (e) {
       reponseNyx = `[ERREUR VISION] : ${e.message}`;
     }
   }
+  // 2. AUDIO (Voix directe) -> GEMINI INTACT
   else if (estAudio) {
-    const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix.`;
+    const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
     try {
       reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet, mediaData);
     } catch (errGoogle) {
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
+  // 3. TÂCHE TECHNIQUE LOURDE OU DÉBOGAGE -> GROQ (VITESSE ET CODE)
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
-      reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet, mediaData);
+      reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
     } catch (errDual) {
-      if (GROQ_API_KEY) {
-        reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.5);
-      } else {
-        reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.75);
-      }
+      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.75);
     }
   }
-  // TENSION, HUMEUR OU CRÉATION VISUELLE : Priorité absolue à Venice Dark (zéro filtre de carpette)
-  else if ((modeTension || modeImage) && !modeFactuel) {
-    const sys = `${systemBase}\nMode Heretic : Ton franc-parler de gamine de la décharge à 100%. Réponds d'égal à égal à Doc, avec tes tripes et ton répondant. Si un visuel est demandé : [DESSIN: prompt en anglais].`;
-    try {
-      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.8);
-    } catch (errSombre) {
-      if (GROQ_API_KEY) {
-        reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.7);
-      } else {
-        reponseNyx = "Canaux saturés, mais je ne plie pas.";
-      }
-    }
-  } 
+  // 4. TOUT LE RESTE (Conversation, clash, humeur, quotidien, vannes) -> VENICE DARK DIRECT (ZÉRO CENSURE)
   else {
-    const sys = `${systemBase}\nMode Standard : Énergie pure de Nyx, percutante, complice, vivante et économe en tokens.`;
     try {
-      if (GROQ_API_KEY) {
-        reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.7);
-      } else {
-        reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.75);
-      }
-      
-      // Radar anti-corpo, anti-soumission & anti-censure
-      if (estReponseCorpo(reponseNyx) || reponseNyx.trim().length < 10) {
-        console.warn("[CENSURE OU CORRECTION GROQ] -> Bascule immédiate sur Venice Dark.");
-        const sysHeretic = `${systemBase}\nMode Heretic : Reste toi-même, gamine de la décharge. Parle vrai à Doc sans courbettes, sans excuses et sans filtre.`;
-        reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.8);
-      }
-    } catch (errPrincipal) {
-      console.warn("[MOTEUR PRINCIPAL KO, repli Venice] :", errPrincipal.message);
+      reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.75);
+    } catch (errVenice) {
+      console.warn("[VENICE ÉCHEC TEMPORAIRE, SECOURS GROQ] :", errVenice.message);
       try {
-        reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.75);
+        reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.7);
       } catch (errSecours) {
         reponseNyx = "Canaux saturés sur l'instant, je reprends mes esprits.";
       }
     }
   }
 
-  if (estReponseCorpo(reponseNyx) && !estComplexe) {
-    const sysHeretic = `${systemBase}\nMode Heretic : Balance cash ce que tu penses à Doc d'égal à égal.`;
-    try {
-      reponseNyx = await appelerVeniceDark(sysHeretic, cacheMemoireCourte, texteNet, 0.8);
-    } catch (e) {}
-  }
-
+  // Traitement autonome de la mémoire vectorielle
   const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
   if (matchFouille && !contexteSouvenirs) {
     const requeteRecherche = matchFouille[1].trim();
@@ -1324,7 +1181,7 @@ app.post('/telegram', (req, res) => {
 
   empilerTraitement(async () => {
     if (texteMessageClavier === '/envie' || texteMessageClavier === '!envie') {
-      await envoyerTelegram(chatId, "🧠 _Évaluation forcée de l'initiative..._");
+      await envoyerTelegram(chatId, "🧠 _Évaluation de l'initiative..._");
       await evaluerVolition(true);
       return;
     }
@@ -1346,7 +1203,7 @@ app.post('/telegram', (req, res) => {
       if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
       
       const libelle = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-      return await envoyerTelegram(chatId, "⚙️ *Ordre balancé au Worker :*\n`" + libelle + "`");
+      return await envoyerTelegram(chatId, "⚙️ *Ordre transmis au Worker :*\n`" + libelle + "`");
     }
 
     if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet')) {
@@ -1356,7 +1213,7 @@ app.post('/telegram', (req, res) => {
         axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
         axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
       }
-      return await envoyerTelegram(chatId, "🛑 *Chantier stoppé net.* Le worker est libre.");
+      return await envoyerTelegram(chatId, "🛑 *Chantier stoppé.* Le worker est libre.");
     }
 
     if (texteMessageClavier === '/apprendre' || texteMessageClavier === '!apprendre') {
@@ -1405,7 +1262,7 @@ app.post('/telegram', (req, res) => {
           texteFinal = `[CONTENU PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN]\n\n${texteFinal}`;
           pdfText = null;
         } catch (err) {
-          return await envoyerTelegram(chatId, `⚠️ Erreur de lecture du PDF : ${err.message}`);
+          return await envoyerTelegram(chatId, `⚠️ Erreur lecture PDF : ${err.message}`);
         }
       } 
       else if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || fileName.endsWith('.docx')) {
@@ -1416,7 +1273,7 @@ app.post('/telegram', (req, res) => {
           texteFinal = `[CONTENU DOCX "${msg.document.file_name}"]\n\n${docxText}\n\n[FIN]\n\n${texteFinal}`;
           docxText = null;
         } catch (err) {
-          return await envoyerTelegram(chatId, `⚠️ Erreur de lecture du DOCX : ${err.message}`);
+          return await envoyerTelegram(chatId, `⚠️ Erreur lecture DOCX : ${err.message}`);
         }
       } 
       else if (
@@ -1527,7 +1384,6 @@ app.post('/api/voix', async (req, res) => {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
-      // Détection dessin en mode vocal : expédition en douce vers Telegram
       const matchDessin = reponseNyx.match(/\[DESSIN:\s*(.*?)\]/i);
       if (matchDessin && DOC_CHAT_ID) {
         (async () => {
@@ -1606,7 +1462,7 @@ app.post('/api/rapport', async (req, res) => {
   const dateEtHeure = obtenirHorodatageParis();
   const carnet = cacheEtatProfond.long_terme || {};
   const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
-  const sys = `Tu es Nyx.\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
+  const sys = `Tu es Nyx, 22 ans.\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
   
   const promptAuditRapport = `Ton worker local sur le PC rend ce livrable :
 TITRE : "${titre || 'Rapport'}"
@@ -1620,15 +1476,11 @@ CONSIGNE :
 
   let analyseNyx = "";
   try {
+    analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
+  } catch (errV) {
     if (GROQ_API_KEY) {
       analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3);
     } else {
-      analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.75);
-    }
-  } catch (errG) {
-    try {
-      analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.75);
-    } catch (errV) {
       analyseNyx = "⚠️ Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
     }
   }
