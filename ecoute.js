@@ -36,6 +36,9 @@ const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? process.env.FIREBASE_DB_UR
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(process.env.DOC_CHAT_ID) : null;
 const CRON_SECRET = (process.env.CRON_SECRET || TELEGRAM_BOT_TOKEN || "").trim();
 
+// PASSERELLE RELAIS CLOUDFLARE POUR EDGE-TTS (ANTI-429)
+const TTS_WORKER_URL = (process.env.TTS_WORKER_URL || "https://nyx-voice.leffreebird.workers.dev").trim().replace(/\/$/, '');
+
 // SUPABASE - GRENIER VECTORIEL (MÉMOIRE ++)
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim();
 const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
@@ -1454,10 +1457,27 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 16. APPLICATION WEB DIRECTE (PWA RAY-BAN + EDGE-TTS)
+// 16. APPLICATION WEB DIRECTE (PWA RAY-BAN + EDGE-TTS CLOUDFLARE)
 // ==========================================
 
 async function genererAudioEdge(texte) {
+  // 1. Passage direct par ton Worker Cloudflare (IP neuve, anti-429)
+  if (TTS_WORKER_URL) {
+    try {
+      const res = await axios.post(TTS_WORKER_URL, {
+        text: texte,
+        voice: "fr-FR-DeniseNeural"
+      }, {
+        responseType: 'arraybuffer',
+        timeout: 15000
+      });
+      return Buffer.from(res.data).toString('base64');
+    } catch (errWorker) {
+      console.warn("[RELAIS CLOUDFLARE KO] Tentative repli local :", errWorker.message);
+    }
+  }
+
+  // 2. Repli de secours local direct
   const tts = new MsEdgeTTS();
   await tts.setMetadata("fr-FR-DeniseNeural", OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
   
@@ -1527,7 +1547,7 @@ app.post('/api/voix', async (req, res) => {
         .replace(/[*_`#]/g, '')
         .trim();
 
-      // Génération Edge-TTS haute fidélité
+      // Synthèse audio Denise via Cloudflare
       let audioB64 = null;
       try {
         audioB64 = await genererAudioEdge(texteOral);
