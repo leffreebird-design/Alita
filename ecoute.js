@@ -1154,29 +1154,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*(\{[^}]+\})\s*\]/);
     if (matchConfigReveil) {
       try {
-        // ... ton code existant de réveil ...
-      } catch (e) {}
-    }
-
-    // === METS LE BLOC EXACTEMENT ICI ===
-    const matchMission = reponseNyx.match(/\[?MISSION:\s*(\{[^}]+\})\]?/i);
-    if (matchMission) {
-      const ordreExpliciteDeDoc = /\b(lance|exécute|run|fais|ouvre|active|tue|stop|build|test)\b/i.test(texteMessageDoc);
-      if (ordreExpliciteDeDoc) {
-        try {
-          const payload = JSON.parse(matchMission[1]);
-          await transmettreAuWorker(payload);
-        } catch (e) {
-          console.error("Format mission invalide :", e.message);
-        }
-      } else {
-        console.log("⚠️ Bloqué : tentative de commande autonome refusée.");
-      }
-      reponseNyx = reponseNyx.replace(matchMission[0], '').trim();
-    }
-    // ===================================
-
-    // Ensuite arrive ton bloc de nettoyage (décapage)
+        
     reponseNyx = reponseNyx.trim();
   const matchProjet = reponseNyx.match(/\[PLAN_PROJET:\s*([\s\S]*?)\]/i);
   if (matchProjet) {
