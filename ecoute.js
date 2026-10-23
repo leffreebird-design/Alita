@@ -28,7 +28,7 @@ const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
 // GEMINI (CONSERVÉ STRICTEMENT : EMBEDDINGS ET VISION)
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-1.5-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
 
 // VENICE AI - SECOURS SOMBRE & IMAGES
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
