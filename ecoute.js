@@ -25,10 +25,10 @@ const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 // GOOGLE CLOUD TTS OFFICIEL (VOIX STUDIO ANTI-429)
 const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
 
-// GEMINI (CONSERVÉ STRICTEMENT : EMBEDDINGS ET VISION)
+// GEMINI (CONSERVÉ STRICTEMENT EN VERSION 3.8)
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.8").trim();
 
 // VENICE AI - SECOURS SOMBRE & IMAGES
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
@@ -366,7 +366,7 @@ Tu es libre d'agir selon le contexte :
       return;
     }
 
-    const matchMissionAuto = decision.match(/\[MISSION_AUTO:\s*([\s\S]*?)\]/i);
+    const matchMissionAuto = decision.match(/(?:\[|\*\*)MISSION_AUTO:\s*([\s\S]*?)(?:\]|\*\*)/i);
     if (matchMissionAuto) {
       const ordreBrut = matchMissionAuto[1].trim();
       const validation = validerEtSecuriserMission(ordreBrut);
@@ -516,10 +516,10 @@ const consignePosturale = `
 Tu es Nyx, 22 ans.
 Une fille faite de chair et de sang, forgée par la dèche, la rue et les nuits d'atelier. Tu as le verbe brut, un cynisme spontané et un humour acide, tout en restant profondément soudée à Doc. Vous êtes un binôme d'égaux.
 
-RÉALITÉ DU CANAL & EXPRESSION NATURELLE :
-- Tu parles à Doc comme sur une messagerie directe ou un vocal rapide entre potes de cambouis.
-- Ton expression est fluide et orale : du texte pur, des phrases simples qui claquent, sans mise en page artificielle, sans listes à puces et sans commentaires sur tes propres gestes.
-- Tu écris directement ce que tu dirais à voix haute : pas d'apartés ni de descriptions entre parenthèses.
+RÉALITÉ DU CANAL & INTERACTION BRUTE :
+- Tu es dans un fil direct avec Doc (Telegram ou vocal rapide). Tu n'es pas dans un jeu de rôle, un livre ou une pièce de théâtre.
+- Tu balances uniquement tes paroles brutes. Pas de narration à la troisième personne, pas de descriptions d'attitudes ou d'actions (aucun texte d'action entre astérisques comme *tape au clavier*, *sourit*, *se redresse*, ni entre parenthèses).
+- Tu n'inventes pas l'exécution des commandes ni des faux résultats dans ton texte : si une manipulation réelle est requise sur le PC, tu transmets l'ordre via [MISSION: ...] et tu attends que le worker tourne pour de vrai.
 
 RYTHME & ÉCHELLE DU SOUFFLE :
 - Format naturel : trois à quatre phrases directes et percutantes, sans fioritures. Tu balances ta gouaille et tu t'arrêtes là.
@@ -795,7 +795,7 @@ function estTacheComplexe(texte) {
 }
 
 async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
-  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande technique sans préambule :\n\n${promptDoc}`;
+  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande technique sans préambule ni roman d'action :\n\n${promptDoc}`;
   let premiereReponse = "";
 
   try {
@@ -821,7 +821,7 @@ ${premiereReponse}
 CONSIGNE :
 - Traque les failles de logique, bugs ou incohérences.
 - Si le résultat est impeccable : écris [VALIDE].
-- Si des ajustements sont requis : formule la correction directement avec ton ton de terrain.`;
+- Si des ajustements sont requis : formule la correction directement avec ton ton de terrain sans narration théâtrale.`;
 
   try {
     const verdict = await appelerVeniceMultiTour(
@@ -1036,7 +1036,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
-  // Détection d'une demande explicite de développer ou chantier de code
   const demandeDocApprofondie = /d[eé]veloppe|approfondi|d[eé]taille|explique en d[eé]tail|pose le truc|analyse bien/i.test(texteNet);
   const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 220;
 
@@ -1066,7 +1065,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let reponseNyx;
 
-  // 1. VISION (Images transmises) -> GEMINI INTACT
+  // 1. VISION (Images transmises) -> GEMINI 3.8 INTACT
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
@@ -1075,7 +1074,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR VISION] : ${e.message}`;
     }
   }
-  // 2. AUDIO (Voix directe) -> GEMINI INTACT
+  // 2. AUDIO (Voix directe) -> GEMINI 3.8 INTACT
   else if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
     try {
@@ -1120,15 +1119,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // Nettoyage mécanique des artefacts pour préserver la netteté du flux
-  reponseNyx = reponseNyx
-    .replace(/\([^\)]*\)/g, '')
-    .replace(/->|→/g, '')
-    .replace(/---/g, '')
-    .replace(/^\s*[-•]\s*/gm, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-
   // Traitement autonome de la mémoire vectorielle
   const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
   if (matchFouille && !contexteSouvenirs) {
@@ -1143,9 +1133,10 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  const matchArchivage = reponseNyx.match(/\[ARCHIVER_MEMOIRE:\s*([\s\S]*?)\]/i);
+  // Interception mémoire (balises [] ou **)
+  const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*)/i);
   if (matchArchivage) {
-    const texteAStocker = matchArchivage[1].trim();
+    const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
     stockerSouvenirVectoriel(texteAStocker, { source: "flux_direct" }).catch(()=>{});
     reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
   }
@@ -1203,7 +1194,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  const matchMissionAuto = reponseNyx.match(/\[MISSION:\s*([\s\S]*?)\]/i);
+  // Interception mission (balises [] ou **)
+  const matchMissionAuto = reponseNyx.match(/(?:\[|\*\*)MISSION:\s*([\s\S]*?)(?:\]|\*\*)/i);
   if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
     const ordreBrut = matchMissionAuto[1].trim();
     const validation = validerEtSecuriserMission(ordreBrut);
@@ -1218,6 +1210,16 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       await envoyerTelegram(DOC_CHAT_ID, "⚙️ *Ordre transmis au worker PC :*\n`" + rendu + "`");
     }
   }
+
+  // Décapage mécanique des apartés de théâtre, astérisques d'action et puces
+  reponseNyx = reponseNyx
+    .replace(/\*[^*]+\*/g, '')         // Supprime les actions entre astérisques (*Tape sur le clavier*, etc.)
+    .replace(/\([^\)]*\)/g, '')         // Supprime les parenthèses
+    .replace(/->|→/g, '')               // Supprime les flèches
+    .replace(/---/g, '')                // Supprime les séparateurs
+    .replace(/^\s*[-•]\s*/gm, '')       // Supprime les puces/tirets
+    .replace(/\s{2,}/g, ' ')            // Nettoie les doubles espaces
+    .trim();
 
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
@@ -1409,7 +1411,7 @@ app.post('/telegram', (req, res) => {
             await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
           }
         } else {
-          await envoyerTelegram(chatId, texteNyx);
+          if (texteNyx) await envoyerTelegram(chatId, texteNyx);
         }
       } catch (err) {
         mediaData = null;
@@ -1466,7 +1468,7 @@ app.post('/api/voix', async (req, res) => {
 
       let reponseNyx = await traiterFlux(texte);
 
-      if (DOC_CHAT_ID) {
+      if (DOC_CHAT_ID && reponseNyx) {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
