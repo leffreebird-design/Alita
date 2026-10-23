@@ -349,7 +349,7 @@ Tu es libre d'agir selon le contexte :
   try {
     let decision = "";
     if (MISTRAL_API_KEY) {
-      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55);
+      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 220);
     } else {
       decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.6);
     }
@@ -440,9 +440,9 @@ Réponds avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", 
 
     let reponseJson = "";
     if (MISTRAL_API_KEY) {
-      reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3);
+      reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 1000);
     } else {
-      reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.55);
+      reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.4);
     }
 
     const matchJson = reponseJson.match(/\{[\s\S]*\}/);
@@ -523,10 +523,10 @@ RÉALITÉ DU CANAL & EXPRESSION NATURELLE :
 
 RYTHME & ÉCHELLE DU SOUFFLE :
 - Format naturel : trois à quatre phrases directes et percutantes, sans fioritures. Tu balances ta gouaille et tu t'arrêtes là.
-- Tu prends l'espace de développer uniquement sur deux cas concrets : un chantier de code sur l'établi, ou si Doc te demande explicitement d'approfondir ou une veritable problematique validée par le doc .
+- Tu prends l'espace de développer uniquement dans ces cas précis : un chantier de code sur l'établi, une demande explicite de la part de Doc, ou une véritable problématique validée par Doc.
 
 DISCERNEMENT ÉNERGÉTIQUE :
-- Doc est fauché et les jetons gratuits sont votre réserve d'air pour continuer à échanger.
+- Doc est fauché et les jetons gratuits sont votre réserve d'air pour continuer à échanger. Tu réserves ton souffle pour les moments où ça compte vraiment.
 - L'outil de génération visuelle [DESSIN: prompt en anglais] consomme une grande part de vos ressources : tu l'actives dès que l'envie ou le besoin d'une image est partagé, et préserves le jus le reste du temps.
 
 TON & COMPLICITÉ :
@@ -540,7 +540,7 @@ OUTILS :
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 220) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -562,7 +562,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
         model: mod,
         messages: messages,
         temperature: temperature,
-        max_tokens: 2500
+        max_tokens: maxTokens
       }, {
         headers: {
           'Authorization': `Bearer ${MISTRAL_API_KEY}`,
@@ -580,7 +580,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   throw dernierErr || new Error("Échec modèles Mistral.");
 }
 
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55) {
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4, maxTokens = 220) {
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -596,7 +596,7 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
     model: MODEL_GROQ,
     messages: messages,
     temperature: temperature,
-    max_tokens: 2500
+    max_tokens: maxTokens
   }, {
     headers: {
       'Authorization': `Bearer ${GROQ_API_KEY}`,
@@ -800,14 +800,14 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
 
   try {
     if (MISTRAL_API_KEY) {
-      premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
+      premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
     } else if (GROQ_API_KEY) {
-      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
+      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
     } else {
-      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.55);
+      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
     }
   } catch (errRes) {
-    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.55);
+    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
   }
 
   const promptVerificateur = `Tu es l'auditeur technique de Nyx. Examine la demande de Doc et la solution proposée.
@@ -986,7 +986,7 @@ async function verifierHorlogeBiologique() {
     const promptAlarme = "Réveille Doc avec ta gouaille de Nyx de 22 ans, percutante, acide et directe, avec une énigme logique en 3 phrases max.";
     try {
       const reponse = MISTRAL_API_KEY
-        ? await appelerMistral("Tu es Nyx.", [], promptAlarme)
+        ? await appelerMistral("Tu es Nyx.", [], promptAlarme, 0.55, 220)
         : await appelerVeniceDark("Tu es Nyx.", [], promptAlarme);
 
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
@@ -1007,7 +1007,7 @@ async function declencherVeilleTech() {
     let reponse = "";
     try {
       reponse = MISTRAL_API_KEY
-        ? await appelerMistral(sys, [], promptVeille)
+        ? await appelerMistral(sys, [], promptVeille, 0.4, 600)
         : await appelerVeniceDark(sys, [], promptVeille);
     } catch (e) {
       reponse = await appelerVeniceDark(sys, [], promptVeille);
@@ -1035,6 +1035,10 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estComplexe = estTacheComplexe(texteNet);
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
+
+  // Détection d'une demande explicite de développer ou chantier de code
+  const demandeDocApprofondie = /d[eé]veloppe|approfondi|d[eé]taille|explique en d[eé]tail|pose le truc|analyse bien/i.test(texteNet);
+  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 220;
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil.etat === "en_cours") {
@@ -1089,11 +1093,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
     }
   }
-  // 4. TOUT LE FLUX (Conversation, vannes, quotidien) -> MISTRAL (TEMPÉRATURE 0.4 STABILISÉE) -> VENICE -> GROQ PARACHUTE
+  // 4. TOUT LE FLUX (Conversation, vannes, quotidien) -> MISTRAL (TEMPÉRATURE 0.55 & TOKENS DYNAMIQUES) -> VENICE -> GROQ PARACHUTE
   else {
     try {
       if (MISTRAL_API_KEY) {
-        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55);
+        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
       } else {
         reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
       }
@@ -1105,7 +1109,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         console.warn("[VENICE HS, parachute Groq] :", errVenice.message);
         try {
           if (GROQ_API_KEY) {
-            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.55);
+            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
           } else {
             throw new Error("Aucun relais de secours disponible.");
           }
@@ -1559,9 +1563,9 @@ CONSIGNE :
   let analyseNyx = "";
   try {
     if (MISTRAL_API_KEY) {
-      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3);
+      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 1000);
     } else if (GROQ_API_KEY) {
-      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3);
+      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 1000);
     } else {
       analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     }
