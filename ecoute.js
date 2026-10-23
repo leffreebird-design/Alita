@@ -1229,6 +1229,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
     : texteNet;
+  // Nettoyage mécanique des didascalies, rôles et résidus de balises
+    reponseNyx = reponseNyx.replace(/^\*\*Nyx\*\*[^\n:]*:\s*/gi, '');
+    reponseNyx = reponseNyx.replace(/\*\[?[^*\]]+\]?\*/g, '');
+    reponseNyx = reponseNyx.replace(/\((?:voix|regard|soupire|sourit)[^)]*\)/gi, '');
+    reponseNyx = reponseNyx.replace(/---/g, '');
+    reponseNyx = reponseNyx.replace(/(?:MISSION|DESSIN|FOUILLE_MEMOIRE):\s*\{?[^}\n]+\}?/gi, '');
+    reponseNyx = reponseNyx.trim();
 
   const texteNyxSecurise = reponseNyx.length > 2500
     ? reponseNyx.slice(0, 2500) + "\n[...tronqué...]"
