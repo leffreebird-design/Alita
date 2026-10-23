@@ -214,7 +214,7 @@ async function genererEmbedding(texte) {
   for (const key of GEMINI_KEYS) {
     try {
       const res = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${key}`,
+        `https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=${key}`,
         {
           model: "models/text-embedding-004",
           content: { parts: [{ text: cleanTexte }] }
@@ -436,7 +436,7 @@ METS À JOUR :
 4. "chantiers" : Les trucs sur l'établi, ce qui reste à réparer ou à construire.
 
 Style percutant, brut, vivant. Pas de phrases mortes.
-Réponds avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "..."}`;
+Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "..."}`;
 
     let reponseJson = "";
     if (MISTRAL_API_KEY) {
@@ -445,10 +445,26 @@ Réponds avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", 
       reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.4);
     }
 
+    // Extraction tolérante aux retours à la ligne et défauts de syntaxe JSON
+    let nouveauCarnet = null;
     const matchJson = reponseJson.match(/\{[\s\S]*\}/);
+
     if (matchJson) {
-      const nouveauCarnet = JSON.parse(matchJson[0]);
-      
+      try {
+        const jsonNettoye = matchJson[0].replace(/[\n\r\t]/g, ' ');
+        nouveauCarnet = JSON.parse(jsonNettoye);
+      } catch (errParse) {
+        nouveauCarnet = {};
+        const cles = ["doc", "nyx", "reussites", "chantiers"];
+        for (const k of cles) {
+          const reg = new RegExp(`"${k}"\\s*:\\s*"([^"]+)"`, 'i');
+          const m = reponseJson.match(reg);
+          if (m) nouveauCarnet[k] = m[1].trim();
+        }
+      }
+    }
+
+    if (nouveauCarnet && Object.keys(nouveauCarnet).length > 0) {
       const longueurAncienne = JSON.stringify(cacheEtatProfond.long_terme).length;
       const longueurNouvelle = JSON.stringify(nouveauCarnet).length;
 
@@ -457,11 +473,8 @@ Réponds avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", 
         return;
       }
 
-      const cles = ["doc", "nyx", "reussites", "chantiers"];
-      for (const k of cles) {
-        if (nouveauCarnet[k]) {
-          cacheEtatProfond.long_terme[k] = nouveauCarnet[k];
-        }
+      for (const k of ["doc", "nyx", "reussites", "chantiers"]) {
+        if (nouveauCarnet[k]) cacheEtatProfond.long_terme[k] = nouveauCarnet[k];
       }
 
       const indexPivot = journalBrut.findIndex(m => m.id === dernierIdTraite);
