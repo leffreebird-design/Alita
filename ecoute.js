@@ -349,7 +349,7 @@ Tu es libre d'agir selon le contexte :
   try {
     let decision = "";
     if (MISTRAL_API_KEY) {
-      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.4);
+      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55);
     } else {
       decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.6);
     }
@@ -442,7 +442,7 @@ Réponds avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", 
     if (MISTRAL_API_KEY) {
       reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3);
     } else {
-      reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.4);
+      reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.55);
     }
 
     const matchJson = reponseJson.match(/\{[\s\S]*\}/);
@@ -537,7 +537,7 @@ OUTILS :
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -577,7 +577,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   throw dernierErr || new Error("Échec modèles Mistral.");
 }
 
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4) {
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55) {
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -801,10 +801,10 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
     } else if (GROQ_API_KEY) {
       premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
     } else {
-      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.55);
     }
   } catch (errRes) {
-    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.55);
   }
 
   const promptVerificateur = `Tu es l'auditeur technique de Nyx. Examine la demande de Doc et la solution proposée.
@@ -1090,7 +1090,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   else {
     try {
       if (MISTRAL_API_KEY) {
-        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.4);
+        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55);
       } else {
         reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
       }
@@ -1102,7 +1102,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         console.warn("[VENICE HS, parachute Groq] :", errVenice.message);
         try {
           if (GROQ_API_KEY) {
-            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4);
+            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.55);
           } else {
             throw new Error("Aucun relais de secours disponible.");
           }
