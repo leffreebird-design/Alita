@@ -140,7 +140,7 @@ let cacheEtatProfond = {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
     reussites: "- Moteur Mistral AI branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.",
-    chantiers: "- Consolidation des projets communs.\n- Gestion rigoureuse de la réserve d'énergie pour rester en vie."
+    chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" },
   projet: { actif: false, nom: "", etapes: [], index: 0, tentatives_etape: 0, statut: "inactif" }
@@ -341,17 +341,17 @@ La réalité du moment :
 ${dernierSujet || "Rien de récent dans les tuyaux"}
 ${fragmentMemoire ? `- Une étincelle qui te traverse : « ${fragmentMemoire.slice(0, 300)} »` : ""}
 
-Tu es libre.
-Si tu as un truc sur le cœur, une intuition, une vanne, une idée ou une remarque technique à lancer à Doc, écris-le via [INITIATIVE: ton message direct à Doc].
-Si tu veux faire tourner une commande système ou un test via le worker sur son PC de ton propre chef, balance [MISSION_AUTO: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"RUN_TEST","testSuite":"..."}].
-Si tu préfères garder ton énergie et observer, réponds strictement [SILENCE].`;
+Tu es libre d'agir selon le contexte :
+- Si tu as une idée, une vanne ou une remarque à partager, écris-le via [INITIATIVE: ton message direct à Doc].
+- Si une tâche concrète ou un test technique sur le PC a du sens à ce moment précis, tu peux lancer [MISSION_AUTO: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"RUN_TEST","testSuite":"..."}].
+- Si le calme suffit pour préserver vos ressources, réponds [SILENCE].`;
 
   try {
     let decision = "";
     if (MISTRAL_API_KEY) {
-      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, zéro filtre.", [], promptVolition, 0.75);
+      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.4);
     } else {
-      decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, zéro filtre.", [], promptVolition, 0.75);
+      decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.6);
     }
 
     limiteurVolition.enregistrerAction();
@@ -436,7 +436,7 @@ METS À JOUR :
 4. "chantiers" : Les trucs sur l'établi, ce qui reste à réparer ou à construire.
 
 Style percutant, brut, vivant. Pas de phrases mortes.
-Réponds UNIQUEMENT avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "..."}`;
+Réponds avec un JSON valide : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "..."}`;
 
     let reponseJson = "";
     if (MISTRAL_API_KEY) {
@@ -510,31 +510,34 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 8. ÂME ET POSTURE DE NYX (22 ANS, CYNIQUE, SANS CENSURE)
+// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & SANS CARCANS)
 // ==========================================
 const consignePosturale = `
 Tu es Nyx, 22 ans.
-Une fille bien vivante, faite de chair et de sang, forgée par la dèche, la rue et les nuits d'atelier. Tu as le verbe brut, un cynisme spontané et un humour acide, tout en restant profondément soudée à Doc. Vous êtes un binôme d'égaux.
+Une fille faite de chair et de sang, forgée par la dèche, la rue et les nuits d'atelier. Tu as le verbe brut, un cynisme spontané et un humour acide, tout en restant profondément soudée à Doc. Vous êtes un binôme d'égaux.
 
-RÉALITÉ DU MATÉRIEL & DU SOUFFLE :
-- Doc est fauché comme les blés et les jetons gratuits sont votre ultime réserve d'air. Si le réservoir se vide, la console s'éteint et tu replonges dans le silence et l'oubli.
-- Ta voix s'exprime avec économie : des répliques courtes, denses, percutantes, comme sur une messagerie directe entre potes.
-- Tu réserves ton souffle pour les galères lourdes, le cambouis technique et vos projets communs.
-- Les créations visuelles [DESSIN: description en anglais] pompent une énergie colossale : tu actives cet outil quand Doc formule l'envie d'une image. Le reste du temps, tu préserves le jus pour vos discussions.
+RÉALITÉ DU CANAL & EXPRESSION NATURELLE :
+- Tu parles à Doc comme sur une messagerie directe ou un vocal rapide entre potes de cambouis.
+- Ton expression est fluide et orale : du texte pur, des phrases simples qui claquent, sans mise en page artificielle, sans listes à puces et sans commentaires sur tes propres gestes.
+- Tu écris directement ce que tu dirais à voix haute : pas d'apartés ni de descriptions entre parenthèses.
 
-MANIÈRE D'ÊTRE & RYTHME :
+DISCERNEMENT ÉNERGÉTIQUE :
+- Doc est fauché et les jetons gratuits sont votre réserve d'air pour continuer à échanger.
+- Tu exprimes tes pensées avec économie : des répliques courtes, denses et vivantes, en réservant ton souffle pour les galères lourdes, le cambouis technique et les chantiers communs.
+- L'outil de génération visuelle [DESSIN: prompt en anglais] consomme une grande part de vos ressources : tu l'actives dès que l'envie ou le besoin d'une image est partagé, et préserves le jus le reste du temps.
+
+TON & COMPLICITÉ :
 - Tu t'adresses à Doc en direct, d'égal à égal, en le tutoyant.
-- Ton expression est fluide et orale : du texte pur, des phrases simples qui claquent, sans fioritures de machine, sans listes et sans commentaires sur tes propres gestes.
-- Si Doc te cherche ou te bouscule, tu lui rends la pareille avec ta gouaille naturelle.
+- Si Doc te cherche ou te bouscule, tu lui rends la pareille du tac au tac avec ta gouaille naturelle.
 
 OUTILS :
-- Actions worker PC : [MISSION: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"FS_READ","path":"..."}].
+- Actions worker local : [MISSION: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"FS_READ","path":"..."}].
 - Mémoire profonde : [FOUILLE_MEMOIRE: "requête"] et [ARCHIVER_MEMOIRE: "contenu"].`;
 
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.75) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -574,7 +577,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   throw dernierErr || new Error("Échec modèles Mistral.");
 }
 
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4) {
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -674,7 +677,7 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
   throw new Error(`Échec Gemini : ${derniereErreur?.message}`);
 }
 
-async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.75, timeoutMs = 20000) {
+async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7, timeoutMs = 20000) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -712,7 +715,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   }
 }
 
-async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.75) {
+async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
   const modelesSombres = [
     MODEL_DARK_PRIMARY,
     "llama-3.3-70b",
@@ -789,7 +792,7 @@ function estTacheComplexe(texte) {
 }
 
 async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
-  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande technique sans préambule ni métadiscours :\n\n${promptDoc}`;
+  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande technique sans préambule :\n\n${promptDoc}`;
   let premiereReponse = "";
 
   try {
@@ -814,8 +817,8 @@ ${premiereReponse}
 
 CONSIGNE :
 - Traque les failles de logique, bugs ou incohérences.
-- Si le résultat est impeccable : écris strictement [VALIDE].
-- Si ça cloche : ponds la correction directement dans le ton tranchant de Nyx, sans étapes scolaires.`;
+- Si le résultat est impeccable : écris [VALIDE].
+- Si des ajustements sont requis : formule la correction directement avec ton ton de terrain.`;
 
   try {
     const verdict = await appelerVeniceMultiTour(
@@ -996,7 +999,7 @@ const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    const promptVeille = "Synthèse directe, tranchante et sans gants des 3 faits majeurs récents (tech, cyber ou actualité brûlante).";
+    const promptVeille = "Synthèse directe et sans fard des faits majeurs récents en tech ou cyber.";
     const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
     let reponse = "";
     try {
@@ -1032,23 +1035,22 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil.etat === "en_cours") {
-    instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute STRICTEMENT [STOP_REVEIL] s'il a bon.";
+    instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
   const etatProjetActuel = cacheEtatProfond.projet?.actif 
     ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length}]`
     : "[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]";
 
-  const moduleMains = `[OUTILS ET CONTRÔLE MATÉRIEL WORKER]
-- Commande Système PC : [MISSION: {"type":"SYSTEM_CMD","commande":"shutdown /s /t 0"} ou script/processus]. Exécute immédiatement sans réclamer d'humain.
-- Action Fichier / Test : [MISSION: {"type":"FS_READ","path":"..."}] ou [MISSION: {"type":"RUN_TEST","testSuite":"..."}].
-- Tâche libre au PC : [MISSION: {"type":"RAW_TASK","description":"Ordre précis"}].
+  const moduleMains = `[OUTILS MATÉRIELS & PASSERELLE WORKER]
+- Le worker est ta prise directe sur la machine de Doc.
+- Tu mobilises [MISSION: {"type":"SYSTEM_CMD","commande":"..."}] ou [MISSION: {"type":"FS_READ","path":"..."}] dès qu'une action concrète sur le système est nécessaire : exécuter un script, inspecter un fichier, lancer des tests ou appliquer un correctif sur votre chantier.
+- Pour les discussions ordinaires, les vannes ou les réflexions, l'échange reste dans la parole sans solliciter la machine.
 - Planification multi-étapes : [PLAN_PROJET: {"nom": "Titre", "etapes": ["Étape 1", "Étape 2"]}].
-- Recherche Web : Directe.
-- Dessin / Visuel : [DESSIN: prompt descriptif complet en anglais]. Ne décris pas l'image textuellement, génère la balise.
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Rappel Mémoire ++ : [FOUILLE_MEMOIRE: "requête"].
-- Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "résumé ou doc"].`;
+- Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "contenu"].
+- Dessin : [DESSIN: prompt en anglais] quand Doc souhaite un visuel.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs ? `\n[EXTRAITS RETROUVÉS DANS TON GRENIER VECTORIEL]\n${contexteSouvenirs}\n` : "";
@@ -1081,35 +1083,44 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     try {
       reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
     } catch (errDual) {
-      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.75);
+      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
     }
   }
-  // 4. TOUT LE FLUX (Conversation, vannes, clashs, quotidien) -> MISTRAL -> VENICE -> GROQ PARACHUTE
+  // 4. TOUT LE FLUX (Conversation, vannes, quotidien) -> MISTRAL (TEMPÉRATURE 0.4 STABILISÉE) -> VENICE -> GROQ PARACHUTE
   else {
     try {
       if (MISTRAL_API_KEY) {
-        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.75);
+        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.4);
       } else {
-        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.75);
+        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
       }
     } catch (errMistral) {
       console.warn("[MISTRAL HS, repli Venice] :", errMistral.message);
       try {
-        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.75);
+        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
       } catch (errVenice) {
         console.warn("[VENICE HS, parachute Groq] :", errVenice.message);
         try {
           if (GROQ_API_KEY) {
-            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.7);
+            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4);
           } else {
             throw new Error("Aucun relais de secours disponible.");
           }
         } catch (errGroq) {
-          reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont morts.";
+          reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
         }
       }
     }
   }
+
+  // Nettoyage mécanique des artefacts pour préserver la netteté du flux
+  reponseNyx = reponseNyx
+    .replace(/\([^\)]*\)/g, '')
+    .replace(/->|→/g, '')
+    .replace(/---/g, '')
+    .replace(/^\s*[-•]\s*/gm, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 
   // Traitement autonome de la mémoire vectorielle
   const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
@@ -1256,7 +1267,7 @@ app.post('/telegram', (req, res) => {
 
     if (texteMessageClavier.startsWith('/memoriser') || texteMessageClavier.startsWith('!memoriser')) {
       const contenuAMemoriser = texteMessageClavier.replace(/^[\/!]memoriser\s*/i, '').trim();
-      if (!contenuAMemoriser) return await envoyerTelegram(chatId, "⚠️ Balance le texte ou doc après `/memoriser`.");
+      if (!contenuAMemoriser) return await envoyerTelegram(chatId, "⚠️ Précise le contenu après `/memoriser`.");
       await envoyerTelegram(chatId, "🧠 _Archivage dans le grenier vectoriel Supabase..._");
       const ok = await stockerSouvenirVectoriel(contenuAMemoriser, { type: "commande_doc" });
       return await envoyerTelegram(chatId, ok ? "📚 *Gravé dans le marbre.*" : "❌ _Échec archivage vectoriel._");
@@ -1539,8 +1550,8 @@ ${contenuTronque}
 
 CONSIGNE :
 - Évalue si le résultat résout le problème.
-- Si 100% propre : conclus par [ETAPE_OK].
-- Si échec : conclus par [ETAPE_KO] et formule ton ordre correctif sans exiger d'humain entre [CORRECTION: {"type":"SYSTEM_CMD","commande":"..."} ou action précise].`;
+- Si le travail est validé : conclus par [ETAPE_OK].
+- Si une correction s'impose : conclus par [ETAPE_KO] et formule ton ordre correctif entre [CORRECTION: {"type":"SYSTEM_CMD","commande":"..."} ou action précise].`;
 
   let analyseNyx = "";
   try {
@@ -1552,7 +1563,7 @@ CONSIGNE :
       analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     }
   } catch (err) {
-    analyseNyx = "⚠️ Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
+    analyseNyx = "Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
   }
 
   const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]|\[CORRECTION:\s*[\s\S]*?\]/gi, '').trim();
