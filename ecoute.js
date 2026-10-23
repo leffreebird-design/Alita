@@ -1151,64 +1151,79 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "attente" }).catch(()=>{});
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
-  const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*(\{[^}]+\})\s*\]/);
-    if (matchConfigReveil) {
+ // =========================================================
+    // 1. GESTION DES PROJETS MULTI-ÉTAPES
+    // =========================================================
+    const matchProjet = reponseNyx.match(/\[PLAN_PROJET:\s*(\{[\s\S]*?\})\]/i);
+    if (matchProjet) {
       try {
-        
-    reponseNyx = reponseNyx.trim();
-  const matchProjet = reponseNyx.match(/\[PLAN_PROJET:\s*([\s\S]*?)\]/i);
-  if (matchProjet) {
-    try {
-      const plan = JSON.parse(matchProjet[1]);
-      if (plan.etapes && Array.isArray(plan.etapes) && plan.etapes.length > 0) {
-        cacheEtatProfond.projet = {
-          actif: true,
-          nom: plan.nom || "Chantier en cours",
-          etapes: plan.etapes,
-          index: 0,
-          tentatives_etape: 0,
-          statut: "en_cours"
-        };
+        const plan = JSON.parse(matchProjet[1]);
+        if (plan.etapes && Array.isArray(plan.etapes) && plan.etapes.length > 0) {
+          cacheEtatProfond.projet = {
+            actif: true,
+            nom: plan.nom || "Chantier en cours",
+            etapes: plan.etapes,
+            index: 0,
+            tentatives_etape: 0,
+            statut: "en_cours"
+          };
 
-        const premierOrdre = plan.etapes[0];
-        const validation = validerEtSecuriserMission(premierOrdre);
+          const premierOrdre = plan.etapes[0];
+          const validation = validerEtSecuriserMission(premierOrdre);
 
-        missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
+          missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
 
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
-          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
+          if (FIREBASE_DB_URL) {
+            axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(() => {});
+            axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+          }
+
+          reponseNyx = reponseNyx.replace(matchProjet[0], '').trim();
+          if (DOC_CHAT_ID) {
+            await envoyerTelegram(
+              DOC_CHAT_ID,
+              "🏗️ Chantier initié : " + cacheEtatProfond.projet.nom + "\n- Jalons totaux : " + plan.etapes.length + "\n- Étape 1 : " + JSON.stringify(validation.action)
+            );
+          }
         }
-
-        reponseNyx = reponseNyx.replace(matchProjet[0], '').trim();
-        if (DOC_CHAT_ID) {
-          await envoyerTelegram(
-            DOC_CHAT_ID, 
-            "📋 *Chantier initié : " + cacheEtatProfond.projet.nom + "*\n- Jalons totaux : " + plan.etapes.length + "\n- *Étape 1 :* `" + JSON.stringify(validation.action) + "`"
-          );
-        }
+      } catch (errPlan) {
+        console.error("[ERREUR PLAN_PROJET]", errPlan.message);
       }
-    } catch (errPlan) {
-      console.error("[ERREUR PLAN_PROJET]", errPlan.message);
     }
-  }
 
-  // Interception mission (balises [] ou **)
-  const matchMissionAuto = reponseNyx.match(/(?:\[|\*\*)MISSION:\s*([\s\S]*?)(?:\]|\*\*)/i);
-  if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
-    const ordreBrut = matchMissionAuto[1].trim();
-    const validation = validerEtSecuriserMission(ordreBrut);
+    // =========================================================
+    // 2. INTERCEPTION MISSION WORKER (SÉCURISÉE SANS CRASH)
+    // =========================================================
+    const matchMissionAuto = reponseNyx.match(/(?:\[|\*\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*\*|\*)?/i);
+    if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
+      // Décapage immédiat de la balise pour ne jamais polluer le chat Telegram
+      reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
 
-    missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-    if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
+      // Sécurité variable : retrouve le message de Doc sans jamais faire de ReferenceError
+      const texteDoc = typeof texteMessageDoc !== 'undefined' ? texteMessageDoc : (typeof messageDoc !== 'undefined' ? messageDoc : (typeof texte !== 'undefined' ? texte : ""));
+      const ordreExplicite = /\b(lance|exécute|run|fais|ouvre|active|tue|stop|build|test)\b/i.test(texteDoc);
+
+      if (ordreExplicite) {
+        try {
+          const ordreBrut = matchMissionAuto[1].trim();
+          const validation = validerEtSecuriserMission(ordreBrut);
+
+          missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
+          if (FIREBASE_DB_URL) {
+            axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+          }
+
+          if (DOC_CHAT_ID) {
+            const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
+            await envoyerTelegram(DOC_CHAT_ID, "⚙️ Ordre transmis au worker PC :\n" + rendu);
+          }
+        } catch (errMission) {
+          console.error("[ERREUR MISSION]", errMission.message);
+        }
+      } else {
+        console.log("⚠️ Mission autonome ignorée : aucun ordre explicite de Doc dans le message.");
+      }
     }
-    reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
-    if (DOC_CHAT_ID) {
-      const rendu = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-      await envoyerTelegram(DOC_CHAT_ID, "⚙️ *Ordre transmis au worker PC :*\n`" + rendu + "`");
-    }
-  }
 
   // Décapage mécanique des apartés de théâtre, astérisques d'action et puces
  reponseNyx = reponseNyx.trim();
