@@ -560,7 +560,7 @@ OUTILS :
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 220) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 400) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -1057,7 +1057,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
   const demandeDocApprofondie = /d[eé]veloppe|approfondi|d[eé]taille|explique en d[eé]tail|pose le truc|analyse bien/i.test(texteNet);
-  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 220;
+  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 400;
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil.etat === "en_cours") {
