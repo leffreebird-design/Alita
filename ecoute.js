@@ -542,9 +542,10 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
   
-  const historiqueRecent = (historiqueMessages || []).slice(-8);
   for (const m of historiqueRecent) {
-    messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
+    if (m && m.texte && m.texte.trim().length > 0) {
+      messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
+    }
   }
 
   messages.push({ role: "user", content: promptActuel });
