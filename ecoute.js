@@ -1203,17 +1203,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     // =========================================================
     // 2. INTERCEPTION MISSION WORKER (SÉCURISÉE SANS CRASH)
     // =========================================================
-    const matchMissionAuto = reponseNyx.match(/(?:\[|\*\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*\*|\*)?/i);
-    if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
-      // Décapage immédiat de la balise pour ne jamais polluer le chat Telegram
-      reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
+    const matchMissionAuto = reponseNyx.match(/(?:\[|\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*|\*)?/i);
+if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
+  // Décapage immédiat de la balise pour ne jamais polluer le chat Telegram
+  reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
 
-      // Sécurité variable : retrouve le message de Doc sans jamais faire de ReferenceError
-      const texteDoc = typeof texteMessageDoc !== 'undefined' ? texteMessageDoc : (typeof messageDoc !== 'undefined' ? messageDoc : (typeof texte !== 'undefined' ? texte : ""));
-      const ordreExplicite = /\b(lance|exécute|run|fais|ouvre|active|tue|stop|build|test)\b/i.test(texteDoc);
-
-      try {
-    // 1. Décodage du JSON généré par Nyx dans la balise MISSION
+  try {
+    // 1. Décodage du JSON
     let actionExtraite;
     try {
       const parsed = JSON.parse(matchMissionAuto[1]);
@@ -1225,12 +1221,12 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
     }
 
-    // 2. Validation de l'ordre (comme pour la commande manuelle /mission)
+    // 2. Préparation de la validation
     const validation = typeof validerEtSecuriserMission === 'function'
       ? validerEtSecuriserMission(actionExtraite.description || matchMissionAuto[1])
       : { action: actionExtraite };
 
-    // 3. Transmission à Firebase et notification Telegram
+    // 3. Envoi Firebase et Telegram
     missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
     if (FIREBASE_DB_URL) {
       axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
@@ -1243,6 +1239,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   } catch (errMission) {
     console.error("[ERREUR MISSION]", errMission.message);
   }
+}
+
   // Décapage mécanique des apartés de théâtre, astérisques d'action et puces
  reponseNyx = reponseNyx.trim();
 
