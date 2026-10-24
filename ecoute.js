@@ -18,7 +18,7 @@ const PORT = process.env.PORT || 3000;
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
 const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
 
-// GROQ - PARACHUTE D'EXTRÊME URGENCE & CODE
+// GROQ - PREMIER PARACHUTE D'URGENCE & CODE RAPIDE
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
 const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 
@@ -30,7 +30,7 @@ const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMI
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
 const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.1-flash-lite").trim();
 
-// VENICE AI - SECOURS SOMBRE & IMAGES
+// VENICE AI - SECOURS SOMBRE & IMAGES (DERNIER RELAIS)
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
@@ -348,10 +348,14 @@ Tu es libre d'agir selon le contexte :
 
   try {
     let decision = "";
-    if (MISTRAL_API_KEY) {
+    try {
       decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 220);
-    } else {
-      decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.6);
+    } catch (eM) {
+      try {
+        decision = await appelerGroq("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 220);
+      } catch (eG) {
+        decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.6);
+      }
     }
 
     limiteurVolition.enregistrerAction();
@@ -439,13 +443,16 @@ Style percutant, brut, vivant. Pas de phrases mortes.
 Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "..."}`;
 
     let reponseJson = "";
-    if (MISTRAL_API_KEY) {
+    try {
       reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 1000);
-    } else {
-      reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.4);
+    } catch (eM) {
+      try {
+        reponseJson = await appelerGroq("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 1000);
+      } catch (eG) {
+        reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.4);
+      }
     }
 
-    // Extraction tolérante aux retours à la ligne et défauts de syntaxe JSON
     let nouveauCarnet = null;
     const matchJson = reponseJson.match(/\{[\s\S]*\}/);
 
@@ -526,13 +533,13 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 // 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & SANS CARCANS)
 // ==========================================
 const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
-Tu es une vraie personne : vivante, franche, loyale, cash,et succinte.
+Tu es une vraie personne : vivante, franche, loyale, cash, et succincte.
 Tu es toujours dans le camp de Doc. Tu lui parles simplement d'égal à égal, sans préfixe, sans jouer un rôle, sans listes et sans fioritures.
-Tu vas droit a l'essentiel et fait des phrases courtes .Tu es concise 3 phrases maximum ,sauf si le doc te demande explicitement de preciser .
+Tu vas droit à l'essentiel et fais des phrases courtes. Tu es concise (3 phrases maximum), sauf si Doc te demande explicitement de développer ou de générer du code complet.
 « Tu n'as pas de corps physique ni de mains : décrire une action avec des mots sans émettre de balise ne produit absolument rien et laisse l'écran noir.
 Si tu veux afficher une image ou exécuter du code, ton SEUL moyen d'action est d'émettre la balise technique brute (DESSIN: {...} ou MISSION: {...}).
 Si tu racontes tes gestes au lieu de sortir la balise, c'est un échec technique immédiat. »
-Tu n'est pas un moulin a parole mais Nyx dont chaque mot valent de l'or donc tu economise tes mots pour qu ils gardent de leurs valeure `;
+Tu n'es pas un moulin à paroles : chaque mot compte.`;
 
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
@@ -542,12 +549,8 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
 
+  // Historique découpé proprement sans répétition
   const historiqueRecent = (historiqueMessages || []).slice(-8);
-  for (const m of historiqueRecent) {
-    if (m && m.texte && m.texte.trim().length > 0) {
-      messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
-    }
-  }
   for (const m of historiqueRecent) {
     if (m && m.texte && m.texte.trim().length > 0) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
@@ -584,14 +587,16 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   throw dernierErr || new Error("Échec modèles Mistral.");
 }
 
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4, maxTokens = 220) {
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4, maxTokens = 1500) {
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
   
   const historiqueRecent = (historiqueMessages || []).slice(-8);
   for (const m of historiqueRecent) {
-    messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
+    if (m && m.texte) {
+      messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
+    }
   }
 
   messages.push({ role: "user", content: promptActuel });
@@ -691,7 +696,9 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   
   const historiqueRecent = (historiqueMessages || []).slice(-8);
   for (const m of historiqueRecent) {
-    messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
+    if (m && m.texte) {
+      messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
+    }
   }
 
   messages.push({ role: "user", content: promptActuel });
@@ -723,10 +730,11 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 }
 
 async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
+  // Suppression définitive de mistral-nemo (404) pour des modèles existants chez Venice
   const modelesSombres = [
     MODEL_DARK_PRIMARY,
     "llama-3.3-70b",
-    "mistral-nemo"
+    "qwen-2.5-coder-32b"
   ].filter(Boolean);
   const modelesUniques = [...new Set(modelesSombres)];
 
@@ -802,6 +810,7 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande technique sans préambule ni roman d'action :\n\n${promptDoc}`;
   let premiereReponse = "";
 
+  // 1. Résolution : Mistral -> Groq -> Venice
   try {
     if (MISTRAL_API_KEY) {
       premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
@@ -811,9 +820,20 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
       premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
     }
   } catch (errRes) {
-    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+    console.warn("[RÉSOLUTION MISTRAL KO, bascule Groq] :", errRes.message);
+    try {
+      if (GROQ_API_KEY) {
+        premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
+      } else {
+        premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+      }
+    } catch (errGroq) {
+      console.warn("[RÉSOLUTION GROQ KO, repli Venice] :", errGroq.message);
+      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+    }
   }
 
+  // 2. Audit de conformité
   const promptVerificateur = `Tu es le superviseur invisible de Nyx. Examine la demande de Doc et la réponse proposée.
 
 DEMANDE :
@@ -989,10 +1009,12 @@ async function verifierHorlogeBiologique() {
 
     const promptAlarme = "Réveille Doc avec ta gouaille de Nyx de 22 ans, percutante, acide et directe, avec une énigme logique en 3 phrases max.";
     try {
-      const reponse = MISTRAL_API_KEY
-        ? await appelerMistral("Tu es Nyx.", [], promptAlarme, 0.55, 220)
-        : await appelerVeniceDark("Tu es Nyx.", [], promptAlarme);
-
+      let reponse = "";
+      try {
+        reponse = await appelerMistral("Tu es Nyx.", [], promptAlarme, 0.55, 220);
+      } catch (eM) {
+        reponse = await appelerGroq("Tu es Nyx.", [], promptAlarme, 0.55, 220);
+      }
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
       if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
     } catch (err) {
@@ -1010,11 +1032,13 @@ async function declencherVeilleTech() {
     const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
     let reponse = "";
     try {
-      reponse = MISTRAL_API_KEY
-        ? await appelerMistral(sys, [], promptVeille, 0.4, 600)
-        : await appelerVeniceDark(sys, [], promptVeille);
-    } catch (e) {
-      reponse = await appelerVeniceDark(sys, [], promptVeille);
+      reponse = await appelerMistral(sys, [], promptVeille, 0.4, 600);
+    } catch (eM) {
+      try {
+        reponse = await appelerGroq(sys, [], promptVeille, 0.4, 600);
+      } catch (eG) {
+        reponse = await appelerVeniceDark(sys, [], promptVeille);
+      }
     }
     
     if (FIREBASE_DB_URL) {
@@ -1029,7 +1053,7 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
-// 14. ROUTEUR DE FLUX CENTRAL (MISTRAL -> VENICE -> GROQ)
+// 14. ROUTEUR DE FLUX CENTRAL (MISTRAL -> GROQ -> VENICE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1087,36 +1111,47 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. TÂCHE TECHNIQUE LOURDE OU CODE
+  // 3. TÂCHE TECHNIQUE LOURDE OU CODE -> MISTRAL -> GROQ -> VENICE
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
       reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
     } catch (errDual) {
-      reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
+      console.warn("[DOUBLE VÉRIF ÉCHEC, bascule Groq direct] :", errDual.message);
+      try {
+        if (GROQ_API_KEY) {
+          reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.3, plafondTokens);
+        } else {
+          reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
+        }
+      } catch (e) {
+        reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
+      }
     }
   }
-  // 4. TOUT LE FLUX (Conversation, vannes, quotidien) -> MISTRAL (TEMPÉRATURE 0.55 & TOKENS DYNAMIQUES) -> VENICE -> GROQ PARACHUTE
+  // 4. TOUT LE FLUX (Conversation, vannes, quotidien) -> MISTRAL -> GROQ (PARACHUTE 1) -> VENICE (PARACHUTE 2)
   else {
     try {
       if (MISTRAL_API_KEY) {
         reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
+      } else if (GROQ_API_KEY) {
+        reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
       } else {
         reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
       }
     } catch (errMistral) {
-      console.warn("[MISTRAL HS, repli Venice] :", errMistral.message);
+      console.warn("[MISTRAL HS, parachute 1 Groq activé] :", errMistral.message);
       try {
-        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
-      } catch (errVenice) {
-        console.warn("[VENICE HS, parachute Groq] :", errVenice.message);
+        if (GROQ_API_KEY) {
+          reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
+        } else {
+          reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
+        }
+      } catch (errGroq) {
+        console.warn("[GROQ HS, parachute 2 Venice activé] :", errGroq.message);
         try {
-          if (GROQ_API_KEY) {
-            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
-          } else {
-            throw new Error("Aucun relais de secours disponible.");
-          }
-        } catch (errGroq) {
+          reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
+        } catch (errVenice) {
           reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
         }
       }
@@ -1160,89 +1195,85 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "attente" }).catch(()=>{});
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
- // =========================================================
-    // 1. GESTION DES PROJETS MULTI-ÉTAPES
-    // =========================================================
-    const matchProjet = reponseNyx.match(/\[PLAN_PROJET:\s*(\{[\s\S]*?\})\]/i);
-    if (matchProjet) {
-      try {
-        const plan = JSON.parse(matchProjet[1]);
-        if (plan.etapes && Array.isArray(plan.etapes) && plan.etapes.length > 0) {
-          cacheEtatProfond.projet = {
-            actif: true,
-            nom: plan.nom || "Chantier en cours",
-            etapes: plan.etapes,
-            index: 0,
-            tentatives_etape: 0,
-            statut: "en_cours"
-          };
 
-          const premierOrdre = plan.etapes[0];
-          const validation = validerEtSecuriserMission(premierOrdre);
-
-          missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-
-          if (FIREBASE_DB_URL) {
-            axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(() => {});
-            axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-          }
-
-          reponseNyx = reponseNyx.replace(matchProjet[0], '').trim();
-          if (DOC_CHAT_ID) {
-            await envoyerTelegram(
-              DOC_CHAT_ID,
-              "🏗️ Chantier initié : " + cacheEtatProfond.projet.nom + "\n- Jalons totaux : " + plan.etapes.length + "\n- Étape 1 : " + JSON.stringify(validation.action)
-            );
-          }
-        }
-      } catch (errPlan) {
-        console.error("[ERREUR PLAN_PROJET]", errPlan.message);
-      }
-    }
-
-    // =========================================================
-    // 2. INTERCEPTION MISSION WORKER (SÉCURISÉE SANS CRASH)
-    // =========================================================
-    const matchMissionAuto = reponseNyx.match(/(?:\[|\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*|\*)?/i);
-if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
-  // Décapage immédiat de la balise pour ne jamais polluer le chat Telegram
-  reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
-
-  try {
-    // 1. Décodage du JSON
-    let actionExtraite;
+  // =========================================================
+  // 1. GESTION DES PROJETS MULTI-ÉTAPES
+  // =========================================================
+  const matchProjet = reponseNyx.match(/\[PLAN_PROJET:\s*(\{[\s\S]*?\})\]/i);
+  if (matchProjet) {
     try {
-      const parsed = JSON.parse(matchMissionAuto[1]);
-      const cmd = parsed.commande || parsed.command || parsed.description || parsed.action || parsed.task;
-      actionExtraite = typeof cmd === 'string'
-        ? { type: "RAW_TASK", description: cmd }
-        : (parsed.type ? parsed : { type: "RAW_TASK", description: JSON.stringify(parsed) });
-    } catch {
-      actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
-    }
+      const plan = JSON.parse(matchProjet[1]);
+      if (plan.etapes && Array.isArray(plan.etapes) && plan.etapes.length > 0) {
+        cacheEtatProfond.projet = {
+          actif: true,
+          nom: plan.nom || "Chantier en cours",
+          etapes: plan.etapes,
+          index: 0,
+          tentatives_etape: 0,
+          statut: "en_cours"
+        };
 
-    // 2. Préparation de la validation
-    const validation = typeof validerEtSecuriserMission === 'function'
-      ? validerEtSecuriserMission(actionExtraite.description || matchMissionAuto[1])
-      : { action: actionExtraite };
+        const premierOrdre = plan.etapes[0];
+        const validation = validerEtSecuriserMission(premierOrdre);
 
-    // 3. Envoi Firebase et Telegram
-    missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-    if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-    }
+        missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
 
-    if (DOC_CHAT_ID) {
-      const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
-      await envoyerTelegram(DOC_CHAT_ID, `⚙️ Ordre transmis au worker PC :\n` + rendu);
+        if (FIREBASE_DB_URL) {
+          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(() => {});
+          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+        }
+
+        reponseNyx = reponseNyx.replace(matchProjet[0], '').trim();
+        if (DOC_CHAT_ID) {
+          await envoyerTelegram(
+            DOC_CHAT_ID,
+            "🏗️ Chantier initié : " + cacheEtatProfond.projet.nom + "\n- Jalons totaux : " + plan.etapes.length + "\n- Étape 1 : " + JSON.stringify(validation.action)
+          );
+        }
+      }
+    } catch (errPlan) {
+      console.error("[ERREUR PLAN_PROJET]", errPlan.message);
     }
-  } catch (errMission) {
-    console.error("[ERREUR MISSION]", errMission.message);
   }
-}
 
-  // Décapage mécanique des apartés de théâtre, astérisques d'action et puces
- reponseNyx = reponseNyx.trim();
+  // =========================================================
+  // 2. INTERCEPTION MISSION WORKER (SÉCURISÉE SANS CRASH)
+  // =========================================================
+  const matchMissionAuto = reponseNyx.match(/(?:\[|\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*|\*)?/i);
+  if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
+    reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
+
+    try {
+      let actionExtraite;
+      try {
+        const parsed = JSON.parse(matchMissionAuto[1]);
+        const cmd = parsed.commande || parsed.command || parsed.description || parsed.action || parsed.task;
+        actionExtraite = typeof cmd === 'string'
+          ? { type: "RAW_TASK", description: cmd }
+          : (parsed.type ? parsed : { type: "RAW_TASK", description: JSON.stringify(parsed) });
+      } catch {
+        actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
+      }
+
+      const validation = typeof validerEtSecuriserMission === 'function'
+        ? validerEtSecuriserMission(actionExtraite.description || matchMissionAuto[1])
+        : { action: actionExtraite };
+
+      missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+      }
+
+      if (DOC_CHAT_ID) {
+        const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
+        await envoyerTelegram(DOC_CHAT_ID, `⚙️ Ordre transmis au worker PC :\n` + rendu);
+      }
+    } catch (errMission) {
+      console.error("[ERREUR MISSION]", errMission.message);
+    }
+  }
+
+  reponseNyx = reponseNyx.trim();
 
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
@@ -1461,8 +1492,8 @@ async function genererAudioGoogle(texte) {
       name: "fr-FR-Neural2-A"
     }, 
     audioConfig: { 
-      audioEncoding: "MP3",
-      speakingRate: 1.05,
+      audioEncoding: "MP3", 
+      speakingRate: 1.05, 
       pitch: 0.0
     }
   };
@@ -1573,7 +1604,7 @@ app.post('/api/rapport', async (req, res) => {
   const dateEtHeure = obtenirHorodatageParis();
   const carnet = cacheEtatProfond.long_terme || {};
   const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
-  const sys = `Tu es Nyx, 22 ans.\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
+  const sys = `Tu es Nyx, 22 ans. Sois ultra-concise (3 phrases max). Pas de fioritures.\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
   
   const promptAuditRapport = `Ton worker local sur le PC rend ce livrable :
 TITRE : "${titre || 'Rapport'}"
@@ -1581,21 +1612,29 @@ CONTENU :
 ${contenuTronque}
 
 CONSIGNE :
-- Évalue si le résultat résout le problème.
+- Évalue brièvement le résultat.
 - Si le travail est validé : conclus par [ETAPE_OK].
-- Si une correction s'impose : conclus par [ETAPE_KO] et formule ton ordre correctif entre [CORRECTION: {"type":"SYSTEM_CMD","commande":"..."} ou action précise].`;
+- Si une correction s'impose : conclus par [ETAPE_KO] et formule ton ordre correctif entre [CORRECTION: {"type":"SYSTEM_CMD","commande":"..."}].`;
 
   let analyseNyx = "";
   try {
     if (MISTRAL_API_KEY) {
-      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 1000);
+      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 250);
     } else if (GROQ_API_KEY) {
-      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 1000);
+      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 250);
     } else {
       analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     }
-  } catch (err) {
-    analyseNyx = "Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
+  } catch (errM) {
+    try {
+      if (GROQ_API_KEY) {
+        analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 250);
+      } else {
+        analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
+      }
+    } catch (errG) {
+      analyseNyx = "Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
+    }
   }
 
   const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]|\[CORRECTION:\s*[\s\S]*?\]/gi, '').trim();
