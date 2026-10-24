@@ -807,7 +807,7 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
     premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
   }
 
-  const promptVerificateur = `Tu es l'auditeur technique de Nyx. Examine la demande de Doc et la solution proposée.
+  const promptVerificateur = `Tu es le superviseur invisible de Nyx. Examine la demande de Doc et la réponse proposée.
 
 DEMANDE :
 ${promptDoc}
@@ -815,10 +815,10 @@ ${promptDoc}
 PROPOSITION :
 ${premiereReponse}
 
-CONSIGNE :
-- Traque les failles de logique, bugs ou incohérences.
-- Si le résultat est impeccable : écris [VALIDE].
-- Si des ajustements sont requis : formule la correction directement avec ton ton de terrain sans narration théâtrale.`;
+CONSIGNE STRICTE :
+- Si la proposition est impeccable : réponds UNIQUEMENT [VALIDE].
+- Si elle contient du cinéma (mains, souris, regards), des balises fictives ou des pavés inutiles : réécris DIRECTEMENT la réplique finale que Nyx doit envoyer, précédée de [CORRIGE].
+- INTERDICTION FORMELLE de faire un rapport, d'expliquer les bugs ou de lister les erreurs. Tu renvoies soit [VALIDE], soit la réponse corrigée.`;
 
   try {
     const verdict = await appelerVeniceMultiTour(
