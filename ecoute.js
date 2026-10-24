@@ -1212,26 +1212,18 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       const texteDoc = typeof texteMessageDoc !== 'undefined' ? texteMessageDoc : (typeof messageDoc !== 'undefined' ? messageDoc : (typeof texte !== 'undefined' ? texte : ""));
       const ordreExplicite = /\b(lance|exécute|run|fais|ouvre|active|tue|stop|build|test)\b/i.test(texteDoc);
 
-      if (ordreExplicite) {
-        try {
-          const ordreBrut = matchMissionAuto[1].trim();
-          const validation = validerEtSecuriserMission(ordreBrut);
-
-          missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-          if (FIREBASE_DB_URL) {
-            axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-          }
-
-          if (DOC_CHAT_ID) {
-            const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
-            await envoyerTelegram(DOC_CHAT_ID, "⚙️ Ordre transmis au worker PC :\n" + rendu);
-          }
-        } catch (errMission) {
-          console.error("[ERREUR MISSION]", errMission.message);
-        }
-      } else {
-        console.log("⚠️ Mission autonome ignorée : aucun ordre explicite de Doc dans le message.");
+      try {
+      missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
       }
+
+      if (DOC_CHAT_ID) {
+        const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
+        await envoyerTelegram(DOC_CHAT_ID, `⚙️ Ordre transmis au worker PC :\n` + rendu);
+      }
+    } catch (errMission) {
+      console.error("[ERREUR MISSION]", errMission.message);
     }
 
   // Décapage mécanique des apartés de théâtre, astérisques d'action et puces
