@@ -541,7 +541,13 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  
+
+  const historiqueRecent = (historiqueMessages || []).slice(-8);
+  for (const m of historiqueRecent) {
+    if (m && m.texte && m.texte.trim().length > 0) {
+      messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
+    }
+  }
   for (const m of historiqueRecent) {
     if (m && m.texte && m.texte.trim().length > 0) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
