@@ -1213,18 +1213,35 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       const ordreExplicite = /\b(lance|exécute|run|fais|ouvre|active|tue|stop|build|test)\b/i.test(texteDoc);
 
       try {
-      missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-      if (FIREBASE_DB_URL) {
-        axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-      }
-
-      if (DOC_CHAT_ID) {
-        const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
-        await envoyerTelegram(DOC_CHAT_ID, `⚙️ Ordre transmis au worker PC :\n` + rendu);
-      }
-    } catch (errMission) {
-      console.error("[ERREUR MISSION]", errMission.message);
+    // 1. Décodage du JSON généré par Nyx dans la balise MISSION
+    let actionExtraite;
+    try {
+      const parsed = JSON.parse(matchMissionAuto[1]);
+      const cmd = parsed.commande || parsed.command || parsed.description || parsed.action || parsed.task;
+      actionExtraite = typeof cmd === 'string'
+        ? { type: "RAW_TASK", description: cmd }
+        : (parsed.type ? parsed : { type: "RAW_TASK", description: JSON.stringify(parsed) });
+    } catch {
+      actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
     }
+
+    // 2. Validation de l'ordre (comme pour la commande manuelle /mission)
+    const validation = typeof validerEtSecuriserMission === 'function'
+      ? validerEtSecuriserMission(actionExtraite.description || matchMissionAuto[1])
+      : { action: actionExtraite };
+
+    // 3. Transmission à Firebase et notification Telegram
+    missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+    }
+
+    if (DOC_CHAT_ID) {
+      const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
+      await envoyerTelegram(DOC_CHAT_ID, `⚙️ Ordre transmis au worker PC :\n` + rendu);
+    }
+  } catch (errMission) {
+    console.error("[ERREUR MISSION]", errMission.message);
   }
   // Décapage mécanique des apartés de théâtre, astérisques d'action et puces
  reponseNyx = reponseNyx.trim();
