@@ -1225,7 +1225,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     } catch (errMission) {
       console.error("[ERREUR MISSION]", errMission.message);
     }
-
+  }
   // Décapage mécanique des apartés de théâtre, astérisques d'action et puces
  reponseNyx = reponseNyx.trim();
 
