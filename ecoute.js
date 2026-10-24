@@ -1476,7 +1476,7 @@ app.post('/api/voix', async (req, res) => {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
-      const matchDessin = reponseNyx.match(/\[DESSIN:\s*(.*?)\]/i);
+      const matchDessin = reponseNyx.match(/(?:\[|\*\*|\*)?DESSIN:\s*(\{[\s\S]*?\})(?:\]|\*\*|\*)?/i);
       if (matchDessin && DOC_CHAT_ID) {
         (async () => {
           try {
