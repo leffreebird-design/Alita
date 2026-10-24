@@ -832,7 +832,7 @@ CONSIGNE :
     );
 
     if (verdict && verdict.includes("[VALIDE]")) return premiereReponse;
-    if (verdict && verdict.trim().length > 0) return verdict.replace(/[CORRIGE]/gi, '').trim();
+    if (verdict && verdict.trim().length > 0) return verdict.replace(/\[CORRIGE\]/gi, '').trim();
     return premiereReponse;
   } catch (errGLM) {
     return premiereReponse;
