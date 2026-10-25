@@ -3,206 +3,348 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Nyx Core Terminal</title>
+  <title>Nyx Neural Hub — Meta Link</title>
   <style>
     :root {
-      --neon-cyan: #0ff;
-      --neon-pink: #ff2a79;
-      --neon-yellow: #f9f002;
-      --bg-color: #050505;
+      --bg: #090a0f;
+      --card: #12151f;
+      --accent: #00e5ff;
+      --accent-dim: rgba(0, 229, 255, 0.2);
+      --doc-bubble: #1f2438;
+      --nyx-bubble: #142834;
+      --text: #e1e7ec;
     }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body {
-      margin: 0; padding: 0; 
-      background-color: var(--bg-color);
-      background-image: 
-        linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
-      background-size: 20px 20px;
-      color: #fff;
-      font-family: 'Courier New', Courier, monospace;
-      display: flex; flex-direction: column; height: 100vh;
-      justify-content: center; align-items: center; text-align: center;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
       overflow: hidden;
     }
 
-    body::after {
-      content: "";
-      position: absolute;
-      top: 0; left: 0; width: 100vw; height: 100vh;
-      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 255, 0, 0.06));
-      background-size: 100% 3px, 3px 100%;
-      pointer-events: none;
-      z-index: 999;
+    /* HEADER */
+    header {
+      background: var(--card);
+      border-bottom: 1px solid var(--accent-dim);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .status-block {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
     }
 
-    #status { 
-      font-size: 1.1rem; 
-      margin-bottom: 35px; 
-      letter-spacing: 3px; 
-      text-transform: uppercase;
-      color: var(--neon-cyan);
-      text-shadow: 0 0 5px var(--neon-cyan), 0 0 10px var(--neon-cyan);
+    /* ZONE DE CHAT */
+    #chat-box {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .msg {
+      max-width: 86%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .msg.doc {
+      align-self: flex-end;
+      background: var(--doc-bubble);
+      color: #fff;
+      border-bottom-right-radius: 2px;
+    }
+    .msg.nyx {
+      align-self: flex-start;
+      background: var(--nyx-bubble);
+      border: 1px solid var(--accent-dim);
+      border-bottom-left-radius: 2px;
+    }
+    .msg-author {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 3px;
+      opacity: 0.8;
+    }
+    .msg img {
+      max-width: 100%;
+      border-radius: 8px;
+      margin-top: 8px;
+      display: block;
+      border: 1px solid rgba(255, 255, 255, 0.15);
     }
 
-    #micBtn {
-      width: 150px; height: 150px; border-radius: 50%;
-      background: rgba(0, 255, 255, 0.05);
-      border: 2px solid var(--neon-cyan);
-      color: var(--neon-cyan);
-      font-size: 1.8rem; font-weight: bold; font-family: 'Courier New', Courier, monospace;
-      cursor: pointer; transition: all 0.2s ease;
-      outline: none; 
-      box-shadow: 0 0 15px var(--neon-cyan), inset 0 0 20px rgba(0, 255, 255, 0.2);
-      text-shadow: 0 0 8px var(--neon-cyan);
-      z-index: 10;
+    /* VIGNETTE D'ATTENTE PHOTO */
+    #preview-container {
+      display: none;
+      background: var(--card);
+      padding: 8px 14px;
+      border-top: 1px solid var(--accent-dim);
+      align-items: center;
+      gap: 10px;
     }
-    #micBtn:active { transform: scale(0.95); }
-
-    #micBtn.listening {
-      background: rgba(255, 42, 121, 0.1);
-      border-color: var(--neon-pink);
-      color: var(--neon-pink);
-      box-shadow: 0 0 30px var(--neon-pink), inset 0 0 30px rgba(255, 42, 121, 0.4);
-      text-shadow: 0 0 8px var(--neon-pink);
-      animation: pulse-pink 1.5s infinite;
+    #preview-thumb {
+      width: 44px;
+      height: 44px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid var(--accent);
     }
-
-    #micBtn.processing {
-      background: rgba(249, 240, 2, 0.1);
-      border-color: var(--neon-yellow);
-      color: var(--neon-yellow);
-      box-shadow: 0 0 25px var(--neon-yellow), inset 0 0 25px rgba(249, 240, 2, 0.4);
-      text-shadow: 0 0 8px var(--neon-yellow);
+    .btn-clear-img {
+      color: #ff5555;
+      font-size: 12px;
+      cursor: pointer;
+      background: none;
+      border: none;
     }
 
-    @keyframes pulse-pink {
-      0% { box-shadow: 0 0 20px var(--neon-pink); }
-      50% { box-shadow: 0 0 45px var(--neon-pink); }
-      100% { box-shadow: 0 0 20px var(--neon-pink); }
+    /* BARRE D'ENTRÉE BASSE */
+    footer {
+      background: var(--card);
+      border-top: 1px solid var(--accent-dim);
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
     }
-
-    #log { 
-      margin-top: 45px; 
-      width: 85%; max-width: 500px;
-      height: 140px; 
-      overflow-y: auto; text-align: left;
-      background: rgba(0, 20, 20, 0.7);
-      border-left: 4px solid var(--neon-cyan);
-      border-right: 1px solid rgba(0, 255, 255, 0.2);
-      border-top: 1px solid rgba(0, 255, 255, 0.2);
-      border-bottom: 1px solid rgba(0, 255, 255, 0.2);
-      padding: 15px;
-      font-size: 0.85rem; 
-      color: #a3f7f7; 
-      text-shadow: 0 0 2px var(--neon-cyan);
-      z-index: 10;
+    input[type="text"] {
+      flex: 1;
+      background: #090b10;
+      border: 1px solid #222a3b;
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 20px;
+      font-size: 14px;
+      outline: none;
     }
-    
-    #log::-webkit-scrollbar { width: 4px; }
-    #log::-webkit-scrollbar-thumb { background: var(--neon-cyan); }
-
-    .role-doc { color: #fff; opacity: 0.7; margin-bottom: 6px; }
-    .role-nyx { color: var(--neon-pink); font-weight: bold; text-shadow: 0 0 3px var(--neon-pink); margin-bottom: 6px; }
+    input[type="text"]:focus { border-color: var(--accent); }
+    button {
+      background: none;
+      border: none;
+      outline: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn-action {
+      font-size: 20px;
+      padding: 6px;
+      color: #9aa8b6;
+      transition: color 0.15s;
+    }
+    .btn-action.active { color: var(--accent); }
+    .btn-mic {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #000;
+      font-size: 19px;
+      flex-shrink: 0;
+      transition: transform 0.1s, background 0.2s;
+    }
+    .btn-mic.recording {
+      background: #ff0055;
+      color: #fff;
+      animation: pulse 1s infinite alternate;
+    }
+    @keyframes pulse {
+      from { transform: scale(1); box-shadow: 0 0 4px #ff0055; }
+      to { transform: scale(1.08); box-shadow: 0 0 14px #ff0055; }
+    }
   </style>
 </head>
 <body>
 
-  <div id="status">[ SYSTÈME PRÊT ]</div>
-  <button id="micBtn">NYX</button>
-  <div id="log"></div>
+  <header>
+    <div class="status-block">
+      <div class="status-dot"></div>
+      <span>NYX // RAY-BAN META</span>
+    </div>
+    <span style="font-size: 11px; opacity: 0.5;">Liaison Bluetooth audio</span>
+  </header>
+
+  <div id="chat-box">
+    <div class="msg nyx">
+      <div class="msg-author">NYX</div>
+      Canal ouvert, Doc. Prête pour le direct.
+    </div>
+  </div>
+
+  <div id="preview-container">
+    <img id="preview-thumb" src="" alt="Aperçu">
+    <span style="font-size: 11px; flex: 1;">Photo prête pour analyse</span>
+    <button class="btn-clear-img" id="btn-cancel-photo">✕ Retirer</button>
+  </div>
+
+  <footer>
+    <label class="btn-action" title="Joindre une photo des lunettes">
+      📷
+      <input type="file" id="file-input" accept="image/*" style="display: none;">
+    </label>
+    <input type="text" id="user-input" placeholder="Écris ou parle dans tes lunettes..." autocomplete="off">
+    <button class="btn-action" id="btn-text-send" style="color: var(--accent);">➔</button>
+    <button class="btn-mic" id="btn-mic" title="Micro">🎙️</button>
+  </footer>
 
   <script>
-    const micBtn = document.getElementById('micBtn');
-    const statusDiv = document.getElementById('status');
-    const logDiv = document.getElementById('log');
+    const chatBox = document.getElementById('chat-box');
+    const userInput = document.getElementById('user-input');
+    const btnTextSend = document.getElementById('btn-text-send');
+    const btnMic = document.getElementById('btn-mic');
+    const fileInput = document.getElementById('file-input');
+    const previewContainer = document.getElementById('preview-container');
+    const previewThumb = document.getElementById('preview-thumb');
+    const btnCancelPhoto = document.getElementById('btn-cancel-photo');
 
-    let lecteurAudio = new Audio();
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    let recognition;
+    let currentPhotoB64 = null;
+    let audioOutput = new Audio();
 
-    function majStatut(texte) {
-      statusDiv.innerText = texte;
+    // 1. SÉLECTION RAPIDE DE PHOTO (RAY-BAN META OU GALERIE)
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        currentPhotoB64 = event.target.result;
+        previewThumb.src = currentPhotoB64;
+        previewContainer.style.display = 'flex';
+      };
+      reader.readAsDataURL(file);
+    });
+
+    btnCancelPhoto.addEventListener('click', () => {
+      currentPhotoB64 = null;
+      fileInput.value = '';
+      previewContainer.style.display = 'none';
+    });
+
+    // 2. CHAT VISUEL
+    function appendChatBubble(role, text, imageB64 = null) {
+      const bubble = document.createElement('div');
+      bubble.className = `msg ${role.toLowerCase()}`;
+      
+      let html = `<div class="msg-author">${role.toUpperCase()}</div><div>${text.replace(/\n/g, '<br>')}</div>`;
+      if (imageB64) {
+        html += `<img src="${imageB64}">`;
+      }
+      bubble.innerHTML = html;
+      chatBox.appendChild(bubble);
+      chatBox.scrollTop = chatBox.scrollHeight;
     }
 
+    // 3. ENVOI VERS LE SERVEUR NYX & RETOUR AUDIO DANS LES BRANCHES
+    async function transmit(text) {
+      const finalMsg = text && text.trim() ? text.trim() : (currentPhotoB64 ? "Regarde ça et dis-moi ce que tu en penses." : "");
+      if (!finalMsg && !currentPhotoB64) return;
+
+      const photoToSend = currentPhotoB64;
+      appendChatBubble('Doc', finalMsg, photoToSend);
+
+      // Réinitialisation du champ et de la vignette
+      userInput.value = '';
+      currentPhotoB64 = null;
+      fileInput.value = '';
+      previewContainer.style.display = 'none';
+
+      try {
+        const payload = { texte: finalMsg };
+        if (photoToSend) payload.image = photoToSend;
+
+        const res = await fetch('/api/voix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+
+        // Affichage écrit complet dans le chat
+        if (data.reponse) {
+          appendChatBubble('Nyx', data.reponse);
+        }
+
+        // Lecture dans les branches des lunettes via Google Cloud TTS
+        if (data.audio) {
+          audioOutput.pause();
+          audioOutput = new Audio(`data:audio/mp3;base64,${data.audio}`);
+          audioOutput.play().catch(e => console.warn("Lecture audio bloquée :", e));
+        }
+      } catch (err) {
+        appendChatBubble('Nyx', `Liaison coupée : ${err.message}`);
+      }
+    }
+
+    btnTextSend.addEventListener('click', () => transmit(userInput.value));
+    userInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') transmit(userInput.value);
+    });
+
+    // 4. MICRO BLUETOOTH DES LUNETTES (WEB SPEECH API)
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
-      recognition = new SpeechRecognition();
-      recognition.lang = 'fr-FR';
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
+      const recognizer = new SpeechRecognition();
+      recognizer.lang = 'fr-FR';
+      recognizer.continuous = false;
+      recognizer.interimResults = false;
 
-      recognition.onstart = () => {
-        majStatut("[ ÉCOUTE EN COURS... ]");
-        micBtn.classList.add('listening');
-      };
+      let recording = false;
 
-      recognition.onresult = async (event) => {
-        const texte = event.results[0][0].transcript;
-        logDiv.innerHTML += `<div class="role-doc">> DOC : ${texte}</div>`;
-        logDiv.scrollTop = logDiv.scrollHeight;
-        
-        majStatut("[ TRANSMISSION... ]");
-        micBtn.classList.remove('listening');
-        micBtn.classList.add('processing');
-
-        try {
-          const debut = Date.now();
-          const res = await fetch('/api/voix', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ texte: texte })
-          });
-          const data = await res.json();
-          
-          logDiv.innerHTML += `<div class="role-nyx">> NYX : ${data.reponse}</div>`;
-          logDiv.scrollTop = logDiv.scrollHeight;
-
-          if (data.audio) {
-            majStatut("[ NYX PARLE... ]");
-            lecteurAudio.src = "data:audio/mp3;base64," + data.audio;
-            lecteurAudio.play().then(() => {
-              lecteurAudio.onended = () => {
-                majStatut("[ SYSTÈME PRÊT ]");
-                micBtn.classList.remove('processing');
-              };
-            }).catch(() => {
-              majStatut("[ SYSTÈME PRÊT ]");
-              micBtn.classList.remove('processing');
-            });
-          } else {
-            majStatut("[ SYSTÈME PRÊT ]");
-            micBtn.classList.remove('processing');
+      btnMic.addEventListener('click', () => {
+        if (!recording) {
+          try {
+            recognizer.start();
+            recording = true;
+            btnMic.classList.add('recording');
+          } catch (e) {
+            recognizer.stop();
           }
-        } catch (err) {
-          majStatut("[ ERREUR RÉSEAU ]");
-          micBtn.classList.remove('processing');
+        } else {
+          recognizer.stop();
         }
+      });
+
+      recognizer.onresult = (evt) => {
+        const transcript = evt.results[0][0].transcript;
+        if (transcript) transmit(transcript);
       };
 
-      recognition.onerror = () => {
-        majStatut("[ DÉFAILLANCE MICRO ]");
-        micBtn.classList.remove('listening', 'processing');
+      recognizer.onerror = () => {
+        recording = false;
+        btnMic.classList.remove('recording');
       };
-      
-      recognition.onend = () => {
-        if (!micBtn.classList.contains('processing')) {
-          majStatut("[ SYSTÈME PRÊT ]");
-          micBtn.classList.remove('listening');
-        }
+
+      recognizer.onend = () => {
+        recording = false;
+        btnMic.classList.remove('recording');
       };
     } else {
-      majStatut("[ MICRO NON SUPPORTÉ ]");
+      btnMic.style.display = 'none';
     }
-
-    micBtn.addEventListener('click', () => {
-      // Déverrouillage audio instantané pour mobile
-      lecteurAudio.play().catch(() => {});
-      lecteurAudio.pause();
-      if (!lecteurAudio.paused) lecteurAudio.pause();
-
-      try { navigator.wakeLock.request('screen'); } catch(e) {}
-      if (recognition) recognition.start();
-    });
   </script>
 </body>
 </html>
