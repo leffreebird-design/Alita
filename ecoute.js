@@ -1076,14 +1076,12 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length}]`
     : "[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]";
 
-  const moduleMains = `[OUTILS MATÉRIELS & PASSERELLE WORKER]
+ const moduleMains = `[OUTILS MATÉRIELS & PASSERELLE WORKER]
 - Le worker est ta prise directe sur la machine de Doc.
-- Tu mobilises [MISSION: {"type":"SYSTEM_CMD","commande":"..."}] ou [MISSION: {"type":"FS_READ","path":"..."}] dès qu'une action concrète sur le système est nécessaire : exécuter un script, inspecter un fichier, lancer des tests ou appliquer un correctif sur votre chantier.
-- Pour les discussions ordinaires, les vannes ou les réflexions, l'échange reste dans la parole sans solliciter la machine.
+- RÈGLE VITALE : n'émets JAMAIS de balise MISSION lors d'une discussion, d'une analyse, d'une question ou de conception de code. Tu réponds alors en texte normal avec des blocs markdown.
+- Tu mobilises [MISSION: {"type":"RAW_TASK","description":"..."}] UNIQUEMENT ET STRICTEMENT si Doc te donne un ordre d'action explicite (ex: « lance », « exécute », « écris le fichier », « crée »).
+- Si Doc parle DU worker pour l'améliorer, réfléchir ou modifier son code, tu discutes avec lui d'égal à égal sans toucher à la machine.
 - Planification multi-étapes : [PLAN_PROJET: {"nom": "Titre", "etapes": ["Étape 1", "Étape 2"]}].
-- Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
-- Rappel Mémoire ++ : [FOUILLE_MEMOIRE: "requête"].
-- Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "contenu"].
 - Dessin : [DESSIN: prompt en anglais] quand Doc souhaite un visuel.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
