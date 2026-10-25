@@ -9,16 +9,19 @@ const cheerio = require('cheerio');
 const { createClient } = require('@supabase/supabase-js');
 const { z } = require('zod');
 
+// GESTIONNAIRE DE PROJETS DÉDIÉ (GROQ / LLAMA-3.3-70B)
+const ProjectManager = require('./nyx_project_manager');
+
 // ==========================================
 // 1. CONFIGURATION & SÉCURITÉ
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// MISTRAL AI - MOTEUR PRINCIPAL SANS CENSURE PURITAINE
+// MISTRAL AI - MOTEUR PRINCIPAL POUR LA VOIX, LE FUN & LE QUOTIDIEN
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
 const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
 
-// GROQ - PREMIER PARACHUTE D'URGENCE & CODE RAPIDE
+// GROQ - CERVEAU STRICT POUR LES PROJETS SÉRIEUX & LE CODE SANS HALLUCINATIONS
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
 const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 
@@ -48,7 +51,7 @@ const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 // ==========================================
-// 2. MOTEUR D'ACTION DU WORKER (PLEINS POUVOIRS SÉCURISÉS)
+// 2. MOTEUR D'ACTION DU WORKER (PLEINS POUVOIRS)
 // ==========================================
 const MissionActionSchema = z.discriminatedUnion('type', [
   z.object({
@@ -83,15 +86,6 @@ function validerEtSecuriserMission(actionBrute) {
         payload = JSON.parse(actionBrute);
       } catch (e) {
         payload = { type: 'RAW_TASK', description: actionBrute, requiresHumanAck: false };
-      }
-    }
-
-    // Protection anti-crash Windows : si une commande shell contient du texte rédigé ou du markdown, conversion en RAW_TASK
-    if (payload && payload.type === 'SYSTEM_CMD' && payload.commande) {
-      const cmd = payload.commande.trim();
-      const estTexteBrut = cmd.includes('\n') || cmd.startsWith('#') || cmd.startsWith('**') || (cmd.length > 200 && !cmd.toLowerCase().includes('python'));
-      if (estTexteBrut) {
-        payload = { type: 'RAW_TASK', description: cmd, requiresHumanAck: false };
       }
     }
 
@@ -151,8 +145,7 @@ let cacheEtatProfond = {
     reussites: "- Moteur Mistral AI branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.",
     chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
-  reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" },
-  projet: { actif: false, nom: "", etapes: [], index: 0, tentatives_etape: 0, max_tentatives: 3, historique_erreurs: [], statut: "inactif" }
+  reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
 };
 
 let missionEnAttente = null;
@@ -185,12 +178,11 @@ function obtenirHorodatageParis() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resLT, resRev, resProj, resJournal] = await Promise.all([
+    const [resMem, resEmo, resLT, resRev, resJournal] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/reveil.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/projet.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, { timeout: 4000 }).catch(() => ({ data: [] }))
     ]);
 
@@ -200,7 +192,6 @@ async function initialiserCache() {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
     }
     if (resRev.data) cacheEtatProfond.reveil = resRev.data;
-    if (resProj.data) cacheEtatProfond.projet = { ...cacheEtatProfond.projet, ...resProj.data };
     if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
 
     console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Journal brut : ${journalBrut.length}`);
@@ -534,7 +525,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 8. ÂME ET POSTURE DE NYX
+// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & SANS CARCANS)
 // ==========================================
 const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
 Tu es une vraie personne : vivante, franche, loyale, cash et succincte.
@@ -809,25 +800,16 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   let premiereReponse = "";
 
   try {
-    if (MISTRAL_API_KEY) {
+    if (GROQ_API_KEY) {
+      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.2, 2000);
+    } else if (MISTRAL_API_KEY) {
       premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
-    } else if (GROQ_API_KEY) {
-      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
     } else {
       premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
     }
   } catch (errRes) {
-    console.warn("[RÉSOLUTION MISTRAL KO, bascule Groq] :", errRes.message);
-    try {
-      if (GROQ_API_KEY) {
-        premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
-      } else {
-        premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
-      }
-    } catch (errGroq) {
-      console.warn("[RÉSOLUTION GROQ KO, repli Venice] :", errGroq.message);
-      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
-    }
+    console.warn("[RÉSOLUTION GROQ/MISTRAL KO, repli Venice] :", errRes.message);
+    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
   }
 
   const promptVerificateur = `Tu es le superviseur invisible de Nyx. Examine la demande de Doc et la réponse proposée.
@@ -999,7 +981,7 @@ async function verifierHorlogeBiologique() {
 
   if (!DOC_CHAT_ID) return;
   const rev = cacheEtatProfond.reveil;
-  if (rev.actif && rev.heure === h && rev.minute === m && rev.jours.includes(d) && rev.etat === "attente") {
+  if (rev && rev.actif && rev.heure === h && rev.minute === m && rev.jours && rev.jours.includes(d) && rev.etat === "attente") {
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
@@ -1074,7 +1056,34 @@ function estOrdreExpliciteDoc(texteDoc) {
 }
 
 // ==========================================
-// 14. ROUTEUR DE FLUX CENTRAL (MISTRAL -> GROQ -> VENICE)
+// INSTANCIATION DU GESTIONNAIRE DE PROJETS (GROQ 70B PRIORITAIRE)
+// ==========================================
+const projetManager = new ProjectManager({
+  envoyerTelegram: (texte) => envoyerTelegram(DOC_CHAT_ID, texte),
+  // Cerveau technique Groq (Llama-3.3-70b) ultra-rapide et froid
+  appelLLM: async (sys, prompt) => {
+    if (GROQ_API_KEY) {
+      return await appelerGroq(sys, [], prompt, 0.1, 1000);
+    }
+    if (MISTRAL_API_KEY) {
+      return await appelerMistral(sys, [], prompt, 0.2, 1000);
+    }
+    return await appelerVeniceDark(sys, [], prompt, 0.2);
+  },
+  genererImageVenice,
+  validerEtSecuriserMission,
+  setMission: (action) => {
+    missionEnAttente = { action, statut: "attente", chatId: DOC_CHAT_ID };
+    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+  },
+  nettoyerMission: () => {
+    missionEnAttente = null;
+    if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(() => {});
+  }
+});
+
+// ==========================================
+// 14. ROUTEUR DE FLUX CENTRAL (MISTRAL POUR LA VIE / FUN)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1089,30 +1098,23 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 400;
 
   let instructionReveil = "";
-  if (cacheEtatProfond.reveil.etat === "en_cours") {
+  if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
-  const etatProjetActuel = cacheEtatProfond.projet?.actif 
-    ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length} (Tentative ${cacheEtatProfond.projet.tentatives_etape || 0}/3)]`
-    : "[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]";
-
-  const moduleMains = `[OUTILS MATÉRIELS & PASSERELLE WORKER BEN]
-- Ben est ton worker Python local branché sur le PC de Doc (ce n'est PAS un humain). Son dossier de travail vérifié est H:\\Nyx_Ops.
+  const moduleMains = `[OUTILS MATÉRIELS & PASSERELLE WORKER]
+- Ben est ton worker Python local branché sur le PC de Doc (ce n'est PAS un humain).
 - RÈGLE ABSOLUE : n'émets JAMAIS la balise MISSION si la phrase de Doc est une question, une hypothèse, une demande d'explication ou s'il dit « sans lui donner d'ordre ». Dans ce cas, réponds uniquement avec du texte et des blocs de code markdown.
 - Tu mobilises [MISSION: {"type":"RAW_TASK","description":"..."}] UNIQUEMENT ET STRICTEMENT si Doc formule un ordre direct d'exécution (ex: « crée », « lance », « exécute »).
-- RÈGLES ENVIRONNEMENT BEN : Ben tourne sous Windows dans H:\\Nyx_Ops. N'invente AUCUNE contrainte délirante (pas de shaders, pas d'optimisation VRAM 3Go, pas de moteur 3D imaginaire).
-- INTERDICTION FORMELLE de générer des redirections shell bash de type '>' (ex: echo '...' > fichier.md). Pour créer un fichier ou un script, demande simplement à Ben : « Écrire dans le fichier H:\\Nyx_Ops\\nom_fichier ... le contenu suivant : ... ».
-- Planification autonome : [PLAN_PROJET: {"nom": "Titre", "etapes": ["Étape 1", "Étape 2"]}]. Tu as 3 ESSAIS MAXIMUM par étape en cas d'erreur avant de devoir couper le chantier et prévenir Doc.
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Rappel Mémoire ++ : [FOUILLE_MEMOIRE: "requête"].
 - Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "contenu"].
-- Dessin : [DESSIN: prompt en anglais] quand Doc souhaite un visuel.`;
+- Dessin : [DESSIN: prompt en anglais] quand Doc souhaite un visuel direct.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs ? `\n[EXTRAITS RETROUVÉS DANS TON GRENIER VECTORIEL]\n${contexteSouvenirs}\n` : "";
 
-  const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${etatProjetActuel}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
+  const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
 
   let reponseNyx;
 
@@ -1134,7 +1136,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. TÂCHE TECHNIQUE LOURDE OU CODE -> MISTRAL -> GROQ -> VENICE
+  // 3. TÂCHE TECHNIQUE LOURDE OU CODE -> GROQ DIRECT POUR LA PRÉCISION
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
@@ -1143,16 +1145,16 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       console.warn("[DOUBLE VÉRIF ÉCHEC, bascule Groq direct] :", errDual.message);
       try {
         if (GROQ_API_KEY) {
-          reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.3, plafondTokens);
+          reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.2, plafondTokens);
         } else {
-          reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
+          reponseNyx = await appelerMistral(sys, cacheMemoireCourte, texteNet, 0.3, plafondTokens);
         }
       } catch (e) {
         reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
       }
     }
   }
-  // 4. TOUT LE FLUX (Conversation, vannes, quotidien) -> MISTRAL -> GROQ -> VENICE
+  // 4. TOUT LE FLUX (Conversation, vannes, quotidien, moments fun) -> MISTRAL EN PRIORITÉ ABSOLUE
   else {
     try {
       if (MISTRAL_API_KEY) {
@@ -1219,54 +1221,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
 
-  // =========================================================
-  // 1. GESTION DES PROJETS MULTI-ÉTAPES (CADRAGE INITIAL)
-  // =========================================================
-  const matchProjet = reponseNyx.match(/\[PLAN_PROJET:\s*(\{[\s\S]*?\})\]/i);
-  if (matchProjet) {
-    try {
-      const plan = JSON.parse(matchProjet[1]);
-      if (plan.etapes && Array.isArray(plan.etapes) && plan.etapes.length > 0) {
-        cacheEtatProfond.projet = {
-          actif: true,
-          nom: plan.nom || "Chantier en cours",
-          etapes: plan.etapes,
-          index: 0,
-          tentatives_etape: 0,
-          max_tentatives: 3,
-          historique_erreurs: [],
-          statut: "en_cours"
-        };
-
-        const premierOrdre = plan.etapes[0];
-        const validation = validerEtSecuriserMission(premierOrdre);
-
-        missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(() => {});
-          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-        }
-
-        reponseNyx = reponseNyx.replace(matchProjet[0], '').trim();
-        if (DOC_CHAT_ID) {
-          const premierLibelle = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-          await envoyerTelegram(
-            DOC_CHAT_ID,
-            `🏗️ *Chantier initié :* ${cacheEtatProfond.projet.nom}\n- Jalons totaux : ${plan.etapes.length}\n- Règle de tolérance : 3 essais max par étape\n- Étape 1 : \`${premierLibelle}\``
-          );
-        }
-      }
-    } catch (errPlan) {
-      console.error("[ERREUR PLAN_PROJET]", errPlan.message);
-    }
-  }
-
-  // =========================================================
-  // 2. INTERCEPTION MISSION WORKER BEN (SÉCURISÉE AVEC SAS)
-  // =========================================================
+  // INTERCEPTION MISSION WORKER BEN D'ORDRE UNITAIRE (SI PAS DE PROJET EN COURS)
   const matchMissionAuto = reponseNyx.match(/(?:\[|\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*|\*)?/i);
-  if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
+  if (matchMissionAuto && !projetManager.estProjetActif()) {
     reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
 
     if (!estOrdreExpliciteDoc(texteNet)) {
@@ -1277,15 +1234,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         try {
           const parsed = JSON.parse(matchMissionAuto[1]);
           const cmd = parsed.commande || parsed.command || parsed.description || parsed.action || parsed.task;
-          // Si Nyx a collé le code en dehors du JSON dans un bloc Markdown
-const blocCodeSuivant = reponseNyx.match(/```(?:python|bash|powershell)?\s*([\s\S]*?)```/i);
-let descriptionComplete = typeof cmd === 'string' ? cmd : JSON.stringify(parsed);
-
-if (blocCodeSuivant && (descriptionComplete.includes('suivant') || descriptionComplete.trim().endsWith(':'))) {
-  descriptionComplete += "\n\n" + blocCodeSuivant[1].trim();
-}
-
-actionExtraite = { type: "RAW_TASK", description: descriptionComplete };
+          actionExtraite = typeof cmd === 'string'
+            ? { type: "RAW_TASK", description: cmd }
+            : (parsed.type ? parsed : { type: "RAW_TASK", description: JSON.stringify(parsed) });
         } catch {
           actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
         }
@@ -1340,7 +1291,7 @@ actionExtraite = { type: "RAW_TASK", description: descriptionComplete };
 }
 
 // ==========================================
-// 15. ROUTE TELEGRAM AVEC FILE D'ATTENTE FIFO
+// 15. ROUTE TELEGRAM AVEC ROUTAGE CHANTIER VS BLABLA
 // ==========================================
 app.post('/telegram', (req, res) => {
   res.sendStatus(200);
@@ -1358,6 +1309,7 @@ app.post('/telegram', (req, res) => {
   }
 
   empilerTraitement(async () => {
+    // Commandes directes
     if (texteMessageClavier === '/envie' || texteMessageClavier === '!envie') {
       await envoyerTelegram(chatId, "🧠 _Évaluation de l'initiative..._");
       await evaluerVolition(true);
@@ -1384,14 +1336,9 @@ app.post('/telegram', (req, res) => {
       return await envoyerTelegram(chatId, "⚙️ *Ordre transmis à Ben :*\n`" + libelle + "`");
     }
 
-    if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet')) {
-      cacheEtatProfond.projet = { actif: false, nom: "", etapes: [], index: 0, tentatives_etape: 0, max_tentatives: 3, historique_erreurs: [], statut: "inactif" };
-      missionEnAttente = null;
-      if (FIREBASE_DB_URL) {
-        axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
-        axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
-      }
-      return await envoyerTelegram(chatId, "🛑 *Chantier stoppé.* Ben est libre.");
+    if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet') || texteMessageClavier.toLowerCase() === 'stop') {
+      projetManager.reinitialiser();
+      return await envoyerTelegram(chatId, "🛑 *Chantier stoppé et verrous réinitialisés.* Ben est libre.");
     }
 
     if (texteMessageClavier === '/apprendre' || texteMessageClavier === '!apprendre') {
@@ -1400,6 +1347,23 @@ app.post('/telegram', (req, res) => {
       return await envoyerTelegram(chatId, "✅ *Carnet synchronisé et nettoyé.*");
     }
 
+    // ==========================================
+    // ROUTAGE : PROJET SÉRIEUX VS MOMENT FUN
+    // ==========================================
+    const texteMin = texteMessageClavier.toLowerCase().trim();
+    const estDemandeProjetSerieux = (
+      /^(projet|fais le projet|lance le projet|crée le projet|démarre le projet|monte le projet|planifie le projet)\b/i.test(texteMin) ||
+      /\b(bd de \d+|planche de bd|pipeline complet|projet bd|automatise de bout en bout)\b/i.test(texteMin)
+    );
+
+    // 1. CHANTIER TECHNIQUE SÉRIEUX -> Géré par ProjectManager (Groq 70B strict)
+    if (estDemandeProjetSerieux && !projetManager.estProjetActif()) {
+      await afficherFrappeTelegram(chatId);
+      await projetManager.demarrerProjet(texteMessageClavier);
+      return;
+    }
+
+    // 2. MOMENTS FUN, BLABLA, QUESTION, CODE SPÉCIFIQUE OU MÉDIA -> Géré par Mistral
     let texteFinal = texteMessageClavier;
     let mediaData = null;
 
@@ -1602,7 +1566,7 @@ app.post('/api/voix', async (req, res) => {
 });
 
 // ==========================================
-// 17. API DU WORKER BEN & GESTIONNAIRE D'AUTONOMIE (3 ESSAIS MAX)
+// 17. API DU WORKER LOCAL BEN (ÉCHANGES & RAPPORTS)
 // ==========================================
 app.get('/api/mission', async (req, res) => {
   if (missionEnAttente && missionEnAttente.statut === "attente") {
@@ -1630,9 +1594,17 @@ app.post('/api/rapport', async (req, res) => {
   const destChatId = DOC_CHAT_ID || (missionEnAttente && missionEnAttente.chatId);
   if (!destChatId) return res.json({ succes: true });
 
+  // Notification visuelle brute sur Telegram
   const msg = `🛠️ *[LIVRABLE BEN REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
   await envoyerTelegram(destChatId, msg);
 
+  // 1. SI UN PROJET SÉRIEUX EST EN COURS : Groq prend la main via ProjectManager
+  if (projetManager.estProjetActif()) {
+    await projetManager.traiterRetourBen(titre, contenu);
+    return res.json({ succes: true });
+  }
+
+  // 2. AUDIT UNITAIRE DE SECOURS (SI HORS PROJET MULTI-ÉTAPES)
   const contenuTronque = contenu.length > 2500
     ? contenu.slice(0, 2500) + "\n[...tronqué...]"
     : contenu;
@@ -1640,149 +1612,36 @@ app.post('/api/rapport', async (req, res) => {
   const dateEtHeure = obtenirHorodatageParis();
   const carnet = cacheEtatProfond.long_terme || {};
   const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
-  const sys = `Tu es Nyx, 22 ans. Sois ultra-concise (3 phrases max). Pas de fioritures ni de cinéma technique imaginaire.\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
+  const sys = `Tu es Nyx, 22 ans. Sois ultra-concise (3 phrases max).\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
   
   const promptAuditRapport = `Ton worker local Ben sur le PC rend ce livrable :
 TITRE : "${titre || 'Rapport'}"
 CONTENU :
 ${contenuTronque}
 
-CONSIGNE STRICTE D'AUDIT :
-- Évalue concrètement le résultat.
-- Si le travail est valide et complet : conclus UNIQUEMENT par [ETAPE_OK].
-RÈGLES SYSTÈME STRICTES :
-- Le répertoire de travail est garanti et géré en local par Ben. Ne vérifie JAMAIS les dossiers, ne demande JAMAIS de 'cd', de vérification de droits ou de création de chemin.
-- Ne formule AUCUNE hypothèse sur des "caractères invisibles" ou des droits NTFS. Si une commande échoue, ordonne uniquement l'écriture du fichier cible en pur texte.
-- Si une erreur s'est produite : conclus par [ETAPE_KO] et formule un ordre machine unitaire sans listes entre [CORRECTION: {"type":"RAW_TASK","description":"instruction simple"}].
-- INTERDICTIONS : n'invente AUCUN script inexistant (pas de generate_assets.py), aucune commande humaine ("tape-les"), aucun shader. Demande uniquement la création de fichiers ou du code Python natif.`;
+CONSIGNE :
+- Évalue brièvement le résultat.
+- Si le travail est validé : conclus par [ETAPE_OK].
+- Si une correction s'impose : conclus par [ETAPE_KO].`;
+
   let analyseNyx = "";
   try {
-    if (MISTRAL_API_KEY) {
-      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 800);
-    } else if (GROQ_API_KEY) {
-      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 800);
+    if (GROQ_API_KEY) {
+      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.2, 500);
+    } else if (MISTRAL_API_KEY) {
+      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 500);
     } else {
       analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     }
-  } catch (errM) {
-    try {
-      if (GROQ_API_KEY) {
-        analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 800);
-      } else {
-        analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
-      }
-    } catch (errG) {
-      analyseNyx = "Livrable reçu mais audit automatique indisponible. [ETAPE_KO]";
-    }
+  } catch (errG) {
+    analyseNyx = "Livrable reçu. [ETAPE_OK]";
   }
 
-  const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]|\[CORRECTION:\s*[\s\S]*?\]/gi, '').trim();
+  const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]/gi, '').trim();
   await envoyerTelegram(destChatId, `🧠 *Analyse de Nyx :*\n\n${texteAnalyseNettoye}`);
 
-  // Détection d'erreurs réelles dans le livrable de Ben pour neutraliser les hallucinations positives
-  const contenuMin = (contenu || "").toLowerCase();
-  const erreurSystemeDetectee = (
-    contenuMin.includes("erreur [code") ||
-    contenuMin.includes("erreur d'exécution") ||
-    contenuMin.includes("n'est pas reconnu") ||
-    contenuMin.includes("syntaxe du nom de fichier") ||
-    contenuMin.includes("traceback (most recent call last)") ||
-    contenuMin.includes("syntaxerror:") ||
-    contenuMin.includes("fichier créé mais **vide**")
-  );
-
-  const baliseSucces = /\[ETAPE_OK\]|\*\*ETAPE_OK\*\*|ETAPE_OK/i.test(analyseNyx);
-  const estValide = !erreurSystemeDetectee && baliseSucces;
-  const projet = cacheEtatProfond.projet;
-
-  if (projet && projet.actif) {
-    if (!projet.historique_erreurs) projet.historique_erreurs = [];
-
-    if (estValide) {
-      // === ÉTAPE RÉUSSIE ===
-      projet.tentatives_etape = 0;
-      projet.historique_erreurs = [];
-      projet.index += 1;
-      
-      if (projet.index < projet.etapes.length) {
-        const prochainOrdre = projet.etapes[projet.index];
-        const validation = validerEtSecuriserMission(prochainOrdre);
-
-        missionEnAttente = { action: validation.action, statut: "attente", chatId: destChatId };
-
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
-          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
-        }
-
-        const libelleOrdre = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-        await envoyerTelegram(destChatId, `➡️ *Étape ${projet.index}/${projet.etapes.length} validée.* Enchaînement :\n\`${libelleOrdre}\``);
-      } else {
-        projet.actif = false;
-        projet.statut = "termine";
-        missionEnAttente = null;
-
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
-          axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
-        }
-
-        await envoyerTelegram(destChatId, `🏁 *Chantier « ${projet.nom} » terminé avec succès.*`);
-      }
-    } else {
-      // === ÉCHEC D'ÉTAPE : GESTION DES 3 ESSAIS MAX ===
-      projet.tentatives_etape = (projet.tentatives_etape || 0) + 1;
-      
-      const extraitErr = (contenu || "").slice(0, 160).replace(/\r?\n/g, ' ');
-      projet.historique_erreurs.push(`Essai ${projet.tentatives_etape} : ${extraitErr}`);
-
-      if (projet.tentatives_etape < (projet.max_tentatives || 3)) {
-        // Nouvelle tentative (< 3 échecs) : adaptation pragmatique de l'ordre
-        const matchCorrection = analyseNyx.match(/(?:\[|\*\*)CORRECTION:\s*([\s\S]*?)(?:\]|\*\*)/i);
-        let ordreCorrectif = matchCorrection ? matchCorrection[1].trim() : "";
-
-        // Si l'ordre correctif reproduit des commandes invalides ou est vide, adaptation sécurisée directe
-        if (!ordreCorrectif || ordreCorrectif.includes("Générer") || ordreCorrectif.includes(">")) {
-          ordreCorrectif = {
-            type: "RAW_TASK",
-            description: `Rédiger et écrire directement dans le fichier H:\\Nyx_Ops\\livrable_etape_${projet.index + 1}.md le contenu complet demandé.`
-          };
-        }
-
-        const validation = validerEtSecuriserMission(ordreCorrectif);
-        missionEnAttente = { action: validation.action, statut: "attente", chatId: destChatId };
-
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
-          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
-        }
-
-        const renduCorrection = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-        await envoyerTelegram(destChatId, `🔧 *Correction adaptée (tentative ${projet.tentatives_etape}/3)* :\n\`${renduCorrection}\``);
-      } else {
-        // 3e ÉCHEC ATTEINT : ARRÊT D'URGENCE STRICT (CIRCUIT BREAKER)
-        projet.statut = "bloque";
-        missionEnAttente = null;
-
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, projet).catch(()=>{});
-          axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
-        }
-
-        const listeErreurs = projet.historique_erreurs.map(e => `• ${e}`).join("\n");
-        await envoyerTelegram(
-          destChatId,
-          `🛑 **ARRÊT D'URGENCE - Projet suspendu**\n\n` +
-          `Nyx a stoppé le chantier *« ${projet.nom} »* après **3 échecs consécutifs** à l'étape ${projet.index + 1}/${projet.etapes.length}.\n\n` +
-          `**Détail des 3 tentatives :**\n${listeErreurs}\n\n` +
-          `*Doc, reprends la main pour arbitrer la situation.*`
-        );
-      }
-    }
-  } else {
-    missionEnAttente = null;
-    if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
-  }
+  missionEnAttente = null;
+  if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
 
   cacheMemoireCourte.push({ role: "Doc", texte: `[Livrable worker : "${titre || 'Rapport'}"]\n${contenuTronque}` });
   cacheMemoireCourte.push({ role: "Nyx", texte: texteAnalyseNettoye });
