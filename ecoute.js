@@ -1650,16 +1650,16 @@ CONSIGNE STRICTE D'AUDIT :
   let analyseNyx = "";
   try {
     if (MISTRAL_API_KEY) {
-      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 250);
+      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 800);
     } else if (GROQ_API_KEY) {
-      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 250);
+      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 800);
     } else {
       analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
     }
   } catch (errM) {
     try {
       if (GROQ_API_KEY) {
-        analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 250);
+        analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 800);
       } else {
         analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
       }
