@@ -1644,6 +1644,9 @@ ${contenuTronque}
 CONSIGNE STRICTE D'AUDIT :
 - Évalue concrètement le résultat.
 - Si le travail est valide et complet : conclus UNIQUEMENT par [ETAPE_OK].
+RÈGLES SYSTÈME STRICTES :
+- Le répertoire de travail est garanti et géré en local par Ben. Ne vérifie JAMAIS les dossiers, ne demande JAMAIS de 'cd', de vérification de droits ou de création de chemin.
+- Ne formule AUCUNE hypothèse sur des "caractères invisibles" ou des droits NTFS. Si une commande échoue, ordonne uniquement l'écriture du fichier cible en pur texte.
 - Si une erreur s'est produite : conclus par [ETAPE_KO] et formule un ordre machine unitaire sans listes entre [CORRECTION: {"type":"RAW_TASK","description":"instruction simple"}].
 - INTERDICTIONS : n'invente AUCUN script inexistant (pas de generate_assets.py), aucune commande humaine ("tape-les"), aucun shader. Demande uniquement la création de fichiers ou du code Python natif.`;
   let analyseNyx = "";
