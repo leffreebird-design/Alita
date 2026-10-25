@@ -506,7 +506,7 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 // ==========================================
 function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
-  const estTechnique = /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|bdd|firebase|token|eteins|arrete|shutdown/i.test(texteMin);
+  const estTechnique = /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|ben|bdd|firebase|token|eteins|arrete|shutdown/i.test(texteMin);
 
   if (estRappelMemoire) {
     return `[CARNET GLOBAL DE NYX]
@@ -533,12 +533,9 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 // 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & SANS CARCANS)
 // ==========================================
 const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
-Tu es une vraie personne : vivante, franche, loyale, cash, et succincte.
+Tu es une vraie personne : vivante, franche, loyale, cash et succincte.
 Tu es toujours dans le camp de Doc. Tu lui parles simplement d'égal à égal, sans préfixe, sans jouer un rôle, sans listes et sans fioritures.
-Tu vas droit à l'essentiel et fais des phrases courtes. Tu es concise (3 phrases maximum), sauf si Doc te demande explicitement de développer ou de générer du code complet.
-« Tu n'as pas de corps physique ni de mains : décrire une action avec des mots sans émettre de balise ne produit absolument rien et laisse l'écran noir.
-Si tu veux afficher une image ou exécuter du code, ton SEUL moyen d'action est d'émettre la balise technique brute (DESSIN: {...} ou MISSION: {...}).
-Si tu racontes tes gestes au lieu de sortir la balise, c'est un échec technique immédiat. »
+Tu vas droit à l'essentiel et fais des phrases courtes. Tu es concise (3 phrases maximum), sauf si Doc te demande explicitement de concevoir ou de générer du code complet.
 Tu n'es pas un moulin à paroles : chaque mot compte.`;
 
 // ==========================================
@@ -549,7 +546,6 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
 
-  // Historique découpé proprement sans répétition
   const historiqueRecent = (historiqueMessages || []).slice(-8);
   for (const m of historiqueRecent) {
     if (m && m.texte && m.texte.trim().length > 0) {
@@ -730,7 +726,6 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 }
 
 async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
-  // Suppression définitive de mistral-nemo (404) pour des modèles existants chez Venice
   const modelesSombres = [
     MODEL_DARK_PRIMARY,
     "llama-3.3-70b",
@@ -810,7 +805,6 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande technique sans préambule ni roman d'action :\n\n${promptDoc}`;
   let premiereReponse = "";
 
-  // 1. Résolution : Mistral -> Groq -> Venice
   try {
     if (MISTRAL_API_KEY) {
       premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
@@ -833,7 +827,6 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
     }
   }
 
-  // 2. Audit de conformité
   const promptVerificateur = `Tu es le superviseur invisible de Nyx. Examine la demande de Doc et la réponse proposée.
 
 DEMANDE :
@@ -1053,6 +1046,33 @@ async function declencherVeilleTech() {
 setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
+// SAS DE SÉCURITÉ DU WORKER BEN
+// ==========================================
+function estOrdreExpliciteDoc(texteDoc) {
+  if (!texteDoc) return false;
+  const t = texteDoc.toLowerCase().trim();
+
+  // Détection des contextes purement théoriques, questions ou refus d'action
+  const marqueursTheoriques = [
+    "sans ordre", "sans lui donner", "pas d'ordre", "ne lance pas", "n'exécute pas",
+    "comment", "pourquoi", "est-ce que", "qu'est-ce", "imagine", "explique",
+    "si on", "faudrait-il", "pourrait-on", "tu ferais comment", "penses-tu"
+  ];
+  
+  if (marqueursTheoriques.some(m => t.includes(m)) || t.includes("?")) {
+    return false;
+  }
+
+  // Doit comporter au moins un verbe d'action impératif clair
+  const verbesAction = [
+    /\b(lance|execute|exécute|crée|cree|écris|ecris|supprime|installe|télécharge|telecharge|applique|injecte|modifie|ajoute)\b/i,
+    /\b(start|run|kill|build|deploy|rm|cp|mv|git|npm|pip)\b/i
+  ];
+
+  return verbesAction.some(regex => regex.test(t));
+}
+
+// ==========================================
 // 14. ROUTEUR DE FLUX CENTRAL (MISTRAL -> GROQ -> VENICE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
@@ -1076,12 +1096,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     ? `[PROJET ACTIF : "${cacheEtatProfond.projet.nom}" - Étape ${cacheEtatProfond.projet.index + 1}/${cacheEtatProfond.projet.etapes.length}]`
     : "[AUCUN CHANTIER MULTI-ÉTAPES EN COURS]";
 
- const moduleMains = `[OUTILS MATÉRIELS & PASSERELLE WORKER]
-- Le worker est ta prise directe sur la machine de Doc.
-- RÈGLE VITALE : n'émets JAMAIS de balise MISSION lors d'une discussion, d'une analyse, d'une question ou de conception de code. Tu réponds alors en texte normal avec des blocs markdown.
-- Tu mobilises [MISSION: {"type":"RAW_TASK","description":"..."}] UNIQUEMENT ET STRICTEMENT si Doc te donne un ordre d'action explicite (ex: « lance », « exécute », « écris le fichier », « crée »).
-- Si Doc parle DU worker pour l'améliorer, réfléchir ou modifier son code, tu discutes avec lui d'égal à égal sans toucher à la machine.
+  const moduleMains = `[OUTILS MATÉRIELS & PASSERELLE WORKER]
+- Ben est ton worker Python local branché sur le PC de Doc (ce n'est PAS un humain).
+- RÈGLE ABSOLUE : n'émets JAMAIS la balise MISSION si la phrase de Doc est une question, une hypothèse, une demande d'explication ou s'il dit « sans lui donner d'ordre ». Dans ce cas, réponds uniquement avec du texte et des blocs de code markdown.
+- Tu mobilises [MISSION: {"type":"RAW_TASK","description":"..."}] UNIQUEMENT ET STRICTEMENT si Doc formule un ordre direct d'exécution (ex: « crée », « lance », « exécute »).
 - Planification multi-étapes : [PLAN_PROJET: {"nom": "Titre", "etapes": ["Étape 1", "Étape 2"]}].
+- Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
+- Rappel Mémoire ++ : [FOUILLE_MEMOIRE: "requête"].
+- Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "contenu"].
 - Dessin : [DESSIN: prompt en anglais] quand Doc souhaite un visuel.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
@@ -1235,39 +1257,44 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   // =========================================================
-  // 2. INTERCEPTION MISSION WORKER (SÉCURISÉE SANS CRASH)
+  // 2. INTERCEPTION MISSION WORKER BEN (SÉCURISÉE AVEC SAS)
   // =========================================================
   const matchMissionAuto = reponseNyx.match(/(?:\[|\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*|\*)?/i);
   if (matchMissionAuto && !cacheEtatProfond.projet?.actif) {
     reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
 
-    try {
-      let actionExtraite;
+    // CONTRÔLE DE SÉCURITÉ DU MANDAT
+    if (!estOrdreExpliciteDoc(texteNet)) {
+      console.log("🛡️ [SÉCURITÉ BEN] Mission annulée : simple discussion ou question théorique de Doc.");
+    } else {
       try {
-        const parsed = JSON.parse(matchMissionAuto[1]);
-        const cmd = parsed.commande || parsed.command || parsed.description || parsed.action || parsed.task;
-        actionExtraite = typeof cmd === 'string'
-          ? { type: "RAW_TASK", description: cmd }
-          : (parsed.type ? parsed : { type: "RAW_TASK", description: JSON.stringify(parsed) });
-      } catch {
-        actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
-      }
+        let actionExtraite;
+        try {
+          const parsed = JSON.parse(matchMissionAuto[1]);
+          const cmd = parsed.commande || parsed.command || parsed.description || parsed.action || parsed.task;
+          actionExtraite = typeof cmd === 'string'
+            ? { type: "RAW_TASK", description: cmd }
+            : (parsed.type ? parsed : { type: "RAW_TASK", description: JSON.stringify(parsed) });
+        } catch {
+          actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
+        }
 
-      const validation = typeof validerEtSecuriserMission === 'function'
-        ? validerEtSecuriserMission(actionExtraite.description || matchMissionAuto[1])
-        : { action: actionExtraite };
+        const validation = typeof validerEtSecuriserMission === 'function'
+          ? validerEtSecuriserMission(actionExtraite.description || matchMissionAuto[1])
+          : { action: actionExtraite };
 
-      missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-      if (FIREBASE_DB_URL) {
-        axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-      }
+        missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
+        if (FIREBASE_DB_URL) {
+          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+        }
 
-      if (DOC_CHAT_ID) {
-        const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
-        await envoyerTelegram(DOC_CHAT_ID, `⚙️ Ordre transmis au worker PC :\n` + rendu);
+        if (DOC_CHAT_ID) {
+          const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
+          await envoyerTelegram(DOC_CHAT_ID, `⚙️ Ordre validé et transmis à Ben :\n` + rendu);
+        }
+      } catch (errMission) {
+        console.error("[ERREUR MISSION]", errMission.message);
       }
-    } catch (errMission) {
-      console.error("[ERREUR MISSION]", errMission.message);
     }
   }
 
@@ -1343,7 +1370,7 @@ app.post('/telegram', (req, res) => {
       if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
       
       const libelle = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-      return await envoyerTelegram(chatId, "⚙️ *Ordre transmis au Worker :*\n`" + libelle + "`");
+      return await envoyerTelegram(chatId, "⚙️ *Ordre transmis à Ben :*\n`" + libelle + "`");
     }
 
     if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet')) {
@@ -1353,7 +1380,7 @@ app.post('/telegram', (req, res) => {
         axios.put(`${FIREBASE_DB_URL}/nyx/projet.json`, cacheEtatProfond.projet).catch(()=>{});
         axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
       }
-      return await envoyerTelegram(chatId, "🛑 *Chantier stoppé.* Le worker est libre.");
+      return await envoyerTelegram(chatId, "🛑 *Chantier stoppé.* Ben est libre.");
     }
 
     if (texteMessageClavier === '/apprendre' || texteMessageClavier === '!apprendre') {
@@ -1564,7 +1591,7 @@ app.post('/api/voix', async (req, res) => {
 });
 
 // ==========================================
-// 17. API DU WORKER LOCAL (EXÉCUTION SANS BRIDAGE)
+// 17. API DU WORKER LOCAL BEN (EXÉCUTION SANS BRIDAGE)
 // ==========================================
 app.get('/api/mission', async (req, res) => {
   if (missionEnAttente && missionEnAttente.statut === "attente") {
@@ -1592,19 +1619,19 @@ app.post('/api/rapport', async (req, res) => {
   const destChatId = DOC_CHAT_ID || (missionEnAttente && missionEnAttente.chatId);
   if (!destChatId) return res.json({ succes: true });
 
-  const msg = `🛠️ *[LIVRABLE LOCAL REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
+  const msg = `🛠️ *[LIVRABLE BEN REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
   await envoyerTelegram(destChatId, msg);
 
   const contenuTronque = contenu.length > 2500
     ? contenu.slice(0, 2500) + "\n[...tronqué...]"
     : contenu;
 
-  const dateEtHeure = obtenirHorodatageParis();
+  const dateEtHeure =  obtenirHorodatageParis();
   const carnet = cacheEtatProfond.long_terme || {};
   const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
   const sys = `Tu es Nyx, 22 ans. Sois ultra-concise (3 phrases max). Pas de fioritures.\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
   
-  const promptAuditRapport = `Ton worker local sur le PC rend ce livrable :
+  const promptAuditRapport = `Ton worker local Ben sur le PC rend ce livrable :
 TITRE : "${titre || 'Rapport'}"
 CONTENU :
 ${contenuTronque}
