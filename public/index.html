@@ -3,52 +3,100 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Nyx Neural Hub — Meta Link</title>
+  <title>NYX // TACTICAL HUB</title>
   <style>
     :root {
-      --bg: #090a0f;
-      --card: #12151f;
-      --accent: #00e5ff;
-      --accent-dim: rgba(0, 229, 255, 0.2);
-      --doc-bubble: #1f2438;
-      --nyx-bubble: #142834;
-      --text: #e1e7ec;
+      --bg-dark: #05070a;
+      --cyan: #00f3ff;
+      --cyan-glow: rgba(0, 243, 255, 0.35);
+      --pink: #ff0055;
+      --pink-glow: rgba(255, 0, 85, 0.4);
+      --glass: rgba(10, 14, 22, 0.78);
+      --glass-border: rgba(0, 243, 255, 0.3);
+      --text: #e2e8f0;
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
     body {
-      background: var(--bg);
+      background-color: var(--bg-dark);
+      background-image: 
+        linear-gradient(180deg, rgba(5, 7, 10, 0.72) 0%, rgba(5, 7, 10, 0.88) 100%),
+        url('/app/nyx_bg.jpg');
+      background-size: cover;
+      background-position: center top;
+      background-repeat: no-repeat;
+      background-attachment: fixed;
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: "Segoe UI", -apple-system, Roboto, sans-serif;
       height: 100dvh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      position: relative;
     }
 
-    /* HEADER */
+    /* EFFET SCANLINES CRT CYBERPUNK */
+    body::before {
+      content: " ";
+      position: absolute;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+      background-size: 100% 4px;
+      z-index: 10;
+      pointer-events: none;
+      opacity: 0.6;
+    }
+
+    /* HEADER HUD */
     header {
-      background: var(--card);
-      border-bottom: 1px solid var(--accent-dim);
+      background: var(--glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--glass-border);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
       padding: 10px 14px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       flex-shrink: 0;
+      z-index: 20;
     }
-    .status-block {
+
+    .hud-title {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      font-family: monospace;
       font-size: 13px;
-      font-weight: 600;
-      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      color: var(--cyan);
+      text-shadow: 0 0 8px var(--cyan-glow);
     }
-    .status-dot {
-      width: 8px;
-      height: 8px;
+
+    .radar-pulse {
+      width: 9px;
+      height: 9px;
+      background: var(--cyan);
       border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 8px var(--accent);
+      box-shadow: 0 0 10px var(--cyan);
+      animation: radarBlink 1.8s infinite ease-in-out;
+    }
+
+    @keyframes radarBlink {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.3; transform: scale(0.8); }
+    }
+
+    .link-tag {
+      font-family: monospace;
+      font-size: 10px;
+      padding: 3px 7px;
+      background: rgba(0, 243, 255, 0.08);
+      border: 1px solid rgba(0, 243, 255, 0.3);
+      color: #94a3b8;
+      clip-path: polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%);
     }
 
     /* ZONE DE CHAT */
@@ -59,87 +107,119 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
+      z-index: 20;
     }
+
     .msg {
       max-width: 86%;
       padding: 10px 14px;
-      border-radius: 12px;
-      font-size: 14px;
+      font-size: 13.5px;
       line-height: 1.45;
       word-break: break-word;
-    }
-    .msg.doc {
-      align-self: flex-end;
-      background: var(--doc-bubble);
-      color: #fff;
-      border-bottom-right-radius: 2px;
-    }
-    .msg.nyx {
-      align-self: flex-start;
-      background: var(--nyx-bubble);
-      border: 1px solid var(--accent-dim);
-      border-bottom-left-radius: 2px;
-    }
-    .msg-author {
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--accent);
-      margin-bottom: 3px;
-      opacity: 0.8;
-    }
-    .msg img {
-      max-width: 100%;
-      border-radius: 8px;
-      margin-top: 8px;
-      display: block;
-      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+      position: relative;
     }
 
-    /* VIGNETTE D'ATTENTE PHOTO */
+    /* BULLES DOC */
+    .msg.doc {
+      align-self: flex-end;
+      background: rgba(20, 28, 44, 0.85);
+      border-right: 2px solid #38bdf8;
+      color: #f8fafc;
+      clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+    }
+
+    /* BULLES NYX */
+    .msg.nyx {
+      align-self: flex-start;
+      background: rgba(10, 24, 32, 0.85);
+      border-left: 2px solid var(--cyan);
+      box-shadow: inset 0 0 12px rgba(0, 243, 255, 0.08);
+      clip-path: polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+    }
+
+    .msg-author {
+      font-family: monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--cyan);
+      letter-spacing: 1px;
+      margin-bottom: 4px;
+      text-shadow: 0 0 6px var(--cyan-glow);
+    }
+
+    .msg img {
+      max-width: 100%;
+      border-radius: 4px;
+      margin-top: 8px;
+      display: block;
+      border: 1px solid var(--cyan-glow);
+    }
+
+    /* VIGNETTE PHOTO EN ATTENTE */
     #preview-container {
       display: none;
-      background: var(--card);
+      background: var(--glass);
+      backdrop-filter: blur(12px);
       padding: 8px 14px;
-      border-top: 1px solid var(--accent-dim);
+      border-top: 1px solid var(--glass-border);
       align-items: center;
-      gap: 10px;
+      gap: 12px;
+      z-index: 20;
     }
+
     #preview-thumb {
       width: 44px;
       height: 44px;
       object-fit: cover;
-      border-radius: 6px;
-      border: 1px solid var(--accent);
+      border-radius: 4px;
+      border: 1px solid var(--cyan);
+      box-shadow: 0 0 8px var(--cyan-glow);
     }
+
     .btn-clear-img {
-      color: #ff5555;
-      font-size: 12px;
+      color: var(--pink);
+      font-family: monospace;
+      font-size: 11px;
       cursor: pointer;
       background: none;
       border: none;
+      letter-spacing: 0.5px;
     }
 
-    /* BARRE D'ENTRÉE BASSE */
+    /* BARRE DE COMMANDE */
     footer {
-      background: var(--card);
-      border-top: 1px solid var(--accent-dim);
+      background: var(--glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--glass-border);
       padding: 8px 10px;
       display: flex;
       align-items: center;
       gap: 8px;
       flex-shrink: 0;
+      z-index: 20;
     }
+
     input[type="text"] {
       flex: 1;
-      background: #090b10;
-      border: 1px solid #222a3b;
+      background: rgba(4, 7, 12, 0.85);
+      border: 1px solid rgba(0, 243, 255, 0.25);
       color: #fff;
       padding: 10px 14px;
-      border-radius: 20px;
-      font-size: 14px;
+      border-radius: 4px;
+      font-size: 13.5px;
       outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
-    input[type="text"]:focus { border-color: var(--accent); }
+
+    input[type="text"]:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+
     button {
       background: none;
       border: none;
@@ -149,64 +229,71 @@
       align-items: center;
       justify-content: center;
     }
+
     .btn-action {
-      font-size: 20px;
+      font-size: 19px;
       padding: 6px;
-      color: #9aa8b6;
-      transition: color 0.15s;
+      color: #94a3b8;
+      transition: color 0.15s, transform 0.1s;
     }
-    .btn-action.active { color: var(--accent); }
+    .btn-action:active { transform: scale(0.92); }
+
     .btn-mic {
       width: 42px;
       height: 42px;
-      border-radius: 50%;
-      background: var(--accent);
-      color: #000;
-      font-size: 19px;
+      background: rgba(0, 243, 255, 0.12);
+      border: 1px solid var(--cyan);
+      color: var(--cyan);
+      font-size: 18px;
+      clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+      transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
       flex-shrink: 0;
-      transition: transform 0.1s, background 0.2s;
     }
+
     .btn-mic.recording {
-      background: #ff0055;
+      background: var(--pink);
+      border-color: #fff;
       color: #fff;
-      animation: pulse 1s infinite alternate;
+      box-shadow: 0 0 16px var(--pink-glow);
+      animation: cyberPulse 0.9s infinite alternate;
     }
-    @keyframes pulse {
-      from { transform: scale(1); box-shadow: 0 0 4px #ff0055; }
-      to { transform: scale(1.08); box-shadow: 0 0 14px #ff0055; }
+
+    @keyframes cyberPulse {
+      from { transform: scale(1); box-shadow: 0 0 8px var(--pink); }
+      to { transform: scale(1.06); box-shadow: 0 0 20px var(--pink); }
     }
   </style>
 </head>
 <body>
 
   <header>
-    <div class="status-block">
-      <div class="status-dot"></div>
-      <span>NYX // RAY-BAN META</span>
+    <div class="hud-title">
+      <div class="radar-pulse"></div>
+      <span>NYX // NET.CORE</span>
     </div>
-    <span style="font-size: 11px; opacity: 0.5;">Liaison Bluetooth audio</span>
+    <div class="link-tag">META GEN3 LINK</div>
   </header>
 
   <div id="chat-box">
     <div class="msg nyx">
-      <div class="msg-author">NYX</div>
-      Canal ouvert, Doc. Prête pour le direct.
+      <div class="msg-author">NYX // CORE</div>
+      Système connecté, Doc. Atelier opérationnel, je reçois tes commandes.
     </div>
   </div>
 
   <div id="preview-container">
     <img id="preview-thumb" src="" alt="Aperçu">
-    <span style="font-size: 11px; flex: 1;">Photo prête pour analyse</span>
-    <button class="btn-clear-img" id="btn-cancel-photo">✕ Retirer</button>
+    <span style="font-family: monospace; font-size: 11px; flex: 1; color: var(--cyan);">FRAME // PRÊTE</span>
+    <button class="btn-clear-img" id="btn-cancel-photo">✕ PURGER</button>
   </div>
 
   <footer>
-    <label class="btn-action" title="Joindre une photo des lunettes">
+    <label class="btn-action" title="Joindre une photo Meta">
       📷
       <input type="file" id="file-input" accept="image/*" style="display: none;">
     </label>
-    <input type="text" id="user-input" placeholder="Écris ou parle dans tes lunettes..." autocomplete="off">
-    <button class="btn-action" id="btn-text-send" style="color: var(--accent);">➔</button>
+    <input type="text" id="user-input" placeholder="Directive atelier ou vocal..." autocomplete="off">
+    <button class="btn-action" id="btn-text-send" style="color: var(--cyan);">➔</button>
     <button class="btn-mic" id="btn-mic" title="Micro">🎙️</button>
   </footer>
 
@@ -223,7 +310,7 @@
     let currentPhotoB64 = null;
     let audioOutput = new Audio();
 
-    // 1. SÉLECTION RAPIDE DE PHOTO (RAY-BAN META OU GALERIE)
+    // 1. SÉLECTION PHOTO (RAY-BAN META OU GALERIE)
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -243,7 +330,7 @@
       previewContainer.style.display = 'none';
     });
 
-    // 2. CHAT VISUEL
+    // 2. RENDU DU CHAT HUD
     function appendChatBubble(role, text, imageB64 = null) {
       const bubble = document.createElement('div');
       bubble.className = `msg ${role.toLowerCase()}`;
@@ -257,15 +344,14 @@
       chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // 3. ENVOI VERS LE SERVEUR NYX & RETOUR AUDIO DANS LES BRANCHES
+    // 3. ENVOI FLUX VERS RENDER & LECTURE AUDIO DANS LES LUNETTES
     async function transmit(text) {
-      const finalMsg = text && text.trim() ? text.trim() : (currentPhotoB64 ? "Regarde ça et dis-moi ce que tu en penses." : "");
+      const finalMsg = text && text.trim() ? text.trim() : (currentPhotoB64 ? "Analyse cette frame." : "");
       if (!finalMsg && !currentPhotoB64) return;
 
       const photoToSend = currentPhotoB64;
       appendChatBubble('Doc', finalMsg, photoToSend);
 
-      // Réinitialisation du champ et de la vignette
       userInput.value = '';
       currentPhotoB64 = null;
       fileInput.value = '';
@@ -283,19 +369,18 @@
 
         const data = await res.json();
 
-        // Affichage écrit complet dans le chat
         if (data.reponse) {
           appendChatBubble('Nyx', data.reponse);
         }
 
-        // Lecture dans les branches des lunettes via Google Cloud TTS
+        // Restitution vocale Google Neural2 dans les haut-parleurs Meta
         if (data.audio) {
           audioOutput.pause();
           audioOutput = new Audio(`data:audio/mp3;base64,${data.audio}`);
-          audioOutput.play().catch(e => console.warn("Lecture audio bloquée :", e));
+          audioOutput.play().catch(e => console.warn("Audio bloqué :", e));
         }
       } catch (err) {
-        appendChatBubble('Nyx', `Liaison coupée : ${err.message}`);
+        appendChatBubble('Nyx', `LIAISON PERDUE : ${err.message}`);
       }
     }
 
@@ -304,7 +389,7 @@
       if (e.key === 'Enter') transmit(userInput.value);
     });
 
-    // 4. MICRO BLUETOOTH DES LUNETTES (WEB SPEECH API)
+    // 4. CAPTURE VOCALE MICRO BLUETOOTH
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognizer = new SpeechRecognition();
