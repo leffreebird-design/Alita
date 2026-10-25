@@ -1642,11 +1642,10 @@ CONTENU :
 ${contenuTronque}
 
 CONSIGNE STRICTE D'AUDIT :
-- Évalue concrètement le résultat rendu sur le PC.
-- Si le travail est valide et complet : réponds avec le tag [ETAPE_OK].
-- Si une erreur s'est produite ou si le travail est incomplet : réponds avec [ETAPE_KO] et formule un ordre correctif clair entre [CORRECTION: {"type":"RAW_TASK","description":"..."}].
-- RÈGLE TECHNIQUE IMPÉRATIVE : Ben est sous Windows dans H:\\Nyx_Ops. N'invente AUCUNE contrainte de VRAM/shaders/3D. Ne génère JAMAIS de redirection shell avec '>' (pas de echo ... > fichier.md). Formule un RAW_TASK direct décrivant ce que Ben doit rédiger ou assembler.`;
-
+- Évalue concrètement le résultat.
+- Si le travail est valide et complet : conclus UNIQUEMENT par [ETAPE_OK].
+- Si une erreur s'est produite : conclus par [ETAPE_KO] et formule un ordre machine unitaire sans listes entre [CORRECTION: {"type":"RAW_TASK","description":"instruction simple"}].
+- INTERDICTIONS : n'invente AUCUN script inexistant (pas de generate_assets.py), aucune commande humaine ("tape-les"), aucun shader. Demande uniquement la création de fichiers ou du code Python natif.`;
   let analyseNyx = "";
   try {
     if (MISTRAL_API_KEY) {
