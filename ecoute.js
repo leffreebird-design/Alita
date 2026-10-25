@@ -1063,8 +1063,9 @@ function estOrdreExpliciteDoc(texteDoc) {
   }
 
   // Doit comporter au moins un verbe d'action impératif clair
+  // Accepte aussi relance, génère, fais, envoie, rédige
   const verbesAction = [
-    /\b(lance|execute|exécute|crée|cree|écris|ecris|supprime|installe|télécharge|telecharge|applique|injecte|modifie|ajoute)\b/i,
+    /\b(lance|relance|execute|exécute|crée|cree|génère|genere|fais|envoie|envoi|transmets|écris|ecris|rédige|redige|supprime|installe|applique)\b/i,
     /\b(start|run|kill|build|deploy|rm|cp|mv|git|npm|pip)\b/i
   ];
 
