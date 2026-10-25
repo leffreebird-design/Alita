@@ -417,12 +417,18 @@ async function consoliderMemoire() {
   if (consolidationEnCours || journalBrut.length < 3) return;
   consolidationEnCours = true;
 
-  const lotATraiter = [...journalBrut];
+  // 1. GARDE-FOU ANTI-EXPLOSION : on ne prend JAMAIS plus des 15 derniers messages
+  // et on tronque chaque message à 400 caractères pour ne pas renvoyer des scripts entiers
+  if (journalBrut.length > 25) {
+    journalBrut = journalBrut.slice(-20);
+  }
+
+  const lotATraiter = journalBrut.slice(-15);
   const dernierIdTraite = lotATraiter[lotATraiter.length - 1].id;
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} : ${m.texte}`)
+      .map(m => `[${m.date}] ${m.role} : ${(m.texte || '').slice(0, 400)}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental. Tu mets à jour ton carnet de bord.
@@ -444,10 +450,10 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 
     let reponseJson = "";
     try {
-      reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 1000);
+      reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 800);
     } catch (eM) {
       try {
-        reponseJson = await appelerGroq("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 1000);
+        reponseJson = await appelerGroq("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 800);
       } catch (eG) {
         reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.4);
       }
@@ -472,30 +478,24 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
     }
 
     if (nouveauCarnet && Object.keys(nouveauCarnet).length > 0) {
-      const longueurAncienne = JSON.stringify(cacheEtatProfond.long_terme).length;
-      const longueurNouvelle = JSON.stringify(nouveauCarnet).length;
-
-      if (longueurNouvelle < longueurAncienne * 0.55 && longueurAncienne > 200) {
-        console.warn("[GARDE-FOU MÉMOIRE] Snapshot annulé (trop destructeur).");
-        return;
-      }
-
       for (const k of ["doc", "nyx", "reussites", "chantiers"]) {
         if (nouveauCarnet[k]) cacheEtatProfond.long_terme[k] = nouveauCarnet[k];
       }
 
-      const indexPivot = journalBrut.findIndex(m => m.id === dernierIdTraite);
-      journalBrut = (indexPivot !== -1) ? journalBrut.slice(indexPivot + 1) : [];
+      // Purge du journal une fois consolidé
+      journalBrut = [];
 
       if (FIREBASE_DB_URL) {
-        await axios.put(`${FIREBASE_DB_URL}/nyx/long_terme.json`, cacheEtatProfond.long_terme);
-        await axios.put(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, journalBrut);
+        await axios.put(`${FIREBASE_DB_URL}/nyx/long_terme.json`, cacheEtatProfond.long_terme).catch(() => {});
+        await axios.put(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, journalBrut).catch(() => {});
       }
 
-      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé. En attente : ${journalBrut.length} msgs.`);
+      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé et journal allégé.`);
     }
   } catch (err) {
     console.error("[APPRENTISSAGE ÉCHEC] :", err.message);
+    // Si échec persistant, on taille quand même le journal pour éviter le gavage
+    if (journalBrut.length > 20) journalBrut = journalBrut.slice(-10);
   } finally {
     consolidationEnCours = false;
   }
@@ -728,8 +728,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
 async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
   const modelesSombres = [
     MODEL_DARK_PRIMARY,
-    "llama-3.3-70b",
-    "qwen-2.5-coder-32b"
+    "llama-3.3-70b"
   ].filter(Boolean);
   const modelesUniques = [...new Set(modelesSombres)];
 
