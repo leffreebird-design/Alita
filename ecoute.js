@@ -1277,9 +1277,15 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         try {
           const parsed = JSON.parse(matchMissionAuto[1]);
           const cmd = parsed.commande || parsed.command || parsed.description || parsed.action || parsed.task;
-          actionExtraite = typeof cmd === 'string'
-            ? { type: "RAW_TASK", description: cmd }
-            : (parsed.type ? parsed : { type: "RAW_TASK", description: JSON.stringify(parsed) });
+          // Si Nyx a collé le code en dehors du JSON dans un bloc Markdown
+const blocCodeSuivant = reponseNyx.match(/```(?:python|bash|powershell)?\s*([\s\S]*?)```/i);
+let descriptionComplete = typeof cmd === 'string' ? cmd : JSON.stringify(parsed);
+
+if (blocCodeSuivant && (descriptionComplete.includes('suivant') || descriptionComplete.trim().endsWith(':'))) {
+  descriptionComplete += "\n\n" + blocCodeSuivant[1].trim();
+}
+
+actionExtraite = { type: "RAW_TASK", description: descriptionComplete };
         } catch {
           actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
         }
