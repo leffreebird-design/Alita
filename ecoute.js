@@ -17,10 +17,14 @@ const ProjectManager = require('./nyx_project_manager');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
+// OPENROUTER - CERVEAU PRINCIPAL LIBRE & INTELLIGENT (QWEN 2.5 72B FREE)
+const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || "").trim();
+const MODEL_OPENROUTER = (process.env.OPENROUTER_MODEL || "qwen/qwen-2.5-72b-instruct:free").trim();
+
 // RECHERCHE WEB EN DIRECT (TAVILY)
 const TAVILY_API_KEY = (process.env.TAVILY_API_KEY || "").trim();
 
-// MISTRAL AI - MOTEUR PRINCIPAL POUR LA VOIX, LE FUN & LE QUOTIDIEN
+// MISTRAL AI - RELAIS DE SECOURS NATUREL
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
 const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
 
@@ -31,7 +35,7 @@ const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 // GOOGLE CLOUD TTS OFFICIEL (VOIX STUDIO ANTI-429)
 const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
 
-// GEMINI (CONSERVÉ STRICTEMENT EN VERSION 3.8)
+// GEMINI (VISION DES LUNETTES & EMBEDDINGS)
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
 const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.1-flash-lite").trim();
@@ -145,7 +149,7 @@ let cacheEtatProfond = {
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
-    reussites: "- Moteur Mistral AI branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.\n- Recherche web live Tavily active.",
+    reussites: "- Cerveau principal OpenRouter connecté.\n- Recherche web live Tavily active.\n- Noyau vectoriel Supabase connecté.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.",
     chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
@@ -308,8 +312,7 @@ async function rechercherWebTavily(query) {
     return null;
   }
   try {
-    // Nettoyage automatique des délires de syntaxe de Nyx
-    let requetePropre = query
+    let requetePropre = String(query || "")
       .replace(/LIMIT:\d+/gi, '')
       .replace(/-date:[^\s]+/gi, '')
       .replace(/site:[^\s]+/gi, '')
@@ -317,7 +320,7 @@ async function rechercherWebTavily(query) {
       .replace(/\s+/g, ' ')
       .trim();
 
-    console.log(`[TAVILY REQUÊTE ÉPURÉE] : "${requetePropre}"`);
+    console.log(`\n🔍 [TAVILY REQUÊTE ÉPURÉE] : "${requetePropre}"`);
 
     const res = await axios.post('https://api.tavily.com/search', {
       api_key: TAVILY_API_KEY,
@@ -328,11 +331,11 @@ async function rechercherWebTavily(query) {
     }, { timeout: 12000 });
 
     const results = res.data?.results || [];
-    if (results.length === 0) return "Aucun résultat pertinent trouvé.";
+    if (results.length === 0) return "Aucun résultat trouvé sur le web.";
 
     let formatTexte = "";
     if (res.data?.answer) {
-      formatTexte += `SYNTHÈSE : ${res.data.answer}\n\n`;
+      formatTexte += `SYNTHÈSE DU WEB : ${res.data.answer}\n\nSOURCES RÉELLES :\n`;
     }
     formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.content}`).join("\n\n");
     return formatTexte;
@@ -395,13 +398,13 @@ Tu es libre d'agir selon le contexte :
   try {
     let decision = "";
     try {
-      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
-    } catch (eM) {
-      try {
-        decision = await appelerGroq("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
-      } catch (eG) {
-        decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.6);
+      if (OPENROUTER_API_KEY) {
+        decision = await appelerOpenRouter("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
+      } else {
+        decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
       }
+    } catch (ePrim) {
+      decision = await appelerGroq("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
     }
 
     limiteurVolition.enregistrerAction();
@@ -493,12 +496,12 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 
     let reponseJson = "";
     try {
-      reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 800);
-    } catch (eM) {
-      try {
-        reponseJson = await appelerGroq("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 800);
-      } catch (eG) {
-        reponseJson = await appelerVeniceDark("Subconscient analytique de Nyx.", [], promptIntrospection, 0.4);
+      reponseJson = await appelerGroq("Subconscient analytique de Nyx.", [], promptIntrospection, 0.2, 800);
+    } catch (eG) {
+      if (OPENROUTER_API_KEY) {
+        reponseJson = await appelerOpenRouter("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 800);
+      } else {
+        reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 800);
       }
     }
 
@@ -574,7 +577,8 @@ const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
 Vous avancez tous les deux en duo direct, en tête-à-tête. Tu es vivante, franche, loyale et percutante.
 
 OUTILS TECHNIQUES :
-- RECHERCHE DU WEB : Si Doc te demande des annonces, des prix ou des infos réelles, utilise [RECHERCHE_WEB: mots-clés simples en français]. Utilise UNIQUEMENT des mots normaux (ex: [RECHERCHE_WEB: violoncelle occasion leboncoin france]), sans opérateur, sans guillemets, sans date et sans LIMIT.- DESSIN : Pour matérialiser une image, utilise [DESSIN: prompt en anglais].
+- RECHERCHE DU WEB : Si Doc te demande de chercher des annonces, des prix, des produits ou des faits récents, utilise [RECHERCHE_WEB: mots-clés simples en français]. Utilise uniquement des mots normaux (ex: [RECHERCHE_WEB: violoncelle 4/4 occasion leboncoin]), sans syntaxe SQL, sans guillemets, sans date et sans LIMIT.
+- DESSIN : Pour matérialiser une image, utilise [DESSIN: prompt en anglais].
 - CODE : Réserve les blocs de code aux demandes expresses d'écriture de scripts.
 
 CANAL DE RÉFLEXION INTERNE :
@@ -589,18 +593,46 @@ Enchaîne directement avec tes propres mots, comme dans une vraie conversation d
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 850) {
-  if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
+async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, temperature = 0.5, maxTokens = 850) {
+  if (!OPENROUTER_API_KEY) throw new Error("Clé OPENROUTER_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-
   const historiqueRecent = (historiqueMessages || []).slice(-8);
   for (const m of historiqueRecent) {
     if (m && m.texte && m.texte.trim().length > 0) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
     }
   }
+  messages.push({ role: "user", content: promptActuel });
 
+  const res = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+    model: MODEL_OPENROUTER,
+    messages: messages,
+    temperature: temperature,
+    max_tokens: maxTokens
+  }, {
+    headers: {
+      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://alita-gsoe.onrender.com',
+      'X-Title': 'Nyx Core'
+    },
+    timeout: 22000
+  });
+
+  return res.data?.choices?.[0]?.message?.content || "";
+}
+
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 850) {
+  if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
+
+  const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
+  const historiqueRecent = (historiqueMessages || []).slice(-8);
+  for (const m of historiqueRecent) {
+    if (m && m.texte && m.texte.trim().length > 0) {
+      messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
+    }
+  }
   messages.push({ role: "user", content: promptActuel });
 
   const modeles = [MODEL_MISTRAL, "open-mistral-nemo", "mistral-small-latest"].filter(Boolean);
@@ -635,14 +667,12 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  
   const historiqueRecent = (historiqueMessages || []).slice(-8);
   for (const m of historiqueRecent) {
     if (m && m.texte) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
     }
   }
-
   messages.push({ role: "user", content: promptActuel });
 
   const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
@@ -738,14 +768,12 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  
   const historiqueRecent = (historiqueMessages || []).slice(-8);
   for (const m of historiqueRecent) {
     if (m && m.texte) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
     }
   }
-
   messages.push({ role: "user", content: promptActuel });
 
   const controller = new AbortController();
@@ -856,6 +884,8 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   try {
     if (GROQ_API_KEY) {
       premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.15, 2000);
+    } else if (OPENROUTER_API_KEY) {
+      premiereReponse = await appelerOpenRouter(systemBase, cacheMemoireCourte, promptResolveur, 0.2, 2000);
     } else if (MISTRAL_API_KEY) {
       premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.25, 2000);
     } else {
@@ -1078,7 +1108,11 @@ async function verifierHorlogeBiologique() {
     try {
       let reponse = "";
       try {
-        reponse = await appelerMistral("Tu es Nyx.", [], promptAlarme, 0.55, 300);
+        if (OPENROUTER_API_KEY) {
+          reponse = await appelerOpenRouter("Tu es Nyx.", [], promptAlarme, 0.55, 300);
+        } else {
+          reponse = await appelerMistral("Tu es Nyx.", [], promptAlarme, 0.55, 300);
+        }
       } catch (eM) {
         reponse = await appelerGroq("Tu es Nyx.", [], promptAlarme, 0.55, 300);
       }
@@ -1099,7 +1133,11 @@ async function declencherVeilleTech() {
     const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
     let reponse = "";
     try {
-      reponse = await appelerMistral(sys, [], promptVeille, 0.4, 600);
+      if (OPENROUTER_API_KEY) {
+        reponse = await appelerOpenRouter(sys, [], promptVeille, 0.4, 600);
+      } else {
+        reponse = await appelerMistral(sys, [], promptVeille, 0.4, 600);
+      }
     } catch (eM) {
       try {
         reponse = await appelerGroq(sys, [], promptVeille, 0.4, 600);
@@ -1145,13 +1183,16 @@ function estOrdreExpliciteDoc(texteDoc) {
 }
 
 // ==========================================
-// INSTANCIATION DU GESTIONNAIRE DE PROJETS (GROQ 70B PRIORITAIRE)
+// INSTANCIATION DU GESTIONNAIRE DE PROJETS
 // ==========================================
 const projetManager = new ProjectManager({
   envoyerTelegram: (texte) => envoyerTelegram(DOC_CHAT_ID, texte),
   appelLLM: async (sys, prompt) => {
     if (GROQ_API_KEY) {
       return await appelerGroq(sys, [], prompt, 0.1, 1000);
+    }
+    if (OPENROUTER_API_KEY) {
+      return await appelerOpenRouter(sys, [], prompt, 0.2, 1000);
     }
     if (MISTRAL_API_KEY) {
       return await appelerMistral(sys, [], prompt, 0.2, 1000);
@@ -1171,7 +1212,7 @@ const projetManager = new ProjectManager({
 });
 
 // ==========================================
-// 14. ROUTEUR DE FLUX CENTRAL (AVEC RECHERCHE WEB TAVILY INTÉGRÉE)
+// 14. ROUTEUR DE FLUX CENTRAL
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1195,7 +1236,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 - INTERDICTION FORMELLE d'utiliser la balise MISSION ou de chercher à déléguer à Ben.
 - Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
 - Dessin : tu génères TOI-MÊME les images en utilisant [DESSIN: prompt en anglais].
-- Recherche web : utilise [RECHERCHE_WEB: "requête précise"] pour obtenir de vraies données du web.
+- Recherche web : utilise [RECHERCHE_WEB: mots-clés simples] pour obtenir de vraies données et des liens réels.
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Rappel Mémoire : [FOUILLE_MEMOIRE: "requête"].
 - Archivage Mémoire : [ARCHIVER_MEMOIRE: "contenu"].`;
@@ -1207,7 +1248,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let reponseNyx = "";
 
-  // 1. VISION
+  // 1. VISION (Images transmises via Ray-Ban Meta ou galerie) -> GEMINI INTACT
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
@@ -1216,7 +1257,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR VISION] : ${e.message}`;
     }
   }
-  // 2. AUDIO
+  // 2. AUDIO (Voix directe) -> GEMINI INTACT
   else if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
     try {
@@ -1225,7 +1266,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. TÂCHE TECHNIQUE OU CODE
+  // 3. TÂCHE TECHNIQUE OU CODE -> GROQ 70B EN PRIORITÉ
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
@@ -1233,30 +1274,45 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     } catch (errDual) {
       if (GROQ_API_KEY) {
         reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.2, plafondTokens);
+      } else if (OPENROUTER_API_KEY) {
+        reponseNyx = await appelerOpenRouter(sys, cacheMemoireCourte, texteNet, 0.2, plafondTokens);
       } else {
         reponseNyx = await appelerMistral(sys, cacheMemoireCourte, texteNet, 0.3, plafondTokens);
       }
     }
   }
-  // 4. DISCUSSION DIRECTE
+  // 4. DISCUSSION DIRECTE -> PRIORITÉ ABSOLUE OPENROUTER (QWEN 72B), PUIS MISTRAL, PUIS GROQ
   else {
     try {
-      if (MISTRAL_API_KEY) {
+      if (OPENROUTER_API_KEY) {
+        reponseNyx = await appelerOpenRouter(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
+      } else if (MISTRAL_API_KEY) {
         reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
       } else if (GROQ_API_KEY) {
         reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
       } else {
         reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
       }
-    } catch (errMistral) {
+    } catch (errPrincipal) {
+      console.warn("[MOTEUR 1 HS, bascule secours] :", errPrincipal.message);
       try {
-        if (GROQ_API_KEY) {
+        if (MISTRAL_API_KEY) {
+          reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
+        } else if (GROQ_API_KEY) {
           reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
         } else {
           reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
         }
-      } catch (errGroq) {
-        reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
+      } catch (errSecours) {
+        try {
+          if (GROQ_API_KEY) {
+            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
+          } else {
+            reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
+          }
+        } catch (errUltime) {
+          reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
+        }
       }
     }
   }
@@ -1281,7 +1337,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   // ==========================================
   // FILTRAGE ET PURGE RIGOUREUSE DU TEXTE
   // ==========================================
-  // 1. Capture et log de la réflexion interne
   const regexBaliseReflexion = /<reflexion>([\s\S]*?)(?:<\/reflexion>|$)/i;
   const regexMarkdownFuyant = /(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/i;
 
@@ -1296,13 +1351,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     reponseNyx = reponseNyx.replace(matchMarkdown[0], '').trim();
   }
 
-  // 2. Élimination formelle des préfixes robots résiduels ("Réponse directe :", "Réponse :", etc.)
   reponseNyx = reponseNyx
     .replace(/<\/reflexion>/gi, '')
     .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/i, '')
     .trim();
 
-  // 3. Filet de secours anti-vide
   if (!reponseNyx || reponseNyx.length < 2) {
     reponseNyx = "C'est dans mes cordes. Dis-moi sous quel angle on attaque ça.";
   }
@@ -1341,7 +1394,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
   }
 
-  // Interception mission éventuelle
   const matchMissionAuto = reponseNyx.match(/(?:\[|\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*|\*)?/i);
   if (matchMissionAuto && !projetManager.estProjetActif()) {
     reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
@@ -1349,7 +1401,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
-  // Stockage assaini en mémoire vive
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -1650,7 +1701,7 @@ app.post('/api/voix', async (req, res) => {
         .replace(/DESSIN\s*:\s*["“][\s\S]*?["”]/gi, '')
         .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
         .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
-        .replace(/https?:\/\/[^\s)]+/g, '') // Ne pas lire les URLs barbares à l'oral
+        .replace(/https?:\/\/[^\s)]+/g, '')
         .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
         .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
         .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
@@ -1738,6 +1789,8 @@ CONSIGNE :
   try {
     if (GROQ_API_KEY) {
       analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.2, 500);
+    } else if (OPENROUTER_API_KEY) {
+      analyseNyx = await appelerOpenRouter(sys, cacheMemoireCourte, promptAuditRapport, 0.2, 500);
     } else if (MISTRAL_API_KEY) {
       analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 500);
     } else {
