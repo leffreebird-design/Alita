@@ -1161,7 +1161,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let reponseNyx = "";
 
-  // 1. VISION (Images transmises) -> GEMINI 3.8 INTACT
+  // 1. VISION
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
@@ -1170,6 +1170,138 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR VISION] : ${e.message}`;
     }
   }
+  // 2. AUDIO
+  else if (estAudio) {
+    const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
+    try {
+      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet, mediaData);
+    } catch (errGoogle) {
+      reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
+    }
+  } 
+  // 3. CODE OU TÂCHE TECHNIQUE
+  else if (estComplexe) {
+    const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
+    try {
+      reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
+    } catch (errDual) {
+      if (GROQ_API_KEY) {
+        reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.2, plafondTokens);
+      } else {
+        reponseNyx = await appelerMistral(sys, cacheMemoireCourte, texteNet, 0.3, plafondTokens);
+      }
+    }
+  }
+  // 4. DISCUSSION DIRECTE
+  else {
+    try {
+      if (MISTRAL_API_KEY) {
+        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
+      } else if (GROQ_API_KEY) {
+        reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
+      } else {
+        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
+      }
+    } catch (errMistral) {
+      try {
+        reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
+      } catch (errGroq) {
+        reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
+      }
+    }
+  }
+
+  // ==========================================
+  // PURGE ET NETTOYAGE AU NIVEAU DU CODE
+  // ==========================================
+  // 1. Log et retrait du bloc de réflexion
+  const matchReflexion = reponseNyx.match(/<reflexion>([\s\S]*?)(?:<\/reflexion>|$)/i);
+  if (matchReflexion) {
+    console.log(`\n🧠 [ANALYSE INTENTION NYX] :\n${matchReflexion[1].trim()}\n----------------------------`);
+    reponseNyx = reponseNyx.replace(matchReflexion[0], '').trim();
+  }
+
+  // 2. Coupe nette de tous les préfixes robots parasites ("Réponse directe :", "Réponse :", etc.)
+  reponseNyx = reponseNyx
+    .replace(/<\/reflexion>/gi, '')
+    .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/i, '')
+    .trim();
+
+  // 3. Filet de secours anti-vide
+  if (!reponseNyx || reponseNyx.length < 2) {
+    reponseNyx = "C'est dans mes cordes. Dis-moi sous quel angle on attaque ça.";
+  }
+
+  // Interception mémoire
+  const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
+  if (matchFouille && !contexteSouvenirs) {
+    const requeteRecherche = matchFouille[1].trim();
+    const resultats = await fouillerMemoireVectorielle(requeteRecherche, 'factuel', 3);
+    if (resultats && resultats.length > 0) {
+      const extraits = resultats.map((r, i) => `Fragment ${i + 1} (${(r.similarity * 100).toFixed(0)}%) : ${r.content}`).join("\n\n");
+      return await traiterFlux(texteBrut, mediaData, texteLegende, extraits);
+    }
+  }
+
+  const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*)/i);
+  if (matchArchivage) {
+    const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
+    stockerSouvenirVectoriel(texteAStocker, { source: "flux_direct" }).catch(()=>{});
+    reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
+  }
+
+  const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
+  if (matchConfigReveil) {
+    try {
+      const newConfig = JSON.parse(matchConfigReveil[1]);
+      cacheEtatProfond.reveil = { ...cacheEtatProfond.reveil, ...newConfig, etat: "attente" };
+      if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, cacheEtatProfond.reveil).catch(()=>{});
+      reponseNyx = reponseNyx.replace(matchConfigReveil[0], '').trim();
+    } catch(e) {}
+  }
+
+  if (reponseNyx.includes("[STOP_REVEIL]")) {
+    cacheEtatProfond.reveil.etat = "attente";
+    if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "attente" }).catch(()=>{});
+    reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
+  }
+
+  // Interception mission éventuelle
+  const matchMissionAuto = reponseNyx.match(/(?:\[|\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*|\*)?/i);
+  if (matchMissionAuto && !projetManager.estProjetActif()) {
+    reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
+  }
+
+  reponseNyx = reponseNyx.trim();
+
+  // Stockage propre (débarrassé de tout préfixe pour ne pas contaminer la suite)
+  const LIMITE_CARACTERES_MEMOIRE = 2000;
+  const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
+    ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
+    : texteNet;
+
+  const texteNyxSecurise = reponseNyx.length > 2500
+    ? reponseNyx.slice(0, 2500) + "\n[...tronqué...]"
+    : reponseNyx;
+
+  if (mediaData) {
+    const isAudio = mediaData.mime_type.startsWith('audio');
+    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? "[Audio]" : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]") });
+  } else {
+    cacheMemoireCourte.push({ role: "Doc", texte: texteDocSecurise });
+  }
+
+  cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
+  if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
+    cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
+  }
+  if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
+
+  archiverDansJournalBrut("Doc", texteDocSecurise);
+  archiverDansJournalBrut("Nyx", texteNyxSecurise);
+
+  return reponseNyx;
+}
   // 2. AUDIO (Voix directe) -> GEMINI 3.8 INTACT
   else if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
