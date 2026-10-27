@@ -19,19 +19,19 @@ const PORT = process.env.PORT || 3000;
 
 // OPENROUTER - ROUTE N°1 CHAT (DEEPSEEK CHAT GRATUIT)
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || "").trim();
-const MODEL_OPENROUTER_CHAT = (process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat:free").trim();
+const MODEL_OPENROUTER_CHAT = (process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free").trim();
 
 // MISTRAL AI - ROUTE N°2 CHAT
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
 const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
 
-// GEMINI - ROUTE N°3 & 4 CHAT (FREE PUIS PAYANT) + VISION
+// GEMINI - ROUTE N°3 & 4 CHAT (FREE PUIS PAYANT) + VISION DES LUNETTES
 const GEMINI_API_KEY_FREE = (process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.5-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.1-flash-lite").trim();
 
-// GROQ - RÉSERVÉ STRICTEMENT AU CODE & PROJETS TECHNIQUES (LLAMA-3.3-70B GRATUIT)
+// GROQ - RÉSERVÉ STRICTEMENT AU CODE & PROJETS TECHNIQUES
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
 const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 
@@ -150,7 +150,7 @@ let cacheEtatProfond = {
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
-    reussites: "- Cerveau de chat libre (DeepSeek Free -> Mistral -> Gemini).\n- Cerveau de code haute puissance (Groq 70B -> DeepSeek).\n- Recherche web live Tavily active.\n- Noyau vectoriel Supabase connecté.",
+    reussites: "- Cerveau de chat autonome (DeepSeek Free -> Mistral -> Gemini).\n- Cerveau de code haute puissance (Groq 70B -> DeepSeek).\n- Recherche web live Tavily active sans boucle.\n- Noyau vectoriel Supabase connecté.",
     chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
@@ -578,7 +578,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
       'HTTP-Referer': 'https://alita-gsoe.onrender.com',
       'X-Title': 'Nyx Core'
     },
-    timeout: 18000
+    timeout: 22000
   });
 
   return res.data?.choices?.[0]?.message?.content || "";
@@ -602,7 +602,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
     max_tokens: maxTokens
   }, {
     headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: 15000
+    timeout: 25000
   });
 
   return res.data?.choices?.[0]?.message?.content || "";
@@ -626,7 +626,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
     generation_config: { temperature: 0.65, max_output_tokens: maxTokens }
   }, {
     headers: { 'Content-Type': 'application/json' },
-    timeout: 16000
+    timeout: 20000
   });
 
   return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -648,7 +648,7 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
     max_tokens: maxTokens
   }, {
     headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: 18000
+    timeout: 20000
   });
 
   return res.data?.choices?.[0]?.message?.content || "";
@@ -676,7 +676,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
     generation_config: { temperature: 0.7, max_output_tokens: 900 }
   }, {
     headers: { 'Content-Type': 'application/json' },
-    timeout: 20000
+    timeout: 25000
   });
 
   return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -799,7 +799,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
   // 2. OPENROUTER DEEPSEEK (Excellent en logique & syntaxe)
   if (OPENROUTER_API_KEY) {
     try {
-      const res = await appelerOpenRouter(systemBase, historique, prompt, "deepseek/deepseek-chat:free", 0.2, plafondTokens);
+      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.2, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e2) {
       console.warn("[CASCADE CODE] 2. DeepSeek Code KO :", e2.message);
@@ -1139,9 +1139,9 @@ const projetManager = new ProjectManager({
 });
 
 // ==========================================
-// 16. ROUTEUR DE FLUX CENTRAL (AVEC CASCADE & RECHERCHE)
+// 16. ROUTEUR DE FLUX CENTRAL (AVEC CASCADE & VERROU RECHERCHE)
 // ==========================================
-async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
+async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
   const texteNet = (texteBrut || texteLegende || "").trim();
   const texteMin = texteNet.toLowerCase();
@@ -1163,13 +1163,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 - INTERDICTION FORMELLE d'utiliser la balise MISSION ou de chercher à déléguer à Ben.
 - Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
 - Dessin : tu génères TOI-MÊME les images en utilisant [DESSIN: prompt en anglais].
-- Recherche web : utilise [RECHERCHE_WEB: mots-clés simples] pour obtenir de vraies données du net.
+- Recherche web : utilise [RECHERCHE_WEB: mots-clés simples] pour obtenir des données fraîches du net.
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Rappel Mémoire : [FOUILLE_MEMOIRE: "requête"].
 - Archivage Mémoire : [ARCHIVER_MEMOIRE: "contenu"].`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
-  const injectionSouvenirs = contexteSouvenirs ? `\n[EXTRAITS RETROUVÉS DANS TON GRENIER VECTORIEL OU LE WEB]\n${contexteSouvenirs}\n` : "";
+  const injectionSouvenirs = contexteSouvenirs ? `\n[DONNÉES COMPLÉMENTAIRES RETROUVÉES]\n${contexteSouvenirs}\n` : "";
 
   const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
 
@@ -1193,7 +1193,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. TÂCHE TECHNIQUE OU CODE -> ROUTE CASCADE CODE (GROQ 70B EN PRIORITÉ)
+  // 3. CODE & LOGIQUE -> CASCADE CODE (GROQ 70B EN TÊTE)
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
@@ -1202,7 +1202,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> ROUTE CASCADE DISCUSSION (DEEPSEEK FREE -> MISTRAL -> GEMINI FREE -> GEMINI PAID)
+  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (DEEPSEEK FREE -> MISTRAL -> GEMINI FREE -> GEMINI PAID)
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
@@ -1213,28 +1213,29 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   // ==========================================
-  // DÉCLENCHEMENT DE LA RECHERCHE WEB EN DIRECT (TAVILY)
+  // DÉCLENCHEMENT TAVILY - VERROU STRICT SUR 1 PASSAGE UNIQUE
   // ==========================================
   const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?\]/i);
-  if (matchRechercheWeb && !contexteSouvenirs.includes("[RÉSULTATS DU WEB]")) {
+  if (matchRechercheWeb && !dejaRecherche) {
     const requeteCible = matchRechercheWeb[1].trim();
     if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
     const resultatsWeb = await rechercherWebTavily(requeteCible);
 
     if (resultatsWeb) {
-      const injectionWeb = `[RÉSULTATS DU WEB EN DIRECT POUR "${requeteCible}"]\n${resultatsWeb}\n(Transmets ces liens réels et ces infos fraîches à Doc sans rien inventer)`;
-      return await traiterFlux(texteBrut, mediaData, texteLegende, injectionWeb);
+      const injectionWeb = `[RÉSULTATS DE RECHERCHE EN DIRECT POUR "${requeteCible}"]\n${resultatsWeb}\n(Réponds directement à Doc avec ces données sans générer de nouvelle balise de recherche)`;
+      return await traiterFlux(texteBrut, mediaData, texteLegende, injectionWeb, true);
     }
   }
 
   // ==========================================
-  // PURGE DÉFINITIVE DES PARASITES ET ÉTIQUETTES
+  // PURGE DU TEXTE ET DES BALISES RÉSIDUELLES
   // ==========================================
   reponseNyx = reponseNyx
+    .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
     .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
     .replace(/<reflexion>[\s\S]*$/gi, '')
     .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
-    .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
+    .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
     .replace(/^\s*(?:\*{0,2}\[?---?\]?\*{0,2}\s*)+/gi, '')
     .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
     .replace(/<\/reflexion>/gi, '')
@@ -1251,7 +1252,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     const resultats = await fouillerMemoireVectorielle(requeteRecherche, 'factuel', 3);
     if (resultats && resultats.length > 0) {
       const extraits = resultats.map((r, i) => `Fragment ${i + 1} (${(r.similarity * 100).toFixed(0)}%) : ${r.content}`).join("\n\n");
-      return await traiterFlux(texteBrut, mediaData, texteLegende, extraits);
+      return await traiterFlux(texteBrut, mediaData, texteLegende, extraits, dejaRecherche);
     }
   }
 
@@ -1285,7 +1286,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
-  // Enregistrement en mémoire vive
+  // Enregistrement assaini en mémoire vive
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -1585,7 +1586,7 @@ app.post('/api/voix', async (req, res) => {
         .replace(/https?:\/\/[^\s)]+/g, '')
         .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
         .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
-        .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
+        .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
         .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
         .replace(/\[MISSION:\s*[\s\S]*?\]/gi, '')
