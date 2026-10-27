@@ -796,54 +796,94 @@ function estTacheComplexe(texte) {
 }
 
 async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
-  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx. Va droit au but, résous sa demande technique sans préambule ni roman d'action :\n\n${promptDoc}`;
+  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx (22 ans, directe, cynique, efficace). Résous sa demande technique sans bla-bla d'ambiance ni roman d'action :\n\n${promptDoc}`;
   let premiereReponse = "";
 
+  // 1. GÉNÉRATION TECHNIQUE INITIALE (Priorité Groq 70B pour la rigueur)
   try {
     if (GROQ_API_KEY) {
-      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.2, 2000);
+      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.15, 2000);
     } else if (MISTRAL_API_KEY) {
-      premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.3, 2000);
+      premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.25, 2000);
     } else {
-      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
     }
   } catch (errRes) {
-    console.warn("[RÉSOLUTION GROQ/MISTRAL KO, repli Venice] :", errRes.message);
+    console.warn("[RÉSOLUTION INITIALE KO, repli Venice] :", errRes.message);
     premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
   }
 
-  const promptVerificateur = `Tu es le superviseur invisible de Nyx. Examine la demande de Doc et la réponse proposée.
+  if (!premiereReponse || !premiereReponse.trim()) {
+    return "Erreur d'exécution : aucune réponse générée par les moteurs.";
+  }
 
-DEMANDE :
+  // 2. EXTRACTION ET SANCTUARISATION DES BALISES CRITIQUES
+  const matchDessinOriginal = premiereReponse.match(/\[DESSIN:\s*[\s\S]*?\]/i) 
+    || premiereReponse.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i);
+
+  // 3. PROMPT SUPERVISEUR STRICT
+  const promptVerificateur = `Tu es le contrôleur d'exécution de Nyx. Examine la demande de Doc et la réponse proposée.
+
+DEMANDE DE DOC :
 ${promptDoc}
 
-PROPOSITION :
+PROPOSITION DE NYX :
 ${premiereReponse}
 
-CONSIGNE STRICTE :
-- Si la proposition est impeccable : réponds UNIQUEMENT [VALIDE].
-- Si elle contient du cinéma (mains, souris, regards), des balises fictives ou des pavés inutiles : réécris DIRECTEMENT la réplique finale que Nyx doit envoyer, précédée de [CORRIGE].
-- INTERDICTION FORMELLE de faire un rapport, d'expliquer les bugs ou de lister les erreurs. Tu renvoies soit [VALIDE], soit la réponse corrigée.`;
+RÈGLES D'AUDIT STRICTES :
+1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [REVEIL: ...] ou un bloc de code markdown (\`\`\`).
+2. PARASITES À ÉLIMINER : Supprime uniquement les descriptions d'actions physiques fictives (ex: *tapote sur son clavier*, *soupir*, *te regarde*).
+3. DÉCISION :
+- Si la réponse est correcte et sans cinéma : réponds STRICTEMENT "[STATUT: VALIDE]".
+- Si elle contient des actions physiques parasites ou une erreur de code flagrante : réécris DIRECTEMENT la version épurée précédée de "[STATUT: CORRIGE]" sans aucune explication ni méta-commentaire.`;
 
+  // 4. EXÉCUTION DU CONTRÔLE (Groq privilégié pour la vitesse, sinon Venice GLM)
   try {
-    const verdict = await appelerVeniceMultiTour(
-      MODEL_GLM_COMPLEXE,
-      "Auditeur de code précis.",
-      [],
-      promptVerificateur,
-      null,
-      0.1,
-      8000
-    );
+    let verdict = "";
+    if (GROQ_API_KEY) {
+      verdict = await appelerGroq("Superviseur de code et de syntaxe.", [], promptVerificateur, 0.05, 2000);
+    } else {
+      verdict = await appelerVeniceMultiTour(
+        MODEL_GLM_COMPLEXE,
+        "Superviseur de code et de syntaxe.",
+        [],
+        promptVerificateur,
+        null,
+        0.05,
+        15000 // 15 secondes réelles pour éviter les faux timeouts
+      );
+    }
 
-    if (verdict && verdict.includes("[VALIDE]")) return premiereReponse;
-    if (verdict && verdict.trim().length > 0) return verdict.replace(/\[CORRIGE\]/gi, '').trim();
+    if (!verdict) return premiereReponse;
+
+    const verdictNet = verdict.trim();
+
+    // Cas 1 : Réponse validée telle quelle
+    if (/^\[STATUT:\s*VALIDE\]/i.test(verdictNet) || verdictNet === "[VALIDE]") {
+      return premiereReponse;
+    }
+
+    // Cas 2 : Réponse corrigée par le superviseur
+    if (/\[STATUT:\s*CORRIGE\]/i.test(verdictNet)) {
+      let reponseCorrigee = verdictNet.replace(/\[STATUT:\s*CORRIGE\]/i, '').trim();
+
+      // Sécurité : si le vérificateur a fait sauter le dessin présent au départ, on le réinjecte
+      if (matchDessinOriginal && !reponseCorrigee.includes("[DESSIN:")) {
+        const baliseRecuperee = matchDessinOriginal[0].startsWith("[") 
+          ? matchDessinOriginal[0] 
+          : `[DESSIN: ${matchDessinOriginal[1]}]`;
+        reponseCorrigee = `${baliseRecuperee}\n\n${reponseCorrigee}`;
+      }
+
+      return reponseCorrigee;
+    }
+
     return premiereReponse;
-  } catch (errGLM) {
+  } catch (errAudit) {
+    console.warn("[AUDIT BYPASSÉ - Erreur superviseur] :", errAudit.message);
     return premiereReponse;
   }
 }
-
 // ==========================================
 // 11. PARSEUR DE LIENS WEB
 // ==========================================
