@@ -735,7 +735,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.55, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
-      console.warn("[CASCADE CHAT] 1. DeepSeek Free KO :", e1.message);
+     console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
     }
   }
 
