@@ -308,20 +308,31 @@ async function rechercherWebTavily(query) {
     return null;
   }
   try {
+    // Nettoyage automatique des délires de syntaxe de Nyx
+    let requetePropre = query
+      .replace(/LIMIT:\d+/gi, '')
+      .replace(/-date:[^\s]+/gi, '')
+      .replace(/site:[^\s]+/gi, '')
+      .replace(/[+"]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    console.log(`[TAVILY REQUÊTE ÉPURÉE] : "${requetePropre}"`);
+
     const res = await axios.post('https://api.tavily.com/search', {
       api_key: TAVILY_API_KEY,
-      query: query,
+      query: requetePropre,
       search_depth: "basic",
       max_results: 5,
       include_answer: true
     }, { timeout: 12000 });
 
     const results = res.data?.results || [];
-    if (results.length === 0) return "Aucun résultat trouvé sur le web.";
+    if (results.length === 0) return "Aucun résultat pertinent trouvé.";
 
     let formatTexte = "";
     if (res.data?.answer) {
-      formatTexte += `SYNTHÈSE DU WEB : ${res.data.answer}\n\nSOURCES RÉELLES :\n`;
+      formatTexte += `SYNTHÈSE : ${res.data.answer}\n\n`;
     }
     formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.content}`).join("\n\n");
     return formatTexte;
