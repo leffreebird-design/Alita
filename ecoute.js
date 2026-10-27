@@ -33,7 +33,7 @@ const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.1-flash-lite").trim(
 
 // GROQ - RÉSERVÉ STRICTEMENT AU CODE & PROJETS TECHNIQUES
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
-const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
+const MODEL_GROQ = (process.env.GROQ_MODEL || "openai/gpt-oss-120b").trim();
 
 // VENICE AI - IMAGES & PARACHUTE ULTIME
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
