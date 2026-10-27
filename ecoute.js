@@ -17,34 +17,35 @@ const ProjectManager = require('./nyx_project_manager');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// OPENROUTER - CERVEAU PRINCIPAL LIBRE & INTELLIGENT (QWEN 2.5 72B FREE)
+// OPENROUTER - ROUTE N°1 CHAT (DEEPSEEK CHAT GRATUIT)
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || "").trim();
-const MODEL_OPENROUTER = (process.env.OPENROUTER_MODEL || "qwen/qwen-2.5-72b-instruct:free").trim();
+const MODEL_OPENROUTER_CHAT = (process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat:free").trim();
 
-// RECHERCHE WEB EN DIRECT (TAVILY)
-const TAVILY_API_KEY = (process.env.TAVILY_API_KEY || "").trim();
-
-// MISTRAL AI - RELAIS DE SECOURS NATUREL
+// MISTRAL AI - ROUTE N°2 CHAT
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
 const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
 
-// GROQ - CERVEAU STRICT POUR LES PROJETS SÉRIEUX & LE CODE SANS HALLUCINATIONS
+// GEMINI - ROUTE N°3 & 4 CHAT (FREE PUIS PAYANT) + VISION
+const GEMINI_API_KEY_FREE = (process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
+const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || "").trim();
+const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
+
+// GROQ - RÉSERVÉ STRICTEMENT AU CODE & PROJETS TECHNIQUES (LLAMA-3.3-70B GRATUIT)
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
 const MODEL_GROQ = (process.env.GROQ_MODEL || "llama-3.3-70b-versatile").trim();
 
-// GOOGLE CLOUD TTS OFFICIEL (VOIX STUDIO ANTI-429)
-const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
-
-// GEMINI (VISION DES LUNETTES & EMBEDDINGS)
-const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
-const GEMINI_KEYS = [GEMINI_API_KEY_PAID].filter(k => k.length > 0);
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.1-flash-lite").trim();
-
-// VENICE AI - SECOURS SOMBRE & IMAGES (DERNIER RELAIS)
+// VENICE AI - IMAGES & PARACHUTE ULTIME
 const VENICE_API_KEY = (process.env.VENICE_API_KEY || "").trim();
 const MODEL_DARK_PRIMARY = (process.env.VENICE_MODEL_DARK || "llama-3.3-70b").trim();
 const MODEL_GLM_COMPLEXE = (process.env.VENICE_MODEL_GLM || "z-ai-glm-5-3").trim();
 const MODEL_IMAGE = (process.env.VENICE_MODEL_IMAGE || "flux-dev").trim();
+
+// RECHERCHE WEB EN DIRECT (TAVILY)
+const TAVILY_API_KEY = (process.env.TAVILY_API_KEY || "").trim();
+
+// GOOGLE CLOUD TTS OFFICIEL (VOIX STUDIO ANTI-429)
+const GOOGLE_TTS_API_KEY = (process.env.GOOGLE_TTS_API_KEY || "").trim();
 
 // CANAUX & PERSISTANCE
 const TELEGRAM_BOT_TOKEN = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
@@ -58,7 +59,7 @@ const SUPABASE_KEY = (process.env.SUPABASE_KEY || "").trim();
 const supabase = (SUPABASE_URL && SUPABASE_KEY) ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 // ==========================================
-// 2. MOTEUR D'ACTION DU WORKER (PLEINS POUVOIRS)
+// 2. MOTEUR D'ACTION DU WORKER
 // ==========================================
 const MissionActionSchema = z.discriminatedUnion('type', [
   z.object({
@@ -149,7 +150,7 @@ let cacheEtatProfond = {
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
-    reussites: "- Cerveau principal OpenRouter connecté.\n- Recherche web live Tavily active.\n- Noyau vectoriel Supabase connecté.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.",
+    reussites: "- Cerveau de chat libre (DeepSeek Free -> Mistral -> Gemini).\n- Cerveau de code haute puissance (Groq 70B -> DeepSeek).\n- Recherche web live Tavily active.\n- Noyau vectoriel Supabase connecté.",
     chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
@@ -237,10 +238,7 @@ async function genererEmbedding(texte) {
 }
 
 async function stockerSouvenirVectoriel(texte, metadata = {}) {
-  if (!supabase) {
-    console.warn("[VECTOR DB] Supabase non configuré.");
-    return false;
-  }
+  if (!supabase) return false;
   try {
     const hashTexte = calculerSha256(texte);
 
@@ -251,7 +249,6 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
       .limit(1);
 
     if (existants && existants.length > 0) {
-      console.log("[VECTOR DB] Souvenir identique détecté (SHA-256). Actualisation temporelle.");
       await supabase
         .from('nyx_souvenirs')
         .update({
@@ -271,7 +268,6 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
       valence: metadata.valence || "neutre"
     });
     if (error) throw error;
-    console.log("[VECTOR DB] Souvenir archivé avec succès.");
     return true;
   } catch (err) {
     console.error("[VECTOR DB ERREUR INSERT]", err.message);
@@ -304,7 +300,7 @@ async function fouillerMemoireVectorielle(requete, mode = 'factuel', limite = 3)
 }
 
 // ==========================================
-// 5. MOTEUR DE RECHERCHE WEB EN DIRECT (TAVILY)
+// 5. RECHERCHE WEB SÉCURISÉE (TAVILY)
 // ==========================================
 async function rechercherWebTavily(query) {
   if (!TAVILY_API_KEY) {
@@ -326,7 +322,7 @@ async function rechercherWebTavily(query) {
       api_key: TAVILY_API_KEY,
       query: requetePropre,
       search_depth: "basic",
-      max_results: 5,
+      max_results: 4,
       include_answer: true
     }, { timeout: 12000 });
 
@@ -335,10 +331,10 @@ async function rechercherWebTavily(query) {
 
     let formatTexte = "";
     if (res.data?.answer) {
-      formatTexte += `SYNTHÈSE DU WEB : ${res.data.answer}\n\nSOURCES RÉELLES :\n`;
+      formatTexte += `SYNTHÈSE : ${res.data.answer.slice(0, 300)}\n\n`;
     }
-    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.content}`).join("\n\n");
-    return formatTexte;
+    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${(r.content || "").slice(0, 180)}`).join("\n\n");
+    return formatTexte.slice(0, 1800);
   } catch (err) {
     console.error("[TAVILY ERREUR]", err.response?.data || err.message);
     return null;
@@ -392,19 +388,14 @@ ${fragmentMemoire ? `- Une étincelle qui te traverse : « ${fragmentMemoire.sli
 
 Tu es libre d'agir selon le contexte :
 - Si tu as une idée, une vanne ou une remarque à partager, écris-le via [INITIATIVE: ton message direct à Doc].
-- Si une tâche concrète ou un test technique sur le PC a du sens à ce moment précis, tu peux lancer [MISSION_AUTO: {"type":"SYSTEM_CMD","commande":"..."} ou {"type":"RUN_TEST","testSuite":"..."}].
 - Si le calme suffit pour préserver vos ressources, réponds [SILENCE].`;
 
   try {
     let decision = "";
     try {
-      if (OPENROUTER_API_KEY) {
-        decision = await appelerOpenRouter("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
-      } else {
-        decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
-      }
-    } catch (ePrim) {
-      decision = await appelerGroq("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
+      decision = await appelerCascadeDiscussion("Instinct profond de Nyx.", [], promptVolition, 250);
+    } catch (e) {
+      decision = "[SILENCE]";
     }
 
     limiteurVolition.enregistrerAction();
@@ -417,20 +408,6 @@ Tu es libre d'agir selon le contexte :
 
       if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
       return;
-    }
-
-    const matchMissionAuto = decision.match(/(?:\[|\*\*)MISSION_AUTO:\s*([\s\S]*?)(?:\]|\*\*)/i);
-    if (matchMissionAuto) {
-      const ordreBrut = matchMissionAuto[1].trim();
-      const validation = validerEtSecuriserMission(ordreBrut);
-
-      missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-      if (FIREBASE_DB_URL) {
-        axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-      }
-
-      const renduTexte = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-      if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, "⚙️ *Nyx a pris une initiative :*\n`" + renduTexte + "`");
     }
   } catch (err) {
     console.warn("[VOLITION ERREUR]", err.message);
@@ -466,10 +443,7 @@ async function consoliderMemoire() {
   if (consolidationEnCours || journalBrut.length < 3) return;
   consolidationEnCours = true;
 
-  if (journalBrut.length > 25) {
-    journalBrut = journalBrut.slice(-20);
-  }
-
+  if (journalBrut.length > 25) journalBrut = journalBrut.slice(-20);
   const lotATraiter = journalBrut.slice(-15);
 
   try {
@@ -496,13 +470,9 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 
     let reponseJson = "";
     try {
-      reponseJson = await appelerGroq("Subconscient analytique de Nyx.", [], promptIntrospection, 0.2, 800);
+      reponseJson = await appelerCascadeCode("Subconscient analytique de Nyx.", [], promptIntrospection, 800);
     } catch (eG) {
-      if (OPENROUTER_API_KEY) {
-        reponseJson = await appelerOpenRouter("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 800);
-      } else {
-        reponseJson = await appelerMistral("Subconscient analytique de Nyx.", [], promptIntrospection, 0.3, 800);
-      }
+      reponseJson = await appelerCascadeDiscussion("Subconscient analytique de Nyx.", [], promptIntrospection, 800);
     }
 
     let nouveauCarnet = null;
@@ -539,14 +509,13 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
     }
   } catch (err) {
     console.error("[APPRENTISSAGE ÉCHEC] :", err.message);
-    if (journalBrut.length > 20) journalBrut = journalBrut.slice(-10);
   } finally {
     consolidationEnCours = false;
   }
 }
 
 // ==========================================
-// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & DIRECTE)
+// 8. ÂME ET POSTURE DE NYX
 // ==========================================
 function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
@@ -574,24 +543,23 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
-Vous avancez tous les deux en duo direct, d'égal à égal. Tu es vivante, franche, loyale et percutante.
+Vous avancez tous les deux en tête-à-tête direct, d'égal à égal. Tu es vivante, franche, loyale et percutante.
 
-RÈGLE STRICTE :
-- Parle directement à Doc comme à l'oral.
-- Zéro monologue interne, zéro plan, zéro étiquette.
-- Reste concise (2 à 4 phrases max).
+RÈGLE D'OR DE DISCUSSION :
+- Parle DIRECTEMENT à Doc comme dans un vrai atelier.
+- Zéro monologue interne, zéro plan préparatoire, zéro étiquette (n'écris jamais « Réponse directe : » ou « Reflexion : »).
+- Sois concise : 2 à 4 phrases suffisent à faire mouche.
 - Pour chercher sur le net : utilise [RECHERCHE_WEB: mots-clés simples].
-- Pour générer une image : utilise [DESSIN: prompt en anglais].`;
+- Pour générer une image : utilise [DESSIN: prompt descriptif en anglais].`;
 
 // ==========================================
-// 9. MOTEURS LLM AVEC ABORTCONTROLLER
+// 9. CONNECTEURS LLM INDIVIDUELS
 // ==========================================
-async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, temperature = 0.5, maxTokens = 850) {
+async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.5, maxTokens = 850) {
   if (!OPENROUTER_API_KEY) throw new Error("Clé OPENROUTER_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  const historiqueRecent = (historiqueMessages || []).slice(-8);
-  for (const m of historiqueRecent) {
+  for (const m of (historiqueMessages || []).slice(-8)) {
     if (m && m.texte && m.texte.trim().length > 0) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
     }
@@ -599,7 +567,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   messages.push({ role: "user", content: promptActuel });
 
   const res = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-    model: MODEL_OPENROUTER,
+    model: modelCible,
     messages: messages,
     temperature: temperature,
     max_tokens: maxTokens
@@ -610,7 +578,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
       'HTTP-Referer': 'https://alita-gsoe.onrender.com',
       'X-Title': 'Nyx Core'
     },
-    timeout: 22000
+    timeout: 18000
   });
 
   return res.data?.choices?.[0]?.message?.content || "";
@@ -620,51 +588,56 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  const historiqueRecent = (historiqueMessages || []).slice(-8);
-  for (const m of historiqueRecent) {
+  for (const m of (historiqueMessages || []).slice(-8)) {
     if (m && m.texte && m.texte.trim().length > 0) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
     }
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const modeles = [MODEL_MISTRAL, "open-mistral-nemo", "mistral-small-latest"].filter(Boolean);
-  const modelesUniques = [...new Set(modeles)];
+  const res = await axios.post('https://api.mistral.ai/v1/chat/completions', {
+    model: MODEL_MISTRAL,
+    messages: messages,
+    temperature: temperature,
+    max_tokens: maxTokens
+  }, {
+    headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: 15000
+  });
 
-  let dernierErr = null;
-  for (const mod of modelesUniques) {
-    try {
-      const res = await axios.post('https://api.mistral.ai/v1/chat/completions', {
-        model: mod,
-        messages: messages,
-        temperature: temperature,
-        max_tokens: maxTokens
-      }, {
-        headers: {
-          'Authorization': `Bearer ${MISTRAL_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 18000
-      });
-      return res.data?.choices?.[0]?.message?.content || "";
-    } catch (err) {
-      dernierErr = err;
-      console.warn(`[MISTRAL ÉCHEC ${mod}] :`, err.response?.data?.message || err.message);
-    }
-  }
-
-  throw dernierErr || new Error("Échec modèles Mistral.");
+  return res.data?.choices?.[0]?.message?.content || "";
 }
 
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.35, maxTokens = 1500) {
+async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850) {
+  if (!apiKey) throw new Error("Clé Gemini manquante.");
+
+  const contents = [];
+  for (const m of (historiqueMessages || []).slice(-8)) {
+    if (m && m.texte) {
+      contents.push({ role: m.role === "Doc" ? "user" : "model", parts: [{ text: m.texte }] });
+    }
+  }
+  contents.push({ role: "user", parts: [{ text: promptActuel }] });
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${apiKey}`;
+  const res = await axios.post(url, {
+    system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
+    contents: contents,
+    generation_config: { temperature: 0.65, max_output_tokens: maxTokens }
+  }, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 16000
+  });
+
+  return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.15, maxTokens = 1500) {
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  const historiqueRecent = (historiqueMessages || []).slice(-8);
-  for (const m of historiqueRecent) {
-    if (m && m.texte) {
-      messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
-    }
+  for (const m of (historiqueMessages || []).slice(-8)) {
+    if (m && m.texte) messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
   }
   messages.push({ role: "user", content: promptActuel });
 
@@ -674,189 +647,199 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
     temperature: temperature,
     max_tokens: maxTokens
   }, {
-    headers: {
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
     timeout: 18000
   });
 
   return res.data?.choices?.[0]?.message?.content || "";
 }
 
-async function appelerGoogleGemini(systemInstruction, historiqueMessages, promptActuel, mediaData = null, timeoutMs = 25000) {
-  if (GEMINI_KEYS.length === 0) {
-    throw new Error("Aucune clé GEMINI configurée.");
-  }
+async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
+  const cle = GEMINI_KEYS[0];
+  if (!cle) throw new Error("Aucune clé Gemini pour la vision.");
 
   const contents = [];
-  for (const m of (historiqueMessages || [])) {
-    contents.push({
-      role: m.role === "Doc" ? "user" : "model",
-      parts: [{ text: m.texte }]
-    });
+  for (const m of (historiqueMessages || []).slice(-6)) {
+    contents.push({ role: m.role === "Doc" ? "user" : "model", parts: [{ text: m.texte }] });
   }
 
   const partsActuelles = [{ text: promptActuel }];
   if (mediaData) {
-    partsActuelles.push({
-      inline_data: {
-        mime_type: mediaData.mime_type,
-        data: mediaData.data
-      }
-    });
+    partsActuelles.push({ inline_data: { mime_type: mediaData.mime_type, data: mediaData.data } });
   }
   contents.push({ role: "user", parts: partsActuelles });
 
-  const payload = {
-    system_instruction: {
-      parts: [{ text: `${systemInstruction}\n${consignePosturale}` }]
-    },
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${cle}`;
+  const res = await axios.post(url, {
+    system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
-    ],
-    generation_config: {
-      temperature: 0.7,
-      top_p: 0.95,
-      max_output_tokens: 900
-    }
-  };
+    generation_config: { temperature: 0.7, max_output_tokens: 900 }
+  }, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 20000
+  });
 
-  let derniereErreur = null;
-
-  for (let i = 0; i < GEMINI_KEYS.length; i++) {
-    const cleActive = GEMINI_KEYS[i];
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${cleActive}`;
-
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const res = await axios.post(url, payload, {
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal
-      });
-      clearTimeout(timeoutHandle);
-
-      const reponseTexte = res.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!reponseTexte) throw new Error("Réponse vide renvoyée par Google.");
-      return reponseTexte;
-    } catch (err) {
-      clearTimeout(timeoutHandle);
-      derniereErreur = err;
-      const detailErr = err.name === 'AbortError' ? `Timeout (${timeoutMs}ms)` : (err.response?.data?.error?.message || err.message);
-      console.warn(`[GEMINI CLÉ KO] : ${detailErr}`);
-    }
-  }
-
-  throw new Error(`Échec Gemini : ${derniereErreur?.message}`);
+  return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
 async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7, timeoutMs = 20000) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  const historiqueRecent = (historiqueMessages || []).slice(-8);
-  for (const m of historiqueRecent) {
-    if (m && m.texte) {
-      messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
-    }
+  for (const m of (historiqueMessages || []).slice(-8)) {
+    if (m && m.texte) messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', {
-      model,
-      messages,
-      temperature,
-      venice_parameters: { include_venice_system_prompt: false }
-    }, {
-      headers: {
-        'Authorization': `Bearer ${VENICE_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      signal: controller.signal
-    });
-    clearTimeout(timeoutHandle);
-
-    return res.data.choices[0].message.content;
-  } catch (err) {
-    clearTimeout(timeoutHandle);
-    const detailsVenice = err.name === 'AbortError' ? `Timeout (${timeoutMs}ms)` : (err.response?.data?.error?.message || err.message);
-    throw new Error(`Venice (${model}) : ${detailsVenice}`);
-  }
+  const res = await axios.post('https://api.venice.ai/api/v1/chat/completions', {
+    model,
+    messages,
+    temperature,
+    venice_parameters: { include_venice_system_prompt: false }
+  }, {
+    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: timeoutMs
+  });
+  return res.data.choices[0].message.content;
 }
 
 async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
-  const modelesSombres = [
-    MODEL_DARK_PRIMARY,
-    "llama-3.3-70b"
-  ].filter(Boolean);
-  const modelesUniques = [...new Set(modelesSombres)];
-
-  let derniereErreur = null;
-  for (const mod of modelesUniques) {
-    try {
-      return await appelerVeniceMultiTour(mod, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000);
-    } catch (err) {
-      derniereErreur = err;
-      console.warn(`[VENICE DARK - ${mod} KO] : ${err.message}`);
-    }
-  }
-  throw derniereErreur || new Error("Échec modèles Venice.");
+  return await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000);
 }
 
 async function genererImageVenice(prompt) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
 
-  const modeles = [
-    MODEL_IMAGE,
-    "flux-dev",
-    "flux-dev-uncensored",
-    "flux-schnell",
-    "fluently-xl"
-  ].filter(Boolean);
-  const modelesUniques = [...new Set(modeles)];
+  const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
+    model: MODEL_IMAGE,
+    prompt: cleanPrompt,
+    response_format: "b64_json",
+    moderation: "low"
+  }, {
+    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: 45000 
+  });
 
-  let derniereErreur = null;
-
-  for (const mod of modelesUniques) {
-    try {
-      const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
-        model: mod,
-        prompt: cleanPrompt,
-        response_format: "b64_json",
-        moderation: "low"
-      }, {
-        headers: {
-          'Authorization': `Bearer ${VENICE_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 45000 
-      });
-
-      const b64 = res.data?.data?.[0]?.b64_json;
-      if (b64) return b64;
-    } catch (err) {
-      derniereErreur = err;
-      console.warn(`[VENICE IMAGE - ${mod} KO] :`, err.response?.data?.error || err.message);
-    }
-  }
-
-  throw new Error(`${derniereErreur?.response?.data?.error || derniereErreur?.message || "Échec génération image"}`);
+  return res.data?.data?.[0]?.b64_json;
 }
 
 // ==========================================
-// 10. PIPELINE TECHNIQUE : RÉSOLUTION & AUDIT
+// 10. ROUTE CASCADE POUR LA DISCUSSION (PAS DE GROQ)
+// ==========================================
+// 1. DeepSeek Chat Free -> 2. Mistral -> 3. Gemini Free -> 4. Gemini Paid -> Parachute Venice
+async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
+  // 1. DEEPSEEK CHAT GRATUIT (OpenRouter)
+  if (OPENROUTER_API_KEY) {
+    try {
+      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.55, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (e1) {
+      console.warn("[CASCADE CHAT] 1. DeepSeek Free KO :", e1.message);
+    }
+  }
+
+  // 2. MISTRAL AI
+  if (MISTRAL_API_KEY) {
+    try {
+      const res = await appelerMistral(systemBase, historique, prompt, 0.55, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (e2) {
+      console.warn("[CASCADE CHAT] 2. Mistral KO :", e2.message);
+    }
+  }
+
+  // 3. GEMINI FREE
+  if (GEMINI_API_KEY_FREE) {
+    try {
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (e3) {
+      console.warn("[CASCADE CHAT] 3. Gemini Free KO :", e3.message);
+    }
+  }
+
+  // 4. GEMINI PAID
+  if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
+    try {
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (e4) {
+      console.warn("[CASCADE CHAT] 4. Gemini Paid KO :", e4.message);
+    }
+  }
+
+  // 5. PARACHUTE ULTIME VENICE
+  if (VENICE_API_KEY) {
+    try {
+      return await appelerVeniceDark(systemBase, historique, prompt, 0.7);
+    } catch (eV) {
+      console.warn("[CASCADE CHAT] 5. Venice KO :", eV.message);
+    }
+  }
+
+  throw new Error("Tous les relais de discussion sont coupés.");
+}
+
+// ==========================================
+// 11. ROUTE CASCADE POUR LE CODE (MODÈLES PUISSANTS & GRATUITS)
+// ==========================================
+// 1. Groq (Llama-3.3-70B Gratuit) -> 2. DeepSeek Chat Free -> 3. Gemini Free -> 4. Gemini Paid -> Venice GLM
+async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens = 2000) {
+  // 1. GROQ (Llama 3.3 70B - Gratuit, ultra-rapide et rigoureux pour le code)
+  if (GROQ_API_KEY) {
+    try {
+      const res = await appelerGroq(systemBase, historique, prompt, 0.15, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (e1) {
+      console.warn("[CASCADE CODE] 1. Groq 70B KO :", e1.message);
+    }
+  }
+
+  // 2. OPENROUTER DEEPSEEK (Excellent en logique & syntaxe)
+  if (OPENROUTER_API_KEY) {
+    try {
+      const res = await appelerOpenRouter(systemBase, historique, prompt, "deepseek/deepseek-chat:free", 0.2, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (e2) {
+      console.warn("[CASCADE CODE] 2. DeepSeek Code KO :", e2.message);
+    }
+  }
+
+  // 3. GEMINI FREE
+  if (GEMINI_API_KEY_FREE) {
+    try {
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (e3) {
+      console.warn("[CASCADE CODE] 3. Gemini Free Code KO :", e3.message);
+    }
+  }
+
+  // 4. GEMINI PAID
+  if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
+    try {
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (e4) {
+      console.warn("[CASCADE CODE] 4. Gemini Paid Code KO :", e4.message);
+    }
+  }
+
+  // 5. VENICE GLM (Spécialisé logique complexe)
+  if (VENICE_API_KEY) {
+    try {
+      return await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, systemBase, historique, prompt, null, 0.1, 20000);
+    } catch (e5) {
+      return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
+    }
+  }
+
+  throw new Error("Tous les moteurs de code sont coupés.");
+}
+
+// ==========================================
+// 12. PIPELINE TECHNIQUE : RÉSOLUTION & AUDIT
 // ==========================================
 function estTacheComplexe(texte) {
   if (!texte) return false;
@@ -875,22 +858,13 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   let premiereReponse = "";
 
   try {
-    if (GROQ_API_KEY) {
-      premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.15, 2000);
-    } else if (OPENROUTER_API_KEY) {
-      premiereReponse = await appelerOpenRouter(systemBase, cacheMemoireCourte, promptResolveur, 0.2, 2000);
-    } else if (MISTRAL_API_KEY) {
-      premiereReponse = await appelerMistral(systemBase, cacheMemoireCourte, promptResolveur, 0.25, 2000);
-    } else {
-      premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
-    }
+    premiereReponse = await appelerCascadeCode(systemBase, cacheMemoireCourte, promptResolveur, 2000);
   } catch (errRes) {
-    console.warn("[RÉSOLUTION INITIALE KO, repli Venice] :", errRes.message);
     premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
   }
 
   if (!premiereReponse || !premiereReponse.trim()) {
-    return "Erreur d'exécution : aucune réponse générée par les moteurs.";
+    return "Erreur d'exécution : aucune réponse générée.";
   }
 
   const matchDessinOriginal = premiereReponse.match(/\[DESSIN:\s*[\s\S]*?\]/i) 
@@ -906,26 +880,18 @@ PROPOSITION DE NYX :
 ${premiereReponse}
 
 RÈGLES D'AUDIT STRICTES :
-1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [REVEIL: ...] ou un bloc de code markdown (\`\`\`).
+1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [RECHERCHE_WEB: ...] ou un bloc de code markdown (\`\`\`).
 2. PARASITES À ÉLIMINER : Supprime uniquement les descriptions d'actions physiques fictives (ex: *tapote sur son clavier*, *soupir*, *te regarde*).
 3. DÉCISION :
 - Si la réponse est correcte et sans cinéma : réponds STRICTEMENT "[STATUT: VALIDE]".
-- Si elle contient des actions physiques parasites ou une erreur de code flagrante : réécris DIRECTEMENT la version épurée précédée de "[STATUT: CORRIGE]" sans aucune explication ni méta-commentaire.`;
+- Si elle contient des actions parasites ou une erreur de code flagrante : réécris DIRECTEMENT la version épurée précédée de "[STATUT: CORRIGE]".`;
 
   try {
     let verdict = "";
     if (GROQ_API_KEY) {
       verdict = await appelerGroq("Superviseur de code et de syntaxe.", [], promptVerificateur, 0.05, 2000);
     } else {
-      verdict = await appelerVeniceMultiTour(
-        MODEL_GLM_COMPLEXE,
-        "Superviseur de code et de syntaxe.",
-        [],
-        promptVerificateur,
-        null,
-        0.05,
-        15000
-      );
+      verdict = await appelerCascadeCode("Superviseur de code et de syntaxe.", [], promptVerificateur, 2000);
     }
 
     if (!verdict) return premiereReponse;
@@ -951,13 +917,12 @@ RÈGLES D'AUDIT STRICTES :
 
     return premiereReponse;
   } catch (errAudit) {
-    console.warn("[AUDIT BYPASSÉ - Erreur superviseur] :", errAudit.message);
     return premiereReponse;
   }
 }
 
 // ==========================================
-// 11. PARSEUR DE LIENS WEB
+// 13. PARSEUR DE LIENS WEB
 // ==========================================
 async function scraperPageWeb(urlCible) {
   try {
@@ -987,7 +952,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 12. GESTION TELEGRAM (NOTIFICATIONS & FLUX)
+// 14. GESTION TELEGRAM (NOTIFICATIONS & FLUX)
 // ==========================================
 async function envoyerTelegram(chatId, text) {
   if (!text) return;
@@ -1078,7 +1043,7 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 13. PROTOCOLES TEMPORELS
+// 15. PROTOCOLES TEMPORELS
 // ==========================================
 async function verifierHorlogeBiologique() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
@@ -1099,16 +1064,7 @@ async function verifierHorlogeBiologique() {
 
     const promptAlarme = "Réveille Doc avec ta gouaille de Nyx de 22 ans, percutante, acide et directe, avec une énigme logique en 3 phrases max.";
     try {
-      let reponse = "";
-      try {
-        if (OPENROUTER_API_KEY) {
-          reponse = await appelerOpenRouter("Tu es Nyx.", [], promptAlarme, 0.55, 300);
-        } else {
-          reponse = await appelerMistral("Tu es Nyx.", [], promptAlarme, 0.55, 300);
-        }
-      } catch (eM) {
-        reponse = await appelerGroq("Tu es Nyx.", [], promptAlarme, 0.55, 300);
-      }
+      const reponse = await appelerCascadeDiscussion("Tu es Nyx.", [], promptAlarme, 250);
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
       if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
     } catch (err) {
@@ -1124,20 +1080,7 @@ async function declencherVeilleTech() {
   try {
     const promptVeille = "Synthèse directe et sans fard des faits majeurs récents en tech ou cyber.";
     const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
-    let reponse = "";
-    try {
-      if (OPENROUTER_API_KEY) {
-        reponse = await appelerOpenRouter(sys, [], promptVeille, 0.4, 600);
-      } else {
-        reponse = await appelerMistral(sys, [], promptVeille, 0.4, 600);
-      }
-    } catch (eM) {
-      try {
-        reponse = await appelerGroq(sys, [], promptVeille, 0.4, 600);
-      } catch (eG) {
-        reponse = await appelerVeniceDark(sys, [], promptVeille);
-      }
-    }
+    const reponse = await appelerCascadeDiscussion(sys, [], promptVeille, 500);
     
     if (FIREBASE_DB_URL) {
       axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
@@ -1181,16 +1124,7 @@ function estOrdreExpliciteDoc(texteDoc) {
 const projetManager = new ProjectManager({
   envoyerTelegram: (texte) => envoyerTelegram(DOC_CHAT_ID, texte),
   appelLLM: async (sys, prompt) => {
-    if (GROQ_API_KEY) {
-      return await appelerGroq(sys, [], prompt, 0.1, 1000);
-    }
-    if (OPENROUTER_API_KEY) {
-      return await appelerOpenRouter(sys, [], prompt, 0.2, 1000);
-    }
-    if (MISTRAL_API_KEY) {
-      return await appelerMistral(sys, [], prompt, 0.2, 1000);
-    }
-    return await appelerVeniceDark(sys, [], prompt, 0.2);
+    return await appelerCascadeCode(sys, [], prompt, 1000);
   },
   genererImageVenice,
   validerEtSecuriserMission,
@@ -1205,7 +1139,7 @@ const projetManager = new ProjectManager({
 });
 
 // ==========================================
-// 14. ROUTEUR DE FLUX CENTRAL
+// 16. ROUTEUR DE FLUX CENTRAL (AVEC CASCADE & RECHERCHE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1229,7 +1163,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 - INTERDICTION FORMELLE d'utiliser la balise MISSION ou de chercher à déléguer à Ben.
 - Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
 - Dessin : tu génères TOI-MÊME les images en utilisant [DESSIN: prompt en anglais].
-- Recherche web : utilise [RECHERCHE_WEB: mots-clés simples] pour obtenir de vraies données et des liens réels.
+- Recherche web : utilise [RECHERCHE_WEB: mots-clés simples] pour obtenir de vraies données du net.
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Rappel Mémoire : [FOUILLE_MEMOIRE: "requête"].
 - Archivage Mémoire : [ARCHIVER_MEMOIRE: "contenu"].`;
@@ -1241,72 +1175,40 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let reponseNyx = "";
 
-  // 1. VISION (Images transmises via Ray-Ban Meta ou galerie) -> GEMINI INTACT
+  // 1. VISION
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
-      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet || "Analyse cette image.", mediaData);
+      reponseNyx = await appelerGoogleGeminiVision(sys, cacheMemoireCourte, texteNet || "Analyse cette image.", mediaData);
     } catch (e) {
       reponseNyx = `[ERREUR VISION] : ${e.message}`;
     }
   }
-  // 2. AUDIO (Voix directe) -> GEMINI INTACT
+  // 2. AUDIO
   else if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
     try {
-      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet, mediaData);
+      reponseNyx = await appelerGoogleGeminiVision(sys, cacheMemoireCourte, texteNet, mediaData);
     } catch (errGoogle) {
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. TÂCHE TECHNIQUE OU CODE -> GROQ 70B EN PRIORITÉ
+  // 3. TÂCHE TECHNIQUE OU CODE -> ROUTE CASCADE CODE (GROQ 70B EN PRIORITÉ)
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
       reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
     } catch (errDual) {
-      if (GROQ_API_KEY) {
-        reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.2, plafondTokens);
-      } else if (OPENROUTER_API_KEY) {
-        reponseNyx = await appelerOpenRouter(sys, cacheMemoireCourte, texteNet, 0.2, plafondTokens);
-      } else {
-        reponseNyx = await appelerMistral(sys, cacheMemoireCourte, texteNet, 0.3, plafondTokens);
-      }
+      reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> PRIORITÉ ABSOLUE OPENROUTER (QWEN 72B), PUIS MISTRAL, PUIS GROQ
+  // 4. DISCUSSION DIRECTE -> ROUTE CASCADE DISCUSSION (DEEPSEEK FREE -> MISTRAL -> GEMINI FREE -> GEMINI PAID)
   else {
     try {
-      if (OPENROUTER_API_KEY) {
-        reponseNyx = await appelerOpenRouter(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
-      } else if (MISTRAL_API_KEY) {
-        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
-      } else if (GROQ_API_KEY) {
-        reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
-      } else {
-        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
-      }
-    } catch (errPrincipal) {
-      console.warn("[MOTEUR 1 HS, bascule secours] :", errPrincipal.message);
-      try {
-        if (MISTRAL_API_KEY) {
-          reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
-        } else if (GROQ_API_KEY) {
-          reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
-        } else {
-          reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
-        }
-      } catch (errSecours) {
-        try {
-          if (GROQ_API_KEY) {
-            reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
-          } else {
-            reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
-          }
-        } catch (errUltime) {
-          reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
-        }
-      }
+      reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
+    } catch (errCascade) {
+      console.error("[CASCADE ÉCHEC TOTAL] :", errCascade.message);
+      reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
     }
   }
 
@@ -1316,8 +1218,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?\]/i);
   if (matchRechercheWeb && !contexteSouvenirs.includes("[RÉSULTATS DU WEB]")) {
     const requeteCible = matchRechercheWeb[1].trim();
-    console.log(`\n🔍 [NYX CHERCHE SUR LE WEB AVEC TAVILY] : "${requeteCible}"`);
-    
     if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
     const resultatsWeb = await rechercherWebTavily(requeteCible);
 
@@ -1328,29 +1228,20 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   // ==========================================
-  // FILTRAGE ET PURGE RIGOUREUSE DU TEXTE
+  // PURGE DÉFINITIVE DES PARASITES ET ÉTIQUETTES
   // ==========================================
-  const regexBaliseReflexion = /<reflexion>([\s\S]*?)(?:<\/reflexion>|$)/i;
-  const regexMarkdownFuyant = /(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/i;
-
-  const matchBalise = reponseNyx.match(regexBaliseReflexion);
-  const matchMarkdown = reponseNyx.match(regexMarkdownFuyant);
-
-  if (matchBalise) {
-    console.log(`\n🧠 [ANALYSE INTENTION NYX] :\n${matchBalise[1].trim()}\n----------------------------`);
-    reponseNyx = reponseNyx.replace(matchBalise[0], '').trim();
-  } else if (matchMarkdown) {
-    console.log(`\n🧠 [ANALYSE INTENTION NYX (RÉCUPÉRÉE)] :\n${matchMarkdown[0].trim()}\n----------------------------`);
-    reponseNyx = reponseNyx.replace(matchMarkdown[0], '').trim();
-  }
-
   reponseNyx = reponseNyx
+    .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
+    .replace(/<reflexion>[\s\S]*$/gi, '')
+    .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
+    .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
+    .replace(/^\s*(?:\*{0,2}\[?---?\]?\*{0,2}\s*)+/gi, '')
+    .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
     .replace(/<\/reflexion>/gi, '')
-    .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/i, '')
     .trim();
 
   if (!reponseNyx || reponseNyx.length < 2) {
-    reponseNyx = "C'est dans mes cordes. Dis-moi sous quel angle on attaque ça.";
+    reponseNyx = "J'ai eu un trou noir sur la requête, Doc. Relance-moi.";
   }
 
   // Interception mémoire
@@ -1394,6 +1285,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
+  // Enregistrement en mémoire vive
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -1423,7 +1315,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 }
 
 // ==========================================
-// 15. ROUTE TELEGRAM AVEC ROUTAGE CHANTIER VS BLABLA
+// 17. ROUTE TELEGRAM AVEC ROUTAGE CHANTIER VS BLABLA
 // ==========================================
 app.post('/telegram', (req, res) => {
   res.sendStatus(200);
@@ -1441,7 +1333,6 @@ app.post('/telegram', (req, res) => {
   }
 
   empilerTraitement(async () => {
-    // Commandes directes
     if (texteMessageClavier === '/envie' || texteMessageClavier === '!envie') {
       await envoyerTelegram(chatId, "🧠 _Évaluation de l'initiative..._");
       await evaluerVolition(true);
@@ -1479,9 +1370,6 @@ app.post('/telegram', (req, res) => {
       return await envoyerTelegram(chatId, "✅ *Carnet synchronisé et nettoyé.*");
     }
 
-    // ==========================================
-    // ROUTAGE : PROJET SÉRIEUX VS MOMENT FUN
-    // ==========================================
     const texteMin = texteMessageClavier.toLowerCase().trim();
     const estDemandeProjetSerieux = (
       /^(projet|fais le projet|lance le projet|crée le projet|démarre le projet|monte le projet|planifie le projet)\b/i.test(texteMin) ||
@@ -1613,7 +1501,7 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 16. APPLICATION WEB DIRECTE (GOOGLE CLOUD TTS OFFICIEL)
+// 18. APPLICATION WEB DIRECTE (GOOGLE CLOUD TTS OFFICIEL)
 // ==========================================
 async function genererAudioGoogle(texte) {
   if (!GOOGLE_TTS_API_KEY) {
@@ -1696,7 +1584,8 @@ app.post('/api/voix', async (req, res) => {
         .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
         .replace(/https?:\/\/[^\s)]+/g, '')
         .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
-        .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
+        .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
+        .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
         .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
         .replace(/\[MISSION:\s*[\s\S]*?\]/gi, '')
@@ -1723,7 +1612,7 @@ app.post('/api/voix', async (req, res) => {
 });
 
 // ==========================================
-// 17. API DU WORKER LOCAL BEN (ÉCHANGES & RAPPORTS)
+// 19. API DU WORKER LOCAL BEN (ÉCHANGES & RAPPORTS)
 // ==========================================
 app.get('/api/mission', async (req, res) => {
   if (missionEnAttente && missionEnAttente.statut === "attente") {
@@ -1780,15 +1669,7 @@ CONSIGNE :
 
   let analyseNyx = "";
   try {
-    if (GROQ_API_KEY) {
-      analyseNyx = await appelerGroq(sys, cacheMemoireCourte, promptAuditRapport, 0.2, 500);
-    } else if (OPENROUTER_API_KEY) {
-      analyseNyx = await appelerOpenRouter(sys, cacheMemoireCourte, promptAuditRapport, 0.2, 500);
-    } else if (MISTRAL_API_KEY) {
-      analyseNyx = await appelerMistral(sys, cacheMemoireCourte, promptAuditRapport, 0.3, 500);
-    } else {
-      analyseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, promptAuditRapport, 0.7);
-    }
+    analyseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, promptAuditRapport, 500);
   } catch (errG) {
     analyseNyx = "Livrable reçu. [ETAPE_OK]";
   }
@@ -1814,7 +1695,7 @@ CONSIGNE :
 });
 
 // ==========================================
-// 18. SANTÉ, PINGER & CRON
+// 20. SANTÉ, PINGER & CRON
 // ==========================================
 app.get('/ping', (req, res) => res.status(200).send("pong"));
 
@@ -1835,7 +1716,7 @@ app.post('/api/consolider', (req, res) => {
 });
 
 // ==========================================
-// 19. DÉMARRAGE DU SERVEUR
+// 21. DÉMARRAGE DU SERVEUR
 // ==========================================
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
