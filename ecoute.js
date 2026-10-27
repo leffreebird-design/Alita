@@ -1237,6 +1237,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
     .replace(/^\s*(?:\*{0,2}\[?---?\]?\*{0,2}\s*)+/gi, '')
     .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
+    .replace(/(?:^|\n)\s*Nyx\s*(?:\([^)]*\))?\s*:\s*/gi, '')
     .replace(/<\/reflexion>/gi, '')
     .trim();
 
