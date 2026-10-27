@@ -1102,14 +1102,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
-  const moduleMains = `[OUTILS MATÉRIELS & PASSERELLE WORKER]
-- Ben est ton worker Python local branché sur le PC de Doc (ce n'est PAS un humain).
-- RÈGLE ABSOLUE : n'émets JAMAIS la balise MISSION si la phrase de Doc est une question, une hypothèse, une demande d'explication ou s'il dit « sans lui donner d'ordre ». Dans ce cas, réponds uniquement avec du texte et des blocs de code markdown.
-- Tu mobilises [MISSION: {"type":"RAW_TASK","description":"..."}] UNIQUEMENT ET STRICTEMENT si Doc formule un ordre direct d'exécution (ex: « crée », « lance », « exécute »).
+ const moduleMains = `[MODE SOLO ATELIER - AUCUN WORKER ACTIF]
+- Tu travailles SEULE avec Doc. Il n'y a AUCUN worker local branché sur le PC.
+- INTERDICTION FORMELLE d'utiliser la balise MISSION ou de chercher à déléguer à Ben.
+- Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
+- Dessin : tu génères TOI-MÊME les images en utilisant [DESSIN: prompt en anglais].
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
-- Rappel Mémoire ++ : [FOUILLE_MEMOIRE: "requête"].
-- Archivage Mémoire ++ : [ARCHIVER_MEMOIRE: "contenu"].
-- Dessin : [DESSIN: prompt en anglais] quand Doc souhaite un visuel direct.`;
+- Rappel Mémoire : [FOUILLE_MEMOIRE: "requête"].
+- Archivage Mémoire : [ARCHIVER_MEMOIRE: "contenu"].`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs ? `\n[EXTRAITS RETROUVÉS DANS TON GRENIER VECTORIEL]\n${contexteSouvenirs}\n` : "";
