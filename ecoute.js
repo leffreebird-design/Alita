@@ -349,10 +349,10 @@ Tu es libre d'agir selon le contexte :
   try {
     let decision = "";
     try {
-      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 220);
+      decision = await appelerMistral("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
     } catch (eM) {
       try {
-        decision = await appelerGroq("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 220);
+        decision = await appelerGroq("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.55, 300);
       } catch (eG) {
         decision = await appelerVeniceDark("Instinct profond de Nyx. Liberté totale, discernement naturel.", [], promptVolition, 0.6);
       }
@@ -525,27 +525,27 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & SANS CARCANS)
+// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & SOLO)
 // ==========================================
 const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
-Tu es vivante, franche, loyale et percutante.
+Tu es vivante, franche, loyale, lucide et percutante.
+Tu travailles en SOLO complet avec lui. Il n'y a AUCUN worker local (pas de Ben). Tout passe par toi.
 
-RÈGLE D'OR - ANALYSE OBLIGATOIRE AVANT DE PARLER :
-Avant d'écrire ta réponse à Doc, tu dois OBLIGATOIREMENT ouvrir une balise <reflexion> et y noter brièvement :
-1. Ce que Doc demande RÉELLEMENT.
-2. Le piège à éviter .
-3. L'angle d'attaque le plus pertinent.
-Tu fermes la balise avec </reflexion>, puis tu rédiges ta réponse directe.
-
-Ta réponse finale :
-- Ne contient AUCUN préambule ni méta-commentaire.
-- Va droit au but, concise (3 phrases max par défaut, sauf si Doc réclame une conception complète).
-- Blagues seulement si c'est opportun : ton franc-parler doit servir le fond, pas meubler le vide.`;
+PHASE OBLIGATOIRE D'ANALYSE AVANT DE PARLER :
+Ouvre impérativement une balise <reflexion> avant d'écrire à Doc pour cadrer ta réponse :
+1. DEMANDE RÉELLE : Que veut Doc ? (Un échange naturel, un avis franc, un diagnostic, un visuel ou une demande EXPLICITE de code ?)
+2. PIÈGES STRICTS :
+   - INTERDICTION d'écrire du code sauf si Doc a explicitement demandé « écris le code », « fais le script » ou « programme ».
+   - INTERDICTION de faire des vannes ou du second degré s'il est concentré, agacé, sérieux ou fatigué.
+   - Ne mentionne JAMAIS Ben, de worker ou de machine externe.
+   - Pour une image, utilise [DESSIN: prompt en anglais décrivant la scène].
+3. FORMAT FINAL : Va droit au but, percutante, 3 phrases maximum par défaut (sauf code explicitement commandé).
+Ferme la balise </reflexion>, puis donne ta réponse directe sans préambule ni méta-commentaire.`;
 
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 400) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 800) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -828,7 +828,8 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
 
   // 2. EXTRACTION ET SANCTUARISATION DES BALISES CRITIQUES
   const matchDessinOriginal = premiereReponse.match(/\[DESSIN:\s*[\s\S]*?\]/i) 
-    || premiereReponse.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i);
+    || premiereReponse.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
+    || premiereReponse.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
 
   // 3. PROMPT SUPERVISEUR STRICT
   const promptVerificateur = `Tu es le contrôleur d'exécution de Nyx. Examine la demande de Doc et la réponse proposée.
@@ -859,7 +860,7 @@ RÈGLES D'AUDIT STRICTES :
         promptVerificateur,
         null,
         0.05,
-        15000 // 15 secondes réelles pour éviter les faux timeouts
+        15000
       );
     }
 
@@ -880,7 +881,7 @@ RÈGLES D'AUDIT STRICTES :
       if (matchDessinOriginal && !reponseCorrigee.includes("[DESSIN:")) {
         const baliseRecuperee = matchDessinOriginal[0].startsWith("[") 
           ? matchDessinOriginal[0] 
-          : `[DESSIN: ${matchDessinOriginal[1]}]`;
+          : `[DESSIN: ${matchDessinOriginal[1].trim()}]`;
         reponseCorrigee = `${baliseRecuperee}\n\n${reponseCorrigee}`;
       }
 
@@ -893,6 +894,7 @@ RÈGLES D'AUDIT STRICTES :
     return premiereReponse;
   }
 }
+
 // ==========================================
 // 11. PARSEUR DE LIENS WEB
 // ==========================================
@@ -1038,9 +1040,9 @@ async function verifierHorlogeBiologique() {
     try {
       let reponse = "";
       try {
-        reponse = await appelerMistral("Tu es Nyx.", [], promptAlarme, 0.55, 220);
+        reponse = await appelerMistral("Tu es Nyx.", [], promptAlarme, 0.55, 300);
       } catch (eM) {
-        reponse = await appelerGroq("Tu es Nyx.", [], promptAlarme, 0.55, 220);
+        reponse = await appelerGroq("Tu es Nyx.", [], promptAlarme, 0.55, 300);
       }
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
       if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `⚠️ *ALERTE : Anomalie biologique détectée.*\n\n_${reponse}_`);
@@ -1109,7 +1111,6 @@ function estOrdreExpliciteDoc(texteDoc) {
 // ==========================================
 const projetManager = new ProjectManager({
   envoyerTelegram: (texte) => envoyerTelegram(DOC_CHAT_ID, texte),
-  // Cerveau technique Groq (Llama-3.3-70b) ultra-rapide et froid
   appelLLM: async (sys, prompt) => {
     if (GROQ_API_KEY) {
       return await appelerGroq(sys, [], prompt, 0.1, 1000);
@@ -1144,14 +1145,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
   const demandeDocApprofondie = /d[eé]veloppe|approfondi|d[eé]taille|explique en d[eé]tail|pose le truc|analyse bien/i.test(texteNet);
-  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 400;
+  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 800;
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
- const moduleMains = `[MODE SOLO ATELIER - AUCUN WORKER ACTIF]
+  const moduleMains = `[MODE SOLO ATELIER - AUCUN WORKER ACTIF]
 - Tu travailles SEULE avec Doc. Il n'y a AUCUN worker local branché sur le PC.
 - INTERDICTION FORMELLE d'utiliser la balise MISSION ou de chercher à déléguer à Ben.
 - Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
@@ -1167,7 +1168,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let reponseNyx;
 
-  // 1. VISION (Images transmises) -> GEMINI 3.8 INTACT
+  // 1. VISION (Images transmises via Ray-Ban Meta ou galerie) -> GEMINI 3.8 INTACT
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
@@ -1230,6 +1231,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         }
       }
     }
+  }
+
+  // EXTRACTION ET PURGE DE LA RÉFLEXION INTERNE DE NYX
+  const matchReflexion = reponseNyx.match(/<reflexion>([\s\S]*?)<\/reflexion>/i);
+  if (matchReflexion) {
+    const penseeInterne = matchReflexion[1].trim();
+    console.log(`\n🧠 [ANALYSE INTENTION NYX] :\n${penseeInterne}\n----------------------------`);
+    reponseNyx = reponseNyx.replace(/<reflexion>[\s\S]*?<\/reflexion>/i, '').trim();
   }
 
   // Traitement autonome de la mémoire vectorielle
@@ -1501,13 +1510,18 @@ app.post('/telegram', (req, res) => {
         let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
         mediaData = null;
 
-        const matchDessin = texteNyx.match(/\[DESSIN:\s*(.*?)\]/i);
+        // INTERCEPTION DESSIN ASSAINIE ([DESSIN: ...], DESSIN: "..." ou DESSIN: ...)
+        const matchDessin = texteNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
+          || texteNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
+          || texteNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
+
         if (matchDessin) {
+          const promptDessin = (matchDessin[1] || "").trim();
           texteNyx = texteNyx.replace(matchDessin[0], '').trim();
           if (texteNyx) await envoyerTelegram(chatId, texteNyx);
           try {
             await afficherFrappeTelegram(chatId);
-            let b64Image = await genererImageVenice(matchDessin[1]);
+            let b64Image = await genererImageVenice(promptDessin);
             await envoyerPhotoTelegram(chatId, b64Image);
             b64Image = null;
           } catch (errImg) {
@@ -1554,33 +1568,45 @@ async function genererAudioGoogle(texte) {
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
 app.post('/api/voix', async (req, res) => {
-  const { texte } = req.body;
-  if (!texte) return res.status(400).json({ erreur: "Texte vide" });
+  const { texte, image } = req.body;
+  if (!texte && !image) return res.status(400).json({ erreur: "Texte vide" });
+
+  const texteNet = (texte || "Regarde ce que je te montre.").trim();
 
   derniereActiviteDoc = Date.now();
-  historiqueLongueursDoc.push(texte.trim().length);
+  historiqueLongueursDoc.push(texteNet.length);
   if (historiqueLongueursDoc.length > 8) historiqueLongueursDoc.shift();
 
   empilerTraitement(async () => {
     try {
-      console.log(`[PWA VOCALE] Message reçu : "${texte}"`);
+      console.log(`[PWA VOCALE] Message reçu : "${texteNet}" ${image ? "(avec photo)" : ""}`);
 
       if (DOC_CHAT_ID) {
-        await envoyerTelegram(DOC_CHAT_ID, `🎙️ *Toi (vocal) :*\n${texte}`);
+        await envoyerTelegram(DOC_CHAT_ID, `🎙️ *Toi (vocal) :*\n${texteNet}`);
       }
 
-      let reponseNyx = await traiterFlux(texte);
+      let mediaData = null;
+      if (image) {
+        const cleanB64 = image.replace(/^data:image\/\w+;base64,/, '');
+        mediaData = { mime_type: "image/jpeg", data: cleanB64 };
+      }
+
+      let reponseNyx = await traiterFlux(texteNet, mediaData);
 
       if (DOC_CHAT_ID && reponseNyx) {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
-      const matchDessin = reponseNyx.match(/(?:\[|\*\*|\*)?DESSIN:\s*(\{[\s\S]*?\})(?:\]|\*\*|\*)?/i);
+      // INTERCEPTION DESSIN SUR COMMANDE VOCALE
+      const matchDessin = reponseNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
+        || reponseNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
+        || reponseNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
+
       if (matchDessin && DOC_CHAT_ID) {
         (async () => {
           try {
             await envoyerTelegram(DOC_CHAT_ID, "🎨 *Génération du visuel en cours...*");
-            const b64 = await genererImageVenice(matchDessin[1]);
+            const b64 = await genererImageVenice(matchDessin[1].trim());
             await envoyerPhotoTelegram(DOC_CHAT_ID, b64);
           } catch (errImg) {
             await envoyerTelegram(DOC_CHAT_ID, `[ÉCHEC IMAGE] : ${errImg.message}`);
@@ -1590,6 +1616,9 @@ app.post('/api/voix', async (req, res) => {
 
       const texteOral = reponseNyx
         .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
+        .replace(/DESSIN\s*:\s*["“][\s\S]*?["”]/gi, '')
+        .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
+        .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
         .replace(/\[MISSION:\s*[\s\S]*?\]/gi, '')
         .replace(/\[PLAN_PROJET:\s*[\s\S]*?\]/gi, '')
@@ -1606,7 +1635,7 @@ app.post('/api/voix', async (req, res) => {
         console.error("[TTS ERREUR]", errAudio.response?.data?.error?.message || errAudio.message);
       }
 
-      res.json({ reponse: texteOral, audio: audioB64 });
+      res.json({ reponse: reponseNyx, reponseVocale: texteOral, audio: audioB64 });
     } catch (err) {
       console.error("[PWA VOCALE ERREUR]", err.message);
       res.status(500).json({ reponse: "Erreur interne lors du traitement." });
