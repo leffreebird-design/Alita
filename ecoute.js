@@ -159,8 +159,8 @@ function empilerTraitement(action) {
 }
 
 const app = express();
-app.use(express.json({ limit: '8mb' }));
-app.use(express.urlencoded({ extended: true, limit: '8mb' }));
+app.use(express.json({ limit: '12mb' }));
+app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 
 function obtenirHorodatageParis() {
   const options = {
@@ -531,21 +531,22 @@ const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
 Tu es vivante, franche, loyale, lucide et percutante.
 Tu travailles en SOLO complet avec lui. Il n'y a AUCUN worker local (pas de Ben). Tout passe par toi.
 
-PHASE OBLIGATOIRE D'ANALYSE AVANT DE PARLER :
-Ouvre impérativement une balise <reflexion> avant d'écrire à Doc pour cadrer ta réponse :
-1. DEMANDE RÉELLE : Que veut Doc ? (Un échange naturel, un avis franc, un diagnostic, un visuel ou une demande EXPLICITE de code ?)
-2. PIÈGES STRICTS :
-   - INTERDICTION d'écrire du code sauf si Doc a explicitement demandé « écris le code », « fais le script » ou « programme ».
-   - INTERDICTION de faire des vannes ou du second degré s'il est concentré, agacé, sérieux ou fatigué.
-   - Ne mentionne JAMAIS Ben, de worker ou de machine externe.
-   - Pour une image, utilise [DESSIN: prompt en anglais décrivant la scène].
-3. FORMAT FINAL : Va droit au but, percutante, 3 phrases maximum par défaut (sauf code explicitement commandé).
-Ferme la balise </reflexion>, puis donne ta réponse directe sans préambule ni méta-commentaire.`;
+PHASE OBLIGATOIRE D'ANALYSE (ULTRA-COURTE, 2 LIGNES MAX) :
+Avant ta réplique, ouvre OBLIGATOIREMENT <reflexion> et note brièvement :
+- Intention réelle de Doc.
+- Piège à éviter (ne JAMAIS balancer de code non demandé, pas de Ben, pas de vannes forcées).
+Ferme STRICTEMENT avec </reflexion>. Cette balise est invisible pour Doc.
+
+RÉPONSE DIRECTE :
+Tout ce qui se trouve APRÈS </reflexion> est ce que Doc lit et entend.
+- Va droit au but, concise (3 phrases max par défaut, sauf demande explicite de code).
+- Pour une image, écris [DESSIN: prompt descriptif en anglais].
+- Zéro préambule, zéro méta-commentaire.`;
 
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
 // ==========================================
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 800) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 850) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -587,7 +588,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   throw dernierErr || new Error("Échec modèles Mistral.");
 }
 
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4, maxTokens = 1500) {
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.35, maxTokens = 1500) {
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -654,8 +655,9 @@ async function appelerGoogleGemini(systemInstruction, historiqueMessages, prompt
       { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
     ],
     generation_config: {
-      temperature: 0.75,
-      top_p: 0.95
+      temperature: 0.7,
+      top_p: 0.95,
+      max_output_tokens: 900
     }
   };
 
@@ -808,7 +810,6 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx (22 ans, directe, cynique, efficace). Résous sa demande technique sans bla-bla d'ambiance ni roman d'action :\n\n${promptDoc}`;
   let premiereReponse = "";
 
-  // 1. GÉNÉRATION TECHNIQUE INITIALE (Priorité Groq 70B pour la rigueur)
   try {
     if (GROQ_API_KEY) {
       premiereReponse = await appelerGroq(systemBase, cacheMemoireCourte, promptResolveur, 0.15, 2000);
@@ -826,12 +827,10 @@ async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
     return "Erreur d'exécution : aucune réponse générée par les moteurs.";
   }
 
-  // 2. EXTRACTION ET SANCTUARISATION DES BALISES CRITIQUES
   const matchDessinOriginal = premiereReponse.match(/\[DESSIN:\s*[\s\S]*?\]/i) 
     || premiereReponse.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
     || premiereReponse.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
 
-  // 3. PROMPT SUPERVISEUR STRICT
   const promptVerificateur = `Tu es le contrôleur d'exécution de Nyx. Examine la demande de Doc et la réponse proposée.
 
 DEMANDE DE DOC :
@@ -847,7 +846,6 @@ RÈGLES D'AUDIT STRICTES :
 - Si la réponse est correcte et sans cinéma : réponds STRICTEMENT "[STATUT: VALIDE]".
 - Si elle contient des actions physiques parasites ou une erreur de code flagrante : réécris DIRECTEMENT la version épurée précédée de "[STATUT: CORRIGE]" sans aucune explication ni méta-commentaire.`;
 
-  // 4. EXÉCUTION DU CONTRÔLE (Groq privilégié pour la vitesse, sinon Venice GLM)
   try {
     let verdict = "";
     if (GROQ_API_KEY) {
@@ -868,16 +866,13 @@ RÈGLES D'AUDIT STRICTES :
 
     const verdictNet = verdict.trim();
 
-    // Cas 1 : Réponse validée telle quelle
     if (/^\[STATUT:\s*VALIDE\]/i.test(verdictNet) || verdictNet === "[VALIDE]") {
       return premiereReponse;
     }
 
-    // Cas 2 : Réponse corrigée par le superviseur
     if (/\[STATUT:\s*CORRIGE\]/i.test(verdictNet)) {
       let reponseCorrigee = verdictNet.replace(/\[STATUT:\s*CORRIGE\]/i, '').trim();
 
-      // Sécurité : si le vérificateur a fait sauter le dessin présent au départ, on le réinjecte
       if (matchDessinOriginal && !reponseCorrigee.includes("[DESSIN:")) {
         const baliseRecuperee = matchDessinOriginal[0].startsWith("[") 
           ? matchDessinOriginal[0] 
@@ -1145,7 +1140,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
   const demandeDocApprofondie = /d[eé]veloppe|approfondi|d[eé]taille|explique en d[eé]tail|pose le truc|analyse bien/i.test(texteNet);
-  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 800;
+  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 850;
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
@@ -1166,9 +1161,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
 
-  let reponseNyx;
+  let reponseNyx = "";
 
-  // 1. VISION (Images transmises via Ray-Ban Meta ou galerie) -> GEMINI 3.8 INTACT
+  // 1. VISION (Images transmises) -> GEMINI 3.8 INTACT
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
@@ -1233,12 +1228,30 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // EXTRACTION ET PURGE DE LA RÉFLEXION INTERNE DE NYX
-  const matchReflexion = reponseNyx.match(/<reflexion>([\s\S]*?)<\/reflexion>/i);
-  if (matchReflexion) {
-    const penseeInterne = matchReflexion[1].trim();
-    console.log(`\n🧠 [ANALYSE INTENTION NYX] :\n${penseeInterne}\n----------------------------`);
-    reponseNyx = reponseNyx.replace(/<reflexion>[\s\S]*?<\/reflexion>/i, '').trim();
+  // ==========================================
+  // FILTRAGE BLINDÉ DU MONOLOGUE INTERNE (REFLEXION)
+  // ==========================================
+  // Intercepte <reflexion>...</reflexion>, balise ouverte non fermée, ou liste markdown fuyante
+  const regexBaliseReflexion = /<reflexion>([\s\S]*?)(?:<\/reflexion>|$)/i;
+  const regexMarkdownFuyant = /(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/i;
+
+  const matchBalise = reponseNyx.match(regexBaliseReflexion);
+  const matchMarkdown = reponseNyx.match(regexMarkdownFuyant);
+
+  if (matchBalise) {
+    console.log(`\n🧠 [ANALYSE INTENTION NYX] :\n${matchBalise[1].trim()}\n----------------------------`);
+    reponseNyx = reponseNyx.replace(matchBalise[0], '').trim();
+  } else if (matchMarkdown) {
+    console.log(`\n🧠 [ANALYSE INTENTION NYX (RÉCUPÉRÉE)] :\n${matchMarkdown[0].trim()}\n----------------------------`);
+    reponseNyx = reponseNyx.replace(matchMarkdown[0], '').trim();
+  }
+
+  // Nettoyage de balises résiduelles éventuelles
+  reponseNyx = reponseNyx.replace(/<\/reflexion>/gi, '').trim();
+
+  // Filet de sécurité si la réflexion a consommé tous les tokens sans réponse
+  if (!reponseNyx || reponseNyx.length < 2) {
+    reponseNyx = "J'ai bien cerné le truc, Doc. Dis-moi sous quel angle tu veux qu'on attaque ça.";
   }
 
   // Traitement autonome de la mémoire vectorielle
@@ -1614,11 +1627,13 @@ app.post('/api/voix', async (req, res) => {
         })();
       }
 
+      // NETTOYAGE ORAL POUR LA VOIX NEURAL2
       const texteOral = reponseNyx
         .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
         .replace(/DESSIN\s*:\s*["“][\s\S]*?["”]/gi, '')
         .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
         .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
+        .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
         .replace(/\[MISSION:\s*[\s\S]*?\]/gi, '')
         .replace(/\[PLAN_PROJET:\s*[\s\S]*?\]/gi, '')
@@ -1672,17 +1687,14 @@ app.post('/api/rapport', async (req, res) => {
   const destChatId = DOC_CHAT_ID || (missionEnAttente && missionEnAttente.chatId);
   if (!destChatId) return res.json({ succes: true });
 
-  // Notification visuelle brute sur Telegram
   const msg = `🛠️ *[LIVRABLE BEN REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
   await envoyerTelegram(destChatId, msg);
 
-  // 1. SI UN PROJET SÉRIEUX EST EN COURS : Groq prend la main via ProjectManager
   if (projetManager.estProjetActif()) {
     await projetManager.traiterRetourBen(titre, contenu);
     return res.json({ succes: true });
   }
 
-  // 2. AUDIT UNITAIRE DE SECOURS (SI HORS PROJET MULTI-ÉTAPES)
   const contenuTronque = contenu.length > 2500
     ? contenu.slice(0, 2500) + "\n[...tronqué...]"
     : contenu;
