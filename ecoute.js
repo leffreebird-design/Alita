@@ -29,7 +29,7 @@ const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
 const GEMINI_API_KEY_FREE = (process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const GEMINI_API_KEY_PAID = (process.env.GEMINI_API_KEY_PAID || "").trim();
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
-const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-2.5-flash").trim();
+const MODEL_GEMINI = (process.env.GEMINI_MODEL || "gemini-3.5-flash").trim();
 
 // GROQ - RÉSERVÉ STRICTEMENT AU CODE & PROJETS TECHNIQUES (LLAMA-3.3-70B GRATUIT)
 const GROQ_API_KEY = (process.env.GROQ_API_KEY || "").trim();
