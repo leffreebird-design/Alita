@@ -792,7 +792,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
       const res = await appelerGroq(systemBase, historique, prompt, 0.15, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
-      console.warn("[CASCADE CODE] 1. Groq 70B KO :", e1.message);
+     console.warn("[CASCADE CODE] 1. Groq KO :", e1.response?.data?.error?.message || e1.message);
     }
   }
 
