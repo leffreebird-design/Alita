@@ -1481,13 +1481,19 @@ app.post('/telegram', (req, res) => {
           const promptDessin = (matchDessin[1] || "").trim();
           texteNyx = texteNyx.replace(matchDessin[0], '').trim();
           if (texteNyx) await envoyerTelegram(chatId, texteNyx);
-          try {
-            await afficherFrappeTelegram(chatId);
-            let b64Image = await genererImageVenice(promptDessin);
-            await envoyerPhotoTelegram(chatId, b64Image);
-            b64Image = null;
-          } catch (errImg) {
-            await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
+
+          // Ne déclenche le rendu lourd que si tu en as parlé ou demandé un croquis
+          const docVeutImage = /\b(dessin|dessine|image|photo|visuel|croquis|schéma|tableau|peins|affiche|montre)\b/i.test(texteMessageClavier);
+
+          if (docVeutImage) {
+            try {
+              await afficherFrappeTelegram(chatId);
+              let b64Image = await genererImageVenice(promptDessin);
+              await envoyerPhotoTelegram(chatId, b64Image);
+              b64Image = null;
+            } catch (errImg) {
+              await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
+            }
           }
         } else {
           if (texteNyx) await envoyerTelegram(chatId, texteNyx);
