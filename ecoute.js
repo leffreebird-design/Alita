@@ -525,7 +525,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 // ==========================================
-// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & SOLO)
+// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & DIRECTE)
 // ==========================================
 const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
 Vous avancez tous les deux en duo direct, en tête-à-tête. Tu es vivante, franche, loyale et percutante.
@@ -1179,7 +1179,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. CODE OU TÂCHE TECHNIQUE
+  // 3. TÂCHE TECHNIQUE OU CODE
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
@@ -1204,7 +1204,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       }
     } catch (errMistral) {
       try {
-        reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
+        if (GROQ_API_KEY) {
+          reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
+        } else {
+          reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
+        }
       } catch (errGroq) {
         reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
       }
@@ -1212,16 +1216,24 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   // ==========================================
-  // PURGE ET NETTOYAGE AU NIVEAU DU CODE
+  // FILTRAGE ET PURGE RIGOUREUSE DU TEXTE
   // ==========================================
-  // 1. Log et retrait du bloc de réflexion
-  const matchReflexion = reponseNyx.match(/<reflexion>([\s\S]*?)(?:<\/reflexion>|$)/i);
-  if (matchReflexion) {
-    console.log(`\n🧠 [ANALYSE INTENTION NYX] :\n${matchReflexion[1].trim()}\n----------------------------`);
-    reponseNyx = reponseNyx.replace(matchReflexion[0], '').trim();
+  // 1. Capture et log de la réflexion interne
+  const regexBaliseReflexion = /<reflexion>([\s\S]*?)(?:<\/reflexion>|$)/i;
+  const regexMarkdownFuyant = /(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/i;
+
+  const matchBalise = reponseNyx.match(regexBaliseReflexion);
+  const matchMarkdown = reponseNyx.match(regexMarkdownFuyant);
+
+  if (matchBalise) {
+    console.log(`\n🧠 [ANALYSE INTENTION NYX] :\n${matchBalise[1].trim()}\n----------------------------`);
+    reponseNyx = reponseNyx.replace(matchBalise[0], '').trim();
+  } else if (matchMarkdown) {
+    console.log(`\n🧠 [ANALYSE INTENTION NYX (RÉCUPÉRÉE)] :\n${matchMarkdown[0].trim()}\n----------------------------`);
+    reponseNyx = reponseNyx.replace(matchMarkdown[0], '').trim();
   }
 
-  // 2. Coupe nette de tous les préfixes robots parasites ("Réponse directe :", "Réponse :", etc.)
+  // 2. Élimination formelle des préfixes robots résiduels ("Réponse directe :", "Réponse :", etc.)
   reponseNyx = reponseNyx
     .replace(/<\/reflexion>/gi, '')
     .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/i, '')
@@ -1274,195 +1286,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
-  // Stockage propre (débarrassé de tout préfixe pour ne pas contaminer la suite)
-  const LIMITE_CARACTERES_MEMOIRE = 2000;
-  const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
-    ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
-    : texteNet;
-
-  const texteNyxSecurise = reponseNyx.length > 2500
-    ? reponseNyx.slice(0, 2500) + "\n[...tronqué...]"
-    : reponseNyx;
-
-  if (mediaData) {
-    const isAudio = mediaData.mime_type.startsWith('audio');
-    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? "[Audio]" : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]") });
-  } else {
-    cacheMemoireCourte.push({ role: "Doc", texte: texteDocSecurise });
-  }
-
-  cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
-  if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
-    cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
-  }
-  if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
-
-  archiverDansJournalBrut("Doc", texteDocSecurise);
-  archiverDansJournalBrut("Nyx", texteNyxSecurise);
-
-  return reponseNyx;
-}
-  // 2. AUDIO (Voix directe) -> GEMINI 3.8 INTACT
-  else if (estAudio) {
-    const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
-    try {
-      reponseNyx = await appelerGoogleGemini(sys, cacheMemoireCourte, texteNet, mediaData);
-    } catch (errGoogle) {
-      reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
-    }
-  } 
-  // 3. TÂCHE TECHNIQUE LOURDE OU CODE -> GROQ DIRECT POUR LA PRÉCISION
-  else if (estComplexe) {
-    const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
-    try {
-      reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
-    } catch (errDual) {
-      console.warn("[DOUBLE VÉRIF ÉCHEC, bascule Groq direct] :", errDual.message);
-      try {
-        if (GROQ_API_KEY) {
-          reponseNyx = await appelerGroq(sys, cacheMemoireCourte, texteNet, 0.2, plafondTokens);
-        } else {
-          reponseNyx = await appelerMistral(sys, cacheMemoireCourte, texteNet, 0.3, plafondTokens);
-        }
-      } catch (e) {
-        reponseNyx = await appelerVeniceDark(sys, cacheMemoireCourte, texteNet, 0.7);
-      }
-    }
-  }
-  // 4. TOUT LE FLUX (Conversation, vannes, quotidien, moments fun) -> MISTRAL EN PRIORITÉ ABSOLUE
-  else {
-    try {
-      if (MISTRAL_API_KEY) {
-        reponseNyx = await appelerMistral(systemBase, cacheMemoireCourte, texteNet, 0.55, plafondTokens);
-      } else if (GROQ_API_KEY) {
-        reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
-      } else {
-        reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
-      }
-    } catch (errMistral) {
-      console.warn("[MISTRAL HS, parachute 1 Groq activé] :", errMistral.message);
-      try {
-        if (GROQ_API_KEY) {
-          reponseNyx = await appelerGroq(systemBase, cacheMemoireCourte, texteNet, 0.4, plafondTokens);
-        } else {
-          reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
-        }
-      } catch (errGroq) {
-        console.warn("[GROQ HS, parachute 2 Venice activé] :", errGroq.message);
-        try {
-          reponseNyx = await appelerVeniceDark(systemBase, cacheMemoireCourte, texteNet, 0.7);
-        } catch (errVenice) {
-          reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
-        }
-      }
-    }
-  }
-
-  // ==========================================
-  // FILTRAGE BLINDÉ DU MONOLOGUE INTERNE (REFLEXION)
-  // ==========================================
-  // Intercepte <reflexion>...</reflexion>, balise ouverte non fermée, ou liste markdown fuyante
-  const regexBaliseReflexion = /<reflexion>([\s\S]*?)(?:<\/reflexion>|$)/i;
-  const regexMarkdownFuyant = /(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/i;
-
-  const matchBalise = reponseNyx.match(regexBaliseReflexion);
-  const matchMarkdown = reponseNyx.match(regexMarkdownFuyant);
-
-  if (matchBalise) {
-    console.log(`\n🧠 [ANALYSE INTENTION NYX] :\n${matchBalise[1].trim()}\n----------------------------`);
-    reponseNyx = reponseNyx.replace(matchBalise[0], '').trim();
-  } else if (matchMarkdown) {
-    console.log(`\n🧠 [ANALYSE INTENTION NYX (RÉCUPÉRÉE)] :\n${matchMarkdown[0].trim()}\n----------------------------`);
-    reponseNyx = reponseNyx.replace(matchMarkdown[0], '').trim();
-  }
-
-  // Nettoyage de balises résiduelles éventuelles
-  reponseNyx = reponseNyx.replace(/<\/reflexion>/gi, '').trim();
-
-  // Filet de sécurité si la réflexion a consommé tous les tokens sans réponse
-  if (!reponseNyx || reponseNyx.length < 2) {
-    reponseNyx = "J'ai bien cerné le truc, Doc. Dis-moi sous quel angle tu veux qu'on attaque ça.";
-  }
-
-  // Traitement autonome de la mémoire vectorielle
-  const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
-  if (matchFouille && !contexteSouvenirs) {
-    const requeteRecherche = matchFouille[1].trim();
-    const resultats = await fouillerMemoireVectorielle(requeteRecherche, 'factuel', 3);
-    
-    if (resultats && resultats.length > 0) {
-      const extraits = resultats.map((r, i) => `Fragment ${i + 1} (${(r.similarity * 100).toFixed(0)}%) : ${r.content}`).join("\n\n");
-      return await traiterFlux(texteBrut, mediaData, texteLegende, extraits);
-    } else {
-      return await traiterFlux(texteBrut, mediaData, texteLegende, "Rien trouvé dans les archives.");
-    }
-  }
-
-  // Interception mémoire
-  const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*)/i);
-  if (matchArchivage) {
-    const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
-    stockerSouvenirVectoriel(texteAStocker, { source: "flux_direct" }).catch(()=>{});
-    reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
-  }
-
-  const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
-  if (matchConfigReveil) {
-    try {
-      const newConfig = JSON.parse(matchConfigReveil[1]);
-      cacheEtatProfond.reveil = { ...cacheEtatProfond.reveil, ...newConfig, etat: "attente" };
-      if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, cacheEtatProfond.reveil).catch(()=>{});
-      reponseNyx = reponseNyx.replace(matchConfigReveil[0], '').trim();
-    } catch(e) {}
-  }
-
-  if (reponseNyx.includes("[STOP_REVEIL]")) {
-    cacheEtatProfond.reveil.etat = "attente";
-    if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "attente" }).catch(()=>{});
-    reponseNyx = reponseNyx.replace(/\[STOP_REVEIL\]/g, '').trim();
-  }
-
-  // INTERCEPTION MISSION WORKER BEN D'ORDRE UNITAIRE (SI PAS DE PROJET EN COURS)
-  const matchMissionAuto = reponseNyx.match(/(?:\[|\*|\*)?MISSION:\s*(\{[\s\S]*?\})(?:\]|\*|\*)?/i);
-  if (matchMissionAuto && !projetManager.estProjetActif()) {
-    reponseNyx = reponseNyx.replace(matchMissionAuto[0], '').trim();
-
-    if (!estOrdreExpliciteDoc(texteNet)) {
-      console.log("🛡️ [SÉCURITÉ BEN] Mission annulée : simple discussion ou question théorique de Doc.");
-    } else {
-      try {
-        let actionExtraite;
-        try {
-          const parsed = JSON.parse(matchMissionAuto[1]);
-          const cmd = parsed.commande || parsed.command || parsed.description || parsed.action || parsed.task;
-          actionExtraite = typeof cmd === 'string'
-            ? { type: "RAW_TASK", description: cmd }
-            : (parsed.type ? parsed : { type: "RAW_TASK", description: JSON.stringify(parsed) });
-        } catch {
-          actionExtraite = { type: "RAW_TASK", description: matchMissionAuto[1] };
-        }
-
-        const validation = typeof validerEtSecuriserMission === 'function'
-          ? validerEtSecuriserMission(actionExtraite.description || matchMissionAuto[1])
-          : { action: actionExtraite };
-
-        missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-        }
-
-        if (DOC_CHAT_ID) {
-          const rendu = validation.action.type === "RAW_TASK" ? validation.action.description : JSON.stringify(validation.action);
-          await envoyerTelegram(DOC_CHAT_ID, `⚙️ Ordre validé et transmis à Ben :\n` + rendu);
-        }
-      } catch (errMission) {
-        console.error("[ERREUR MISSION]", errMission.message);
-      }
-    }
-  }
-
-  reponseNyx = reponseNyx.trim();
-
+  // Stockage assaini en mémoire vive
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -1557,14 +1381,14 @@ app.post('/telegram', (req, res) => {
       /\b(bd de \d+|planche de bd|pipeline complet|projet bd|automatise de bout en bout)\b/i.test(texteMin)
     );
 
-    // 1. CHANTIER TECHNIQUE SÉRIEUX -> Géré par ProjectManager (Groq 70B strict)
+    // 1. CHANTIER TECHNIQUE SÉRIEUX
     if (estDemandeProjetSerieux && !projetManager.estProjetActif()) {
       await afficherFrappeTelegram(chatId);
       await projetManager.demarrerProjet(texteMessageClavier);
       return;
     }
 
-    // 2. MOMENTS FUN, BLABLA, QUESTION, CODE SPÉCIFIQUE OU MÉDIA -> Géré par Mistral
+    // 2. DISCUSSION, MÉDIA OU VOCAL
     let texteFinal = texteMessageClavier;
     let mediaData = null;
 
@@ -1653,7 +1477,7 @@ app.post('/telegram', (req, res) => {
         let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
         mediaData = null;
 
-        // INTERCEPTION DESSIN ASSAINIE ([DESSIN: ...], DESSIN: "..." ou DESSIN: ...)
+        // DÉTECTION IMAGE TOUT-TERRAIN
         const matchDessin = texteNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
           || texteNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
           || texteNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
@@ -1757,13 +1581,14 @@ app.post('/api/voix', async (req, res) => {
         })();
       }
 
-      // NETTOYAGE ORAL POUR LA VOIX NEURAL2
+      // NETTOYAGE ORAL COMPLET POUR LE RETOUR AUDIO
       const texteOral = reponseNyx
         .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
         .replace(/DESSIN\s*:\s*["“][\s\S]*?["”]/gi, '')
         .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
         .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
         .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
+        .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
         .replace(/\[MISSION:\s*[\s\S]*?\]/gi, '')
         .replace(/\[PLAN_PROJET:\s*[\s\S]*?\]/gi, '')
