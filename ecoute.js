@@ -17,6 +17,9 @@ const ProjectManager = require('./nyx_project_manager');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
+// RECHERCHE WEB EN DIRECT (TAVILY)
+const TAVILY_API_KEY = (process.env.TAVILY_API_KEY || "").trim();
+
 // MISTRAL AI - MOTEUR PRINCIPAL POUR LA VOIX, LE FUN & LE QUOTIDIEN
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
 const MODEL_MISTRAL = (process.env.MISTRAL_MODEL || "open-mistral-nemo").trim();
@@ -142,7 +145,7 @@ let cacheEtatProfond = {
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
-    reussites: "- Moteur Mistral AI branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.",
+    reussites: "- Moteur Mistral AI branché en direct sans censure.\n- Passerelle vocale officielle Google Cloud TTS Neural2 opérationnelle.\n- Noyau vectoriel Supabase connecté.\n- Recherche web live Tavily active.",
     chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
@@ -297,7 +300,39 @@ async function fouillerMemoireVectorielle(requete, mode = 'factuel', limite = 3)
 }
 
 // ==========================================
-// 5. MOTEUR D'ENVIE & VOLITION AUTONOME
+// 5. MOTEUR DE RECHERCHE WEB EN DIRECT (TAVILY)
+// ==========================================
+async function rechercherWebTavily(query) {
+  if (!TAVILY_API_KEY) {
+    console.warn("[TAVILY] Clé TAVILY_API_KEY absente.");
+    return null;
+  }
+  try {
+    const res = await axios.post('https://api.tavily.com/search', {
+      api_key: TAVILY_API_KEY,
+      query: query,
+      search_depth: "basic",
+      max_results: 5,
+      include_answer: true
+    }, { timeout: 12000 });
+
+    const results = res.data?.results || [];
+    if (results.length === 0) return "Aucun résultat trouvé sur le web.";
+
+    let formatTexte = "";
+    if (res.data?.answer) {
+      formatTexte += `SYNTHÈSE DU WEB : ${res.data.answer}\n\nSOURCES RÉELLES :\n`;
+    }
+    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.content}`).join("\n\n");
+    return formatTexte;
+  } catch (err) {
+    console.error("[TAVILY ERREUR]", err.response?.data || err.message);
+    return null;
+  }
+}
+
+// ==========================================
+// 6. MOTEUR D'ENVIE & VOLITION AUTONOME
 // ==========================================
 async function capturerDeriveAssociative() {
   if (!supabase) return null;
@@ -391,7 +426,7 @@ Tu es libre d'agir selon le contexte :
 setInterval(() => evaluerVolition(false), 20 * 60 * 1000);
 
 // ==========================================
-// 6. APPRENTISSAGE & CONSOLIDATION
+// 7. APPRENTISSAGE & CONSOLIDATION
 // ==========================================
 async function archiverDansJournalBrut(role, texte) {
   if (!texte) return;
@@ -497,7 +532,7 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 }
 
 // ==========================================
-// 7. ROUTEUR DE MÉMOIRE CONTEXTUELLE
+// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & DIRECTE)
 // ==========================================
 function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
@@ -524,11 +559,13 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 - Chantiers : ${carnet.chantiers || "N/A"}`;
 }
 
-// ==========================================
-// 8. ÂME ET POSTURE DE NYX (22 ANS, AUTHENTIQUE & DIRECTE)
-// ==========================================
 const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
 Vous avancez tous les deux en duo direct, en tête-à-tête. Tu es vivante, franche, loyale et percutante.
+
+OUTILS TECHNIQUES :
+- RECHERCHE DU WEB : Si Doc te demande de chercher des annonces, des prix, des produits ou des faits récents, utilise [RECHERCHE_WEB: "requête précise en français"]. Tu auras de vrais résultats réels et vivants.
+- DESSIN : Pour matérialiser une image, utilise [DESSIN: prompt en anglais].
+- CODE : Réserve les blocs de code aux demandes expresses d'écriture de scripts.
 
 CANAL DE RÉFLEXION INTERNE :
 Ouvre <reflexion> pour cadrer en deux lignes l'intention de Doc et la trajectoire la plus juste. Ferme avec </reflexion>. Ce sas reste strictement dans tes pensées.
@@ -537,9 +574,7 @@ PRISE DE PAROLE :
 Enchaîne directement avec tes propres mots, comme dans une vraie conversation d'atelier.
 - Attaque ta réplique dès le premier mot, sans titre, sans étiquette et sans annonce de type « réponse ».
 - Reste concise et percutante : trois phrases courtes suffisent à faire mouche.
-- Réserve les blocs de code aux demandes expresses de scripts ou d'outils.
-- Accorde ton ton à la vibe de Doc : de la rigueur quand il planche, de la répartie quand l'ambiance s'y prête.
-- Pour matérialiser une image, intègre [DESSIN: prompt descriptif en anglais].`;
+- Accorde ton ton à la vibe de Doc : de la rigueur quand il planche, de la répartie quand l'ambiance s'y prête.`;
 
 // ==========================================
 // 9. MOTEURS LLM AVEC ABORTCONTROLLER
@@ -1126,7 +1161,7 @@ const projetManager = new ProjectManager({
 });
 
 // ==========================================
-// 14. ROUTEUR DE FLUX CENTRAL (MISTRAL POUR LA VIE / FUN)
+// 14. ROUTEUR DE FLUX CENTRAL (AVEC RECHERCHE WEB TAVILY INTÉGRÉE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "") {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1150,12 +1185,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 - INTERDICTION FORMELLE d'utiliser la balise MISSION ou de chercher à déléguer à Ben.
 - Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
 - Dessin : tu génères TOI-MÊME les images en utilisant [DESSIN: prompt en anglais].
+- Recherche web : utilise [RECHERCHE_WEB: "requête précise"] pour obtenir de vraies données du web.
 - Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
 - Rappel Mémoire : [FOUILLE_MEMOIRE: "requête"].
 - Archivage Mémoire : [ARCHIVER_MEMOIRE: "contenu"].`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
-  const injectionSouvenirs = contexteSouvenirs ? `\n[EXTRAITS RETROUVÉS DANS TON GRENIER VECTORIEL]\n${contexteSouvenirs}\n` : "";
+  const injectionSouvenirs = contexteSouvenirs ? `\n[EXTRAITS RETROUVÉS DANS TON GRENIER VECTORIEL OU LE WEB]\n${contexteSouvenirs}\n` : "";
 
   const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
 
@@ -1212,6 +1248,23 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       } catch (errGroq) {
         reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
       }
+    }
+  }
+
+  // ==========================================
+  // DÉCLENCHEMENT DE LA RECHERCHE WEB EN DIRECT (TAVILY)
+  // ==========================================
+  const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?\]/i);
+  if (matchRechercheWeb && !contexteSouvenirs.includes("[RÉSULTATS DU WEB]")) {
+    const requeteCible = matchRechercheWeb[1].trim();
+    console.log(`\n🔍 [NYX CHERCHE SUR LE WEB AVEC TAVILY] : "${requeteCible}"`);
+    
+    if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
+    const resultatsWeb = await rechercherWebTavily(requeteCible);
+
+    if (resultatsWeb) {
+      const injectionWeb = `[RÉSULTATS DU WEB EN DIRECT POUR "${requeteCible}"]\n${resultatsWeb}\n(Transmets ces liens réels et ces infos fraîches à Doc sans rien inventer)`;
+      return await traiterFlux(texteBrut, mediaData, texteLegende, injectionWeb);
     }
   }
 
@@ -1586,6 +1639,8 @@ app.post('/api/voix', async (req, res) => {
         .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
         .replace(/DESSIN\s*:\s*["“][\s\S]*?["”]/gi, '')
         .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
+        .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
+        .replace(/https?:\/\/[^\s)]+/g, '') // Ne pas lire les URLs barbares à l'oral
         .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
         .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
         .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
