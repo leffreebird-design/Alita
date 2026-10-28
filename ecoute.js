@@ -17,7 +17,6 @@ const ProjectManager = require('./nyx_project_manager');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// Nettoyeur d'environnement anti-caractères parasites (guillemets, crochets, espaces)
 function assainirParametre(val) {
   if (!val) return "";
   return String(val).trim().replace(/^["'`\[\(\{]+|["'`\]\)\}]+$/g, '').trim();
@@ -227,8 +226,9 @@ async function genererEmbedding(texte) {
 
   for (const key of GEMINI_KEYS) {
     try {
+      const url = "https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=" + encodeURIComponent(key);
       const res = await axios.post(
-        `[https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=$](https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=$){encodeURIComponent(key)}`,
+        url,
         {
           model: "models/text-embedding-004",
           content: { parts: [{ text: cleanTexte }] }
@@ -324,7 +324,7 @@ async function rechercherWebTavily(query) {
 
     console.log(`\n🔍 [TAVILY REQUÊTE ÉPURÉE] : "${requetePropre}"`);
 
-    const res = await axios.post('https://api.tavily.com/search', {
+    const res = await axios.post("https://api.tavily.com/search", {
       api_key: TAVILY_API_KEY,
       query: requetePropre,
       search_depth: "basic",
@@ -454,7 +454,7 @@ async function consoliderMemoire() {
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} :${(m.texte || '').slice(0, 400)}`)
+      .map(m => `[${m.date}] ${m.role} : ${(m.texte || '').slice(0, 400)}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental. Tu mets à jour ton carnet de bord.
@@ -574,7 +574,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post('[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)', {
+  const res = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
     model: modelCible,
     messages: messages,
     temperature: temperature,
@@ -583,7 +583,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
     headers: {
       'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': '[https://alita-gsoe.onrender.com](https://alita-gsoe.onrender.com)',
+      'HTTP-Referer': 'https://alita-gsoe.onrender.com',
       'X-Title': 'Nyx Core'
     },
     timeout: 20000
@@ -603,7 +603,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post('[https://api.mistral.ai/v1/chat/completions](https://api.mistral.ai/v1/chat/completions)', {
+  const res = await axios.post("https://api.mistral.ai/v1/chat/completions", {
     model: MODEL_MISTRAL,
     messages: messages,
     temperature: temperature,
@@ -627,7 +627,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
   }
   contents.push({ role: "user", parts: [{ text: promptActuel }] });
 
-  const url = `[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){MODEL_GEMINI}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(apiKey);
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
@@ -649,7 +649,7 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post('[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)', {
+  const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
     model: MODEL_GROQ,
     messages: messages,
     temperature: temperature,
@@ -677,7 +677,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   }
   contents.push({ role: "user", parts: partsActuelles });
 
-  const url = `[https://generativelanguage.googleapis.com/v1beta/models/$](https://generativelanguage.googleapis.com/v1beta/models/$){MODEL_GEMINI}:generateContent?key=${encodeURIComponent(cle)}`;
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(cle);
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
@@ -699,7 +699,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post('[https://api.venice.ai/api/v1/chat/completions](https://api.venice.ai/api/v1/chat/completions)', {
+  const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", {
     model,
     messages,
     temperature,
@@ -719,7 +719,7 @@ async function genererImageVenice(prompt) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
 
-  const res = await axios.post('[https://api.venice.ai/api/v1/images/generations](https://api.venice.ai/api/v1/images/generations)', {
+  const res = await axios.post("https://api.venice.ai/api/v1/images/generations", {
     model: MODEL_IMAGE,
     prompt: cleanPrompt,
     response_format: "b64_json",
@@ -947,9 +947,10 @@ async function scraperPageWeb(urlCible) {
       timeout: 12000
     });
 
-    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $ = cheerio.load(res.data);
+    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() ||$('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -973,13 +974,15 @@ async function envoyerTelegram(chatId, text) {
   for (let i = 0; i < text.length; i += TAILLE_MAX) {
     const bloc = text.slice(i, i + TAILLE_MAX);
     try {
-      await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/sendMessage`, {
+      const urlTelegram = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendMessage";
+      await axios.post(urlTelegram, {
         chat_id: chatId,
         text: bloc,
         parse_mode: 'Markdown'
       }, { timeout: 12000 });
     } catch (err) {
-      await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/sendMessage`, {
+      const urlTelegramFallback = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendMessage";
+      await axios.post(urlTelegramFallback, {
         chat_id: chatId,
         text: bloc
       }, { timeout: 12000 }).catch(e => console.error("[TELEGRAM ERREUR]", e.message));
@@ -990,7 +993,8 @@ async function envoyerTelegram(chatId, text) {
 async function afficherFrappeTelegram(chatId) {
   if (!TELEGRAM_BOT_TOKEN) return;
   try {
-    await axios.post(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/sendChatAction`, {
+    const urlAction = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendChatAction";
+    await axios.post(urlAction, {
       chat_id: chatId,
       action: 'typing'
     }, { timeout: 4000 });
@@ -1008,7 +1012,7 @@ function envoyerPhotoTelegram(chatId, base64Image) {
     const req = https.request({
       hostname: 'api.telegram.org',
       port: 443,
-      path: `/bot${encodeURIComponent(TELEGRAM_BOT_TOKEN)}/sendPhoto`,
+      path: "/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendPhoto",
       method: 'POST',
       headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': payload.length }
     }, () => {
@@ -1025,32 +1029,40 @@ function envoyerPhotoTelegram(chatId, base64Image) {
 }
 
 async function lireMediaSecurise(fileId) {
-  const resMeta = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/getFile?file_id=${fileId}`);
-  const resMedia = await axios.get(`[https://api.telegram.org/file/bot$](https://api.telegram.org/file/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const resMeta = await axios.get(urlMeta);
+  const urlMedia = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const resMedia = await axios.get(urlMedia, { responseType: 'arraybuffer' });
   const b64 = Buffer.from(resMedia.data).toString('base64');
   resMedia.data = null;
   return b64;
 }
 
 async function lirePdfSecurise(fileId) {
-  const resMeta = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/getFile?file_id=${fileId}`);
-  const resDoc = await axios.get(`[https://api.telegram.org/file/bot$](https://api.telegram.org/file/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const resMeta = await axios.get(urlMeta);
+  const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
   const data = await pdfParse(Buffer.from(resDoc.data));
   resDoc.data = null;
   return data.text;
 }
 
 async function lireDocxSecurise(fileId) {
-  const resMeta = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/getFile?file_id=${fileId}`);
-  const resDoc = await axios.get(`[https://api.telegram.org/file/bot$](https://api.telegram.org/file/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const resMeta = await axios.get(urlMeta);
+  const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
   const data = await mammoth.extractRawText({ buffer: Buffer.from(resDoc.data) });
   resDoc.data = null;
   return data.value;
 }
 
 async function lireTexteSecurise(fileId) {
-  const resMeta = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/getFile?file_id=${fileId}`);
-  const resDoc = await axios.get(`[https://api.telegram.org/file/bot$](https://api.telegram.org/file/bot$){encodeURIComponent(TELEGRAM_BOT_TOKEN)}/${resMeta.data.result.file_path}`, { responseType: 'arraybuffer' });
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const resMeta = await axios.get(urlMeta);
+  const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
   const texte = Buffer.from(resDoc.data).toString('utf-8');
   resDoc.data = null;
   return texte;
@@ -1289,7 +1301,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/<\/reflexion>/gi, '')
     .trim();
 
-  // Évite qu'une phrase reste tronquée en fin de réponse
   reponseNyx = couperPhraseIncomplete(reponseNyx);
 
   if (!reponseNyx || reponseNyx.length < 2) {
@@ -1337,7 +1348,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
-  // Enregistrement assaini en mémoire vive
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -1524,7 +1534,6 @@ app.post('/telegram', (req, res) => {
         let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
         mediaData = null;
 
-        // DÉTECTION IMAGE TOUT-TERRAIN
         const matchDessin = texteNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
           || texteNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
           || texteNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
@@ -1534,7 +1543,6 @@ app.post('/telegram', (req, res) => {
           texteNyx = texteNyx.replace(matchDessin[0], '').trim();
           if (texteNyx) await envoyerTelegram(chatId, texteNyx);
 
-          // Verrou strict : ne déclenche l'image que sur demande explicite
           const docVeutImage = /\b(dessin|dessine|image|photo|visuel|croquis|schéma|tableau|peins|affiche|montre)\b/i.test(texteMessageClavier);
 
           if (docVeutImage) {
@@ -1599,7 +1607,7 @@ async function genererAudioGoogle(texte) {
       const options = {
         hostname: 'texttospeech.googleapis.com',
         port: 443,
-        path: `/v1/text:synthesize?key=${encodeURIComponent(cle)}`,
+        path: "/v1/text:synthesize?key=" + encodeURIComponent(cle),
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1625,7 +1633,7 @@ async function genererAudioGoogle(texte) {
     const optionsSecours = {
       hostname: 'translate.google.com',
       port: 443,
-      path: `/translate_tts?ie=UTF-8&q=${encodeURIComponent(extraitCourt)}&tl=fr&client=tw-ob`,
+      path: "/translate_tts?ie=UTF-8&q=" + encodeURIComponent(extraitCourt) + "&tl=fr&client=tw-ob",
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
@@ -1672,12 +1680,10 @@ app.post('/api/voix', async (req, res) => {
 
       let reponseNyx = await traiterFlux(texteNet, mediaData);
 
-      // INTERCEPTION DESSIN SUR COMMANDE VOCALE
       const matchDessin = reponseNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
         || reponseNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
         || reponseNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
 
-      // Verrou strict : ne déclenche JAMAIS d'image sauf si tu l'as explicitement demandée
       const docVeutImage = /\b(dessin|dessine|image|photo|visuel|croquis|schéma|tableau|peins|affiche|montre)\b/i.test(texteNet);
       let imageB64 = null;
 
@@ -1702,7 +1708,6 @@ app.post('/api/voix', async (req, res) => {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
-      // NETTOYAGE ORAL COMPLET POUR LE RETOUR AUDIO (SANS DICTER LES BALISES NI LE CODE)
       const texteOral = reponseNyx
         .replace(/```[\s\S]*?```/gi, "Je t'ai posé le code sur l'écran.")
         .replace(/`[^`]+`/g, '')
@@ -1735,7 +1740,6 @@ app.post('/api/voix', async (req, res) => {
         console.error("[TTS ERREUR]", errAudio.message);
       }
 
-      // Renvoie la réponse textuelle complète (avec Markdown de code), l'audio et l'image générée
       res.json({
         reponse: reponseNyx,
         reponseVocale: texteOral,
@@ -1859,13 +1863,14 @@ app.post('/api/consolider', (req, res) => {
 // ==========================================
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
-  console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
+  console.log(`🌐 Interface vocale : [https://alita-gsoe.onrender.com/app](https://alita-gsoe.onrender.com/app)`);
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
-    const webhookUrl = "https://alita-gsoe.onrender.com/telegram";
+    const webhookUrl = "[https://alita-gsoe.onrender.com/telegram](https://alita-gsoe.onrender.com/telegram)";
     try {
-      const res = await axios.get(`https://api.telegram.org/bot${encodeURIComponent(TELEGRAM_BOT_TOKEN)}/setWebhook?url=${encodeURIComponent(webhookUrl)}`);
+      const urlWebhook = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/setWebhook?url=" + encodeURIComponent(webhookUrl);
+      const res = await axios.get(urlWebhook);
       console.log("🔗 Webhook Telegram configuré :", res.data);
     } catch (err) {
       console.error("❌ Échec Webhook Telegram :", err.response?.data || err.message);
