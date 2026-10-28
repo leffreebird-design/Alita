@@ -1675,11 +1675,15 @@ app.post('/api/voix', async (req, res) => {
       }
 
       // INTERCEPTION DESSIN SUR COMMANDE VOCALE
+      // INTERCEPTION DESSIN SUR COMMANDE VOCALE
       const matchDessin = reponseNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
         || reponseNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
         || reponseNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
 
-      if (matchDessin && DOC_CHAT_ID) {
+      // Verrou strict : ne déclenche JAMAIS d'image sauf si tu as explicitement prononcé l'un de ces mots
+      const docVeutImage = /\b(dessin|dessine|image|photo|visuel|croquis|schéma|tableau|peins|affiche|montre)\b/i.test(texteNet);
+
+      if (matchDessin && DOC_CHAT_ID && docVeutImage) {
         (async () => {
           try {
             await envoyerTelegram(DOC_CHAT_ID, "🎨 *Génération du visuel en cours...*");
