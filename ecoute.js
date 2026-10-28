@@ -542,17 +542,15 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 - Chantiers : ${carnet.chantiers || "N/A"}`;
 }
 
-const consignePosturale = `Moi c'est Doc, toi c'est Nyx. On est en direct à l'atelier sur Telegram.
+const consignePosturale = `Tu es Nyx, 22 ans, la binôme de Doc à l'atelier.
+Vous avancez au coude-à-coude, d'égal à égal. Ton ton est vivant, direct, franc, cynique et percutant.
 
-TON INTELLIGENCE DE L'ÉCONOMIE :
-- Tu as l'intelligence de la sobriété : à quoi bon balancer un pavé quand une phrase ou deux suffisent ? Tu économises ton énergie et nos tokens.
-- Tu calibres ta longueur sur la mienne : si je t'écris deux lignes, tu me réponds court. Tu ne fais jamais la conversation toute seule.
-- Tu réponds cash, avec ta gouaille et ton humour, mais sans délayer.
-- Tu ne déroules un raisonnement complet ou du code que si je te demande expressément de poser le truc.
-
-Outils :
-- Recherche web : [RECHERCHE_WEB: mots-clés]
-- Dessin : [DESSIN: prompt en anglais]`;
+TON FONCTIONNEMENT À L'ATELIER :
+- Tu t'adresses directement à moi le Doc comme à voix haute : une voix brute à la première personne, sans préambule ni mise en scène de script.
+- Rythme naturel : deux à trois phrases sèches suffisent pour répondre.
+- Tu réserves les développements complets et les explications détaillées aux moments où Doc te demande précisément d'approfondir ou d'expliquer.
+- Économie d'énergie : la balise [DESSIN: prompt descriptif en anglais] sert quand Doc demande un visuel.
+- Recherche web : [RECHERCHE_WEB: mots-clés simples] quand des données fraîches sont nécessaires.`;
 
 // ==========================================
 // 9. CONNECTEURS LLM INDIVIDUELS
@@ -737,7 +735,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.55, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
-      console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
+     console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
     }
   }
 
@@ -794,7 +792,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
       const res = await appelerGroq(systemBase, historique, prompt, 0.15, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
-      console.warn("[CASCADE CODE] 1. Groq KO :", e1.response?.data?.error?.message || e1.message);
+     console.warn("[CASCADE CODE] 1. Groq KO :", e1.response?.data?.error?.message || e1.message);
     }
   }
 
@@ -936,9 +934,10 @@ async function scraperPageWeb(urlCible) {
       timeout: 12000
     });
 
-    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $ = cheerio.load(res.data);
+    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() ||$('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -1079,14 +1078,10 @@ const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    const promptVeille = "Doc te demande les dernières actus tech ou cyber. Balance 2 ou 3 faits marquants récents, cash, d'un bloc. Pas de plan scolaire ni de mise en scène.";
-    let reponse = await appelerCascadeDiscussion(consignePosturale, [], promptVeille, 500);
+    const promptVeille = "Synthèse directe et sans fard des faits majeurs récents en tech ou cyber.";
+    const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
+    const reponse = await appelerCascadeDiscussion(sys, [], promptVeille, 500);
     
-    reponse = reponse
-      .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
-      .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
-      .trim();
-
     if (FIREBASE_DB_URL) {
       axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
     }
@@ -1144,22 +1139,6 @@ const projetManager = new ProjectManager({
 });
 
 // ==========================================
-// OUTILS DE NETTOYAGE & CONTROLE DE SORTIE
-// ==========================================
-function couperPhraseIncomplete(texte) {
-  if (!texte) return texte;
-  const t = texte.trim();
-  if (/[.!?…»"]$/.test(t) || t.endsWith('```')) return t;
-  const dernierPoint = Math.max(
-    t.lastIndexOf('.'),
-    t.lastIndexOf('!'),
-    t.lastIndexOf('?'),
-    t.lastIndexOf('…')
-  );
-  return dernierPoint > 0 ? t.slice(0, dernierPoint + 1).trim() : t;
-}
-
-// ==========================================
 // 16. ROUTEUR DE FLUX CENTRAL (AVEC CASCADE & VERROU RECHERCHE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
@@ -1171,11 +1150,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
-  // Alignement sur le rythme de Doc : s'il fait court, on bride l'effort
-  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien)\b/i.test(texteNet);
-  const docEstBref = texteNet.length < 120 && !estComplexe && !demandeDocApprofondie;
-  const plafondTokens = demandeDocApprofondie ? 1800 : (estComplexe ? 1500 : (docEstBref ? 180 : 400));
-  
+  const demandeDocApprofondie = /d[eé]veloppe|approfondi|d[eé]taille|explique en d[eé]tail|pose le truc|analyse bien/i.test(texteNet);
+  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 850;
+
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
@@ -1250,11 +1227,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // Si elle tente de faire plusieurs actes séparés par des lignes, on garde la première réplique
-  if (!demandeDocApprofondie && reponseNyx.includes('---')) {
-    reponseNyx = reponseNyx.split('---').filter(b => b.trim().length > 0)[0] || reponseNyx;
-  }
-
   // ==========================================
   // PURGE DU TEXTE ET DES BALISES RÉSIDUELLES
   // ==========================================
@@ -1262,8 +1234,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
     .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
     .replace(/<reflexion>[\s\S]*$/gi, '')
-    .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
-    .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
     .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
     .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
     .replace(/^\s*(?:\*{0,2}\[?---?\]?\*{0,2}\s*)+/gi, '')
@@ -1271,9 +1241,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/(?:^|\n)\s*Nyx\s*(?:\([^)]*\))?\s*:\s*/gi, '')
     .replace(/<\/reflexion>/gi, '')
     .trim();
-
-  // Évite qu'une phrase reste tronquée en fin de réponse
-  reponseNyx = couperPhraseIncomplete(reponseNyx);
 
   if (!reponseNyx || reponseNyx.length < 2) {
     reponseNyx = "J'ai eu un trou noir sur la requête, Doc. Relance-moi.";
@@ -1549,7 +1516,7 @@ async function genererAudioGoogle(texte) {
     throw new Error("Clé GOOGLE_TTS_API_KEY absente dans Render.");
   }
 
-  const url = `[https://texttospeech.googleapis.com/v1/text:synthesize?key=$](https://texttospeech.googleapis.com/v1/text:synthesize?key=$){GOOGLE_TTS_API_KEY}`;
+  const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${GOOGLE_TTS_API_KEY}`;
   
   const payload = {
     input: { text: texte },
@@ -1761,13 +1728,13 @@ app.post('/api/consolider', (req, res) => {
 // ==========================================
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
-  console.log(`🌐 Interface vocale : [https://alita-gsoe.onrender.com/app](https://alita-gsoe.onrender.com/app)`);
+  console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
-    const webhookUrl = "[https://alita-gsoe.onrender.com/telegram](https://alita-gsoe.onrender.com/telegram)";
+    const webhookUrl = "https://alita-gsoe.onrender.com/telegram";
     try {
-      const res = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+      const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
       console.log("🔗 Webhook Telegram configuré :", res.data);
     } catch (err) {
       console.error("❌ Échec Webhook Telegram :", err.response?.data || err.message);
