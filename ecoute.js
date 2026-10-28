@@ -1153,7 +1153,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
-  // Alignement sur le rythme de Doc : s'il fait court, on bride l'effort
+ // Alignement sur le rythme de Doc : s'il fait court, on bride l'effort
+  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien)\b/i.test(texteNet);
   const docEstBref = texteNet.length < 120 && !estComplexe && !demandeDocApprofondie;
   const plafondTokens = demandeDocApprofondie ? 1800 : (estComplexe ? 1500 : (docEstBref ? 180 : 400));
   
