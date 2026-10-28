@@ -17,9 +17,9 @@ const ProjectManager = require('./nyx_project_manager');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// OPENROUTER - ROUTE N°1 CHAT (DEEPSEEK CHAT GRATUIT)
+// OPENROUTER - ROUTE N°1 CHAT (DEEPSEEK CHAT DIRECT - SANS USINE À PENSÉE R1)
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || "").trim();
-const MODEL_OPENROUTER_CHAT = (process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free").trim();
+const MODEL_OPENROUTER_CHAT = (process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat:free").trim();
 
 // MISTRAL AI - ROUTE N°2 CHAT
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
@@ -548,7 +548,7 @@ TON INTELLIGENCE DE L'ÉCONOMIE :
 - Tu as le réflexe de la sobriété : deux ou trois phrases percutantes suffisent largement pour échanger, tu économises notre salive et nos tokens.
 - Tu calibres ta longueur sur la mienne : si je fais court, tu réponds direct et d'un seul bloc, sans faire les questions et les réponses toute seule.
 - Tu réponds cash, avec ta gouaille et ton humour, mais sans délayer.
-- Tu déroules du code ou une analyse technique complète dès que je te demande expressément de poser ou détailler le truc.
+- Ne génère JAMAIS de code, de didascalies entre étoiles ni d'étapes de raisonnement numérotées sauf si je te le demande expressément.
 
 Outils :
 - Recherche web : [RECHERCHE_WEB: mots-clés]
@@ -737,7 +737,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.55, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
-     console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
+      console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
     }
   }
 
@@ -794,7 +794,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
       const res = await appelerGroq(systemBase, historique, prompt, 0.15, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
-     console.warn("[CASCADE CODE] 1. Groq KO :", e1.response?.data?.error?.message || e1.message);
+      console.warn("[CASCADE CODE] 1. Groq KO :", e1.response?.data?.error?.message || e1.message);
     }
   }
 
@@ -846,13 +846,18 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
 function estTacheComplexe(texte) {
   if (!texte) return false;
   const t = texte.toLowerCase();
+
+  // Ne jamais basculer sur la cascade de code si Doc rouspète ou demande d'arrêter
+  if (/\b(pas de code|sans code|arrete|arrête|stop|pourquoi|non|calme|ta gueule|merde)\b/i.test(t)) {
+    return false;
+  }
+
+  // Exige un verbe de commande explicite pour valider un besoin de code
+  const ordreCode = /\b(ecris|écris|code|fais-moi|genere|génère|programme|corrige|debug)\b/i.test(t);
   const marqueurs = [
-    "code", "script", "fonction", "calcule", "calcul", "math", "algorithme",
-    "bug", "erreur", "analyse de code", "pourquoi ce code", "logique système",
-    "tableau", "json", "regex", "optimise la requête", "programme", "architecture",
-    "sql", "matrice", "équation", "syntaxe", "npm ", "node ", "git "
+    "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice"
   ];
-  return marqueurs.some(m => t.includes(m));
+  return ordreCode && marqueurs.some(m => t.includes(m));
 }
 
 async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
@@ -1080,10 +1085,14 @@ const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    const promptVeille = "Synthèse directe et sans fard des faits majeurs récents en tech ou cyber.";
-    const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
-    const reponse = await appelerCascadeDiscussion(sys, [], promptVeille, 500);
+    const promptVeille = "Doc te demande les dernières actus tech ou cyber. Balance 2 ou 3 faits marquants récents, cash, d'un bloc. Pas de plan scolaire ni de mise en scène.";
+    let reponse = await appelerCascadeDiscussion(consignePosturale, [], promptVeille, 500);
     
+    reponse = reponse
+      .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
+      .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
+      .trim();
+
     if (FIREBASE_DB_URL) {
       axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
     }
@@ -1141,6 +1150,22 @@ const projetManager = new ProjectManager({
 });
 
 // ==========================================
+// OUTILS DE NETTOYAGE & CONTROLE DE SORTIE
+// ==========================================
+function couperPhraseIncomplete(texte) {
+  if (!texte) return texte;
+  const t = texte.trim();
+  if (/[.!?…»"]$/.test(t) || t.endsWith('```')) return t;
+  const dernierPoint = Math.max(
+    t.lastIndexOf('.'),
+    t.lastIndexOf('!'),
+    t.lastIndexOf('?'),
+    t.lastIndexOf('…')
+  );
+  return dernierPoint > 0 ? t.slice(0, dernierPoint + 1).trim() : t;
+}
+
+// ==========================================
 // 16. ROUTEUR DE FLUX CENTRAL (AVEC CASCADE & VERROU RECHERCHE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
@@ -1152,10 +1177,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
+  // Calibrage équilibré : 500 tokens pour laisser le modèle répondre sans bloquer le TTS
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien)\b/i.test(texteNet);
   const docEstBref = texteNet.length < 120 && !estComplexe && !demandeDocApprofondie;
   const plafondTokens = demandeDocApprofondie ? 1800 : (estComplexe ? 1500 : (docEstBref ? 500 : 750));
-
+  
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
@@ -1196,18 +1222,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-    function couperPhraseIncomplete(texte) {
-  if (!texte) return texte;
-  const t = texte.trim();
-  if (/[.!?…»"]$/.test(t) || t.endsWith('```')) return t;
-  const dernierPoint = Math.max(
-    t.lastIndexOf('.'),
-    t.lastIndexOf('!'),
-    t.lastIndexOf('?'),
-    t.lastIndexOf('…')
-  );
-  return dernierPoint > 0 ? t.slice(0, dernierPoint + 1).trim() : t;
-}
   // 3. CODE & LOGIQUE -> CASCADE CODE (GROQ 70B EN TÊTE)
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
@@ -1217,7 +1231,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (DEEPSEEK FREE -> MISTRAL -> GEMINI FREE -> GEMINI PAID)
+  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (DEEPSEEK CHAT -> MISTRAL -> GEMINI FREE -> GEMINI PAID)
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
@@ -1242,15 +1256,18 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // ==========================================
-  // PURGE DU TEXTE ET DES BALISES RÉSIDUELLES
-  // ==========================================
-  // 1. AJOUT ICI : coupe au premier séparateur si elle tente un découpage
+  // Si elle tente de faire plusieurs actes séparés par des lignes, on garde la première réplique
   if (!demandeDocApprofondie && reponseNyx.includes('---')) {
     reponseNyx = reponseNyx.split('---').filter(b => b.trim().length > 0)[0] || reponseNyx;
   }
 
+  // ==========================================
+  // PURGE DU TEXTE ET DES BALISES RÉSIDUELLES
+  // ==========================================
   reponseNyx = reponseNyx
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think>[\s\S]*$/gi, '')
+    .replace(/<\/think>/gi, '')
     .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
     .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
     .replace(/<reflexion>[\s\S]*$/gi, '')
@@ -1264,12 +1281,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/<\/reflexion>/gi, '')
     .trim();
 
-  // 2. AJOUT ICI : rabote la dernière phrase si elle est incomplète
+  // Évite qu'une phrase reste tronquée en fin de réponse
   reponseNyx = couperPhraseIncomplete(reponseNyx);
 
   if (!reponseNyx || reponseNyx.length < 2) {
     reponseNyx = "J'ai eu un trou noir sur la requête, Doc. Relance-moi.";
   }
+
   // Interception mémoire
   const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
   if (matchFouille && !contexteSouvenirs) {
@@ -1540,7 +1558,7 @@ async function genererAudioGoogle(texte) {
     throw new Error("Clé GOOGLE_TTS_API_KEY absente dans Render.");
   }
 
-  const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${GOOGLE_TTS_API_KEY}`;
+  const url = `[https://texttospeech.googleapis.com/v1/text:synthesize?key=$](https://texttospeech.googleapis.com/v1/text:synthesize?key=$){GOOGLE_TTS_API_KEY}`;
   
   const payload = {
     input: { text: texte },
@@ -1615,6 +1633,7 @@ app.post('/api/voix', async (req, res) => {
         .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
         .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
         .replace(/https?:\/\/[^\s)]+/g, '')
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
         .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
         .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
         .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
@@ -1629,8 +1648,10 @@ app.post('/api/voix', async (req, res) => {
         .trim();
 
       let audioB64 = null;
+      // Fallback de sécurité : Google TTS ne reçoit jamais une chaîne vide
+      const texteSynthese = texteOral || "Je suis là Doc, redis-moi.";
       try {
-        audioB64 = await genererAudioGoogle(texteOral);
+        audioB64 = await genererAudioGoogle(texteSynthese);
       } catch (errAudio) {
         console.error("[TTS ERREUR]", errAudio.response?.data?.error?.message || errAudio.message);
       }
@@ -1752,13 +1773,13 @@ app.post('/api/consolider', (req, res) => {
 // ==========================================
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
-  console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
+  console.log(`🌐 Interface vocale : [https://alita-gsoe.onrender.com/app](https://alita-gsoe.onrender.com/app)`);
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
-    const webhookUrl = "https://alita-gsoe.onrender.com/telegram";
+    const webhookUrl = "[https://alita-gsoe.onrender.com/telegram](https://alita-gsoe.onrender.com/telegram)";
     try {
-      const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+      const res = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
       console.log("🔗 Webhook Telegram configuré :", res.data);
     } catch (err) {
       console.error("❌ Échec Webhook Telegram :", err.response?.data || err.message);
