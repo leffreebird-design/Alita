@@ -24,7 +24,11 @@ function assainirParametre(val) {
 
 // OPENROUTER - ROUTE N°1 CHAT
 const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
-const MODEL_OPENROUTER_CHAT = assainirParametre(process.env.OPENROUTER_MODEL) || "meta-llama/llama-3.3-70b-instruct:free";
+let modelOpenRouter = assainirParametre(process.env.OPENROUTER_MODEL);
+if (!modelOpenRouter || modelOpenRouter.includes("deepseek-r1") || modelOpenRouter.includes("gemma")) {
+  modelOpenRouter = "meta-llama/llama-3.3-70b-instruct:free";
+}
+const MODEL_OPENROUTER_CHAT = modelOpenRouter;
 
 // MISTRAL AI - ROUTE N°2 CHAT
 const MISTRAL_API_KEY = assainirParametre(process.env.MISTRAL_API_KEY);
