@@ -1560,50 +1560,88 @@ app.post('/telegram', (req, res) => {
 // ==========================================
 // 18. APPLICATION WEB DIRECTE (AVEC PARACHUTE VOCAL UNIVERSEL)
 // ==========================================
+function envoyerRequeteHttps(options, postData = null) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        resolve({ statusCode: res.statusCode, data: buffer });
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout HTTPS')); });
+    if (postData) req.write(postData);
+    req.end();
+  });
+}
+
 async function genererAudioGoogle(texte) {
   const texteNettoye = (texte || "").trim().slice(0, 1500);
   if (!texteNettoye) return null;
 
-  // 1. TENTATIVE VIA GOOGLE CLOUD TTS OFFICIEL (SI CLÉ CONFIGURÉE)
-  try {
-    let cle = GOOGLE_TTS_API_KEY;
-    if (cle.includes('key=')) {
-      cle = cle.split('key=')[1].split('&')[0];
-    }
+  // 1. TENTATIVE AVEC GOOGLE CLOUD OFFICIEL (VOIX NEURAL2 STUDIO)
+  let cle = (GOOGLE_TTS_API_KEY || "").trim().replace(/[\r\n\t "']/g, '');
+  if (cle.includes('key=')) {
+    cle = cle.split('key=')[1].split('&')[0];
+  }
 
-    if (cle && !cle.startsWith('http')) {
-      const url = `[https://texttospeech.googleapis.com/v1/text:synthesize?key=$](https://texttospeech.googleapis.com/v1/text:synthesize?key=$){encodeURIComponent(cle)}`;
-      const payload = {
+  if (cle && !cle.startsWith('http')) {
+    try {
+      const payload = JSON.stringify({
         input: { text: texteNettoye },
         voice: { languageCode: "fr-FR", name: "fr-FR-Neural2-A" },
         audioConfig: { audioEncoding: "MP3", speakingRate: 1.05, pitch: 0.0 }
+      });
+
+      const options = {
+        hostname: 'texttospeech.googleapis.com',
+        port: 443,
+        path: `/v1/text:synthesize?key=${encodeURIComponent(cle)}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        },
+        timeout: 10000
       };
 
-      const res = await axios.post(url, payload, { timeout: 10000 });
-      if (res.data?.audioContent) {
-        return res.data.audioContent;
+      const res = await envoyerRequeteHttps(options, payload);
+      if (res.statusCode === 200) {
+        const json = JSON.parse(res.data.toString('utf-8'));
+        if (json.audioContent) return json.audioContent;
       }
+      console.warn(`[TTS CLOUD HTTP ${res.statusCode}] Basculement secours.`);
+    } catch (errCloud) {
+      console.warn("[TTS CLOUD ERREUR]", errCloud.message);
     }
-  } catch (errGoogle) {
-    console.warn("[TTS CLOUD KO, ACTIVATION PARACHUTE DIRECT] :", errGoogle.message);
   }
 
-  // 2. PARACHUTE VOCAL UNIVERSEL (Aucune clé requise, ne plante jamais)
+  // 2. PARACHUTE DIRECT GOOGLE TRANSLATE (PUR HTTPS, SANS CLÉ, ROBUSTE)
   try {
-    const texteCourt = texteNettoye.slice(0, 300);
-    const urlSecours = `[https://translate.google.com/translate_tts?ie=UTF-8&q=$](https://translate.google.com/translate_tts?ie=UTF-8&q=$){encodeURIComponent(texteCourt)}&tl=fr&client=tw-ob`;
-    const resSecours = await axios.get(urlSecours, {
-      responseType: 'arraybuffer',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+    const extraitCourt = texteNettoye.slice(0, 250);
+    const optionsSecours = {
+      hostname: 'translate.google.com',
+      port: 443,
+      path: `/translate_tts?ie=UTF-8&q=${encodeURIComponent(extraitCourt)}&tl=fr&client=tw-ob`,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+      },
       timeout: 8000
-    });
-    return Buffer.from(resSecours.data).toString('base64');
-  } catch (errSecours) {
-    console.error("[TTS PARACHUTE ÉCHEC] :", errSecours.message);
-    return null;
-  }
-}
+    };
 
+    const resSecours = await envoyerRequeteHttps(optionsSecours);
+    if (resSecours.statusCode === 200) {
+      return resSecours.data.toString('base64');
+    }
+  } catch (errSecours) {
+    console.error("[TTS SECOURS ÉCHEC]", errSecours.message);
+  }
+
+  return null;
+}
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
 app.post('/api/voix', async (req, res) => {
