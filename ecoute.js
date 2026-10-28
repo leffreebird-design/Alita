@@ -1195,6 +1195,18 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
+    function couperPhraseIncomplete(texte) {
+  if (!texte) return texte;
+  const t = texte.trim();
+  if (/[.!?…»"]$/.test(t) || t.endsWith('```')) return t;
+  const dernierPoint = Math.max(
+    t.lastIndexOf('.'),
+    t.lastIndexOf('!'),
+    t.lastIndexOf('?'),
+    t.lastIndexOf('…')
+  );
+  return dernierPoint > 0 ? t.slice(0, dernierPoint + 1).trim() : t;
+}
   // 3. CODE & LOGIQUE -> CASCADE CODE (GROQ 70B EN TÊTE)
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
