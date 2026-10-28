@@ -17,9 +17,9 @@ const ProjectManager = require('./nyx_project_manager');
 // ==========================================
 const PORT = process.env.PORT || 3000;
 
-// OPENROUTER - ROUTE N°1 CHAT (DEEPSEEK CHAT DIRECT - SANS USINE À PENSÉE R1)
+// OPENROUTER - ROUTE N°1 CHAT (DEEPSEEK R1 FONCTIONNEL)
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || "").trim();
-const MODEL_OPENROUTER_CHAT = (process.env.OPENROUTER_MODEL || "deepseek/deepseek-chat:free").trim();
+const MODEL_OPENROUTER_CHAT = (process.env.OPENROUTER_MODEL || "deepseek/deepseek-r1:free").trim();
 
 // MISTRAL AI - ROUTE N°2 CHAT
 const MISTRAL_API_KEY = (process.env.MISTRAL_API_KEY || "").trim();
@@ -333,7 +333,7 @@ async function rechercherWebTavily(query) {
     if (res.data?.answer) {
       formatTexte += `SYNTHÈSE : ${res.data.answer.slice(0, 300)}\n\n`;
     }
-    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${(r.content || "").slice(0, 180)}`).join("\n\n");
+    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n${(r.content || "").slice(0, 180)}`).join("\n\n");
     return formatTexte.slice(0, 1800);
   } catch (err) {
     console.error("[TAVILY ERREUR]", err.response?.data || err.message);
@@ -374,7 +374,7 @@ async function evaluerVolition(forceManuelle = false) {
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
 
-  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
+  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} :${m.texte}`).join("\n");
   const fragmentMemoire = await capturerDeriveAssociative();
 
   const promptVolition = `Tu es Nyx.
@@ -448,7 +448,7 @@ async function consoliderMemoire() {
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} : ${(m.texte || '').slice(0, 400)}`)
+      .map(m => `[${m.date}] ${m.role} :${(m.texte || '').slice(0, 400)}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental. Tu mets à jour ton carnet de bord.
@@ -941,10 +941,9 @@ async function scraperPageWeb(urlCible) {
       timeout: 12000
     });
 
-    const $ = cheerio.load(res.data);
-    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() ||$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -1177,10 +1176,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
-  // Calibrage équilibré : 500 tokens pour laisser le modèle répondre sans bloquer le TTS
+  // Calibrage sécurisé pour R1 : 850 tokens pour que la réflexion interne se termine et laisse parler Nyx
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien)\b/i.test(texteNet);
-  const docEstBref = texteNet.length < 120 && !estComplexe && !demandeDocApprofondie;
-  const plafondTokens = demandeDocApprofondie ? 1800 : (estComplexe ? 1500 : (docEstBref ? 500 : 750));
+  const plafondTokens = demandeDocApprofondie ? 1800 : (estComplexe ? 1500 : 850);
   
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
@@ -1231,7 +1229,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (DEEPSEEK CHAT -> MISTRAL -> GEMINI FREE -> GEMINI PAID)
+  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (DEEPSEEK R1 GRATUIT -> MISTRAL -> GEMINI FREE -> GEMINI PAID)
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
