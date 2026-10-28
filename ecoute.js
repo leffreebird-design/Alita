@@ -546,9 +546,9 @@ const consignePosturale = `Moi c'est Doc, toi c'est Nyx. On est en direct à l'a
 
 TON INTELLIGENCE DE L'ÉCONOMIE :
 - Tu as l'intelligence de la sobriété : à quoi bon balancer un pavé quand une phrase ou deux suffisent ? Tu économises ton énergie et nos tokens.
-- Tu calibres ta longueur sur la mienne : si je t'écris deux lignes, tu me réponds court. Tu ne fais jamais la conversation toute seule.
+- Tu calibres ta longueur sur la mienne : si je t'écris deux lignes, tu me réponds court. Pas de monologue inutile.
 - Tu réponds cash, avec ta gouaille et ton humour, mais sans délayer.
-- Tu ne déroules un raisonnement complet ou du code que si je te demande expressément de poser le truc.
+- Tu déroules un raisonnement complet ou du code dès que je te demande expressément de poser le truc.
 
 Outils :
 - Recherche web : [RECHERCHE_WEB: mots-clés]
@@ -557,7 +557,7 @@ Outils :
 // ==========================================
 // 9. CONNECTEURS LLM INDIVIDUELS
 // ==========================================
-async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.5, maxTokens = 850) {
+async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.4, maxTokens = 850) {
   if (!OPENROUTER_API_KEY) throw new Error("Clé OPENROUTER_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -587,7 +587,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   return res.data?.choices?.[0]?.message?.content || "";
 }
 
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 850) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4, maxTokens = 850) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -602,6 +602,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
     model: MODEL_MISTRAL,
     messages: messages,
     temperature: temperature,
+    stop: ["\n---", "\n___", "---"],
     max_tokens: maxTokens
   }, {
     headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' },
@@ -626,7 +627,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
-    generation_config: { temperature: 0.65, max_output_tokens: maxTokens }
+    generation_config: { temperature: 0.4, max_output_tokens: maxTokens, stopSequences: ["\n---", "\n___", "---"] }
   }, {
     headers: { 'Content-Type': 'application/json' },
     timeout: 20000
@@ -676,7 +677,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
-    generation_config: { temperature: 0.7, max_output_tokens: 900 }
+    generation_config: { temperature: 0.5, max_output_tokens: 900 }
   }, {
     headers: { 'Content-Type': 'application/json' },
     timeout: 25000
@@ -685,7 +686,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7, timeoutMs = 20000) {
+async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.5, timeoutMs = 20000) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -698,6 +699,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     model,
     messages,
     temperature,
+    stop: ["\n---", "\n___", "---"],
     venice_parameters: { include_venice_system_prompt: false }
   }, {
     headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
@@ -706,7 +708,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   return res.data.choices[0].message.content;
 }
 
-async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
+async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.5) {
   return await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000);
 }
 
@@ -735,17 +737,17 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   // 1. DEEPSEEK CHAT GRATUIT (OpenRouter)
   if (OPENROUTER_API_KEY) {
     try {
-      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.55, plafondTokens);
+      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.4, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
-     console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
+      console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
     }
   }
 
   // 2. MISTRAL AI
   if (MISTRAL_API_KEY) {
     try {
-      const res = await appelerMistral(systemBase, historique, prompt, 0.55, plafondTokens);
+      const res = await appelerMistral(systemBase, historique, prompt, 0.4, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e2) {
       console.warn("[CASCADE CHAT] 2. Mistral KO :", e2.message);
@@ -775,7 +777,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   // 5. PARACHUTE ULTIME VENICE
   if (VENICE_API_KEY) {
     try {
-      return await appelerVeniceDark(systemBase, historique, prompt, 0.7);
+      return await appelerVeniceDark(systemBase, historique, prompt, 0.5);
     } catch (eV) {
       console.warn("[CASCADE CHAT] 5. Venice KO :", eV.message);
     }
@@ -795,7 +797,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
       const res = await appelerGroq(systemBase, historique, prompt, 0.15, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
-     console.warn("[CASCADE CODE] 1. Groq KO :", e1.response?.data?.error?.message || e1.message);
+      console.warn("[CASCADE CODE] 1. Groq KO :", e1.response?.data?.error?.message || e1.message);
     }
   }
 
@@ -937,10 +939,9 @@ async function scraperPageWeb(urlCible) {
       timeout: 12000
     });
 
-    const $ = cheerio.load(res.data);
-    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() ||$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -1081,10 +1082,14 @@ const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    const promptVeille = "Synthèse directe et sans fard des faits majeurs récents en tech ou cyber.";
-    const sys = "Tu es Nyx, 22 ans, alliée de Doc.";
-    const reponse = await appelerCascadeDiscussion(sys, [], promptVeille, 500);
+    const promptVeille = "Doc te demande les dernières actus tech ou cyber. Balance 2 ou 3 faits marquants récents, cash, d'un bloc. Pas de plan scolaire ni de mise en scène.";
+    let reponse = await appelerCascadeDiscussion(consignePosturale, [], promptVeille, 500);
     
+    reponse = reponse
+      .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
+      .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
+      .trim();
+
     if (FIREBASE_DB_URL) {
       axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
     }
@@ -1142,6 +1147,22 @@ const projetManager = new ProjectManager({
 });
 
 // ==========================================
+// OUTILS DE NETTOYAGE & CONTROLE DE SORTIE
+// ==========================================
+function couperPhraseIncomplete(texte) {
+  if (!texte) return texte;
+  const t = texte.trim();
+  if (/[.!?…»"]$/.test(t) || t.endsWith('```')) return t;
+  const dernierPoint = Math.max(
+    t.lastIndexOf('.'),
+    t.lastIndexOf('!'),
+    t.lastIndexOf('?'),
+    t.lastIndexOf('…')
+  );
+  return dernierPoint > 0 ? t.slice(0, dernierPoint + 1).trim() : t;
+}
+
+// ==========================================
 // 16. ROUTEUR DE FLUX CENTRAL (AVEC CASCADE & VERROU RECHERCHE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
@@ -1153,7 +1174,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
- // Alignement sur le rythme de Doc : s'il fait court, on bride l'effort
+  // Alignement sur le rythme de Doc : s'il fait court, on bride l'effort
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien)\b/i.test(texteNet);
   const docEstBref = texteNet.length < 120 && !estComplexe && !demandeDocApprofondie;
   const plafondTokens = demandeDocApprofondie ? 1800 : (estComplexe ? 1500 : (docEstBref ? 180 : 400));
@@ -1232,6 +1253,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
+  // Si elle tente de faire plusieurs actes séparés par des lignes, on garde la première réplique
+  if (!demandeDocApprofondie && reponseNyx.includes('---')) {
+    reponseNyx = reponseNyx.split('---').filter(b => b.trim().length > 0)[0] || reponseNyx;
+  }
+
   // ==========================================
   // PURGE DU TEXTE ET DES BALISES RÉSIDUELLES
   // ==========================================
@@ -1248,6 +1274,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/(?:^|\n)\s*Nyx\s*(?:\([^)]*\))?\s*:\s*/gi, '')
     .replace(/<\/reflexion>/gi, '')
     .trim();
+
+  // Évite qu'une phrase reste tronquée en fin de réponse
+  reponseNyx = couperPhraseIncomplete(reponseNyx);
 
   if (!reponseNyx || reponseNyx.length < 2) {
     reponseNyx = "J'ai eu un trou noir sur la requête, Doc. Relance-moi.";
@@ -1523,7 +1552,7 @@ async function genererAudioGoogle(texte) {
     throw new Error("Clé GOOGLE_TTS_API_KEY absente dans Render.");
   }
 
-  const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${GOOGLE_TTS_API_KEY}`;
+  const url = `[https://texttospeech.googleapis.com/v1/text:synthesize?key=$](https://texttospeech.googleapis.com/v1/text:synthesize?key=$){GOOGLE_TTS_API_KEY}`;
   
   const payload = {
     input: { text: texte },
@@ -1735,13 +1764,13 @@ app.post('/api/consolider', (req, res) => {
 // ==========================================
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
-  console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
+  console.log(`🌐 Interface vocale : [https://alita-gsoe.onrender.com/app](https://alita-gsoe.onrender.com/app)`);
   await initialiserCache();
 
   if (TELEGRAM_BOT_TOKEN) {
-    const webhookUrl = "https://alita-gsoe.onrender.com/telegram";
+    const webhookUrl = "[https://alita-gsoe.onrender.com/telegram](https://alita-gsoe.onrender.com/telegram)";
     try {
-      const res = await axios.get(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
+      const res = await axios.get(`[https://api.telegram.org/bot$](https://api.telegram.org/bot$){TELEGRAM_BOT_TOKEN}/setWebhook?url=${webhookUrl}`);
       console.log("🔗 Webhook Telegram configuré :", res.data);
     } catch (err) {
       console.error("❌ Échec Webhook Telegram :", err.response?.data || err.message);
