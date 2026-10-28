@@ -243,7 +243,7 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
     const hashTexte = calculerSha256(texte);
 
     const { data: existants } = await supabase
-      .from('nyx_souvenirs')
+      .from('nyx_souvers')
       .select('id, metadata')
       .filter('metadata->>hash', 'eq', hashTexte)
       .limit(1);
@@ -603,12 +603,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
     temperature: temperature,
     max_tokens: maxTokens
   }, {
-    headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 25000 });  return res.data?.choices?.[0]?.message?.content \vert{}\vert{} ""; }  async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850) { if (!apiKey) throw new Error("Clé Gemini manquante.");
-
-  const contents = [];
-  for (const m of (historiqueMessages || []).slice(-8)) {
-    if (m && m.texte) {
-      contents.push({ role: m.role === "Doc" ? "user" : "model", parts: [{ text: m.texte }] });
+    headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 25000 });  return res.data?.choices?.[0]?.message?.content \vert{}\vert{} ""; }  async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850) { if (!apiKey) throw new Error("Clé Gemini manquante.");  const contents = []; for (const m of (historiqueMessages \vert{}\vert{} []).slice(-8)) { if (m && m.texte) { contents.push({ role: m.role === "Doc" ? "user" : "model", parts: [{ text: m.texte }] });
     }
   }
   contents.push({ role: "user", parts: [{ text: promptActuel }] });
