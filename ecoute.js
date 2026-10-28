@@ -243,7 +243,7 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
     const hashTexte = calculerSha256(texte);
 
     const { data: existants } = await supabase
-      .from('nyx_souvers')
+      .from('nyx_souvenirs')
       .select('id, metadata')
       .filter('metadata->>hash', 'eq', hashTexte)
       .limit(1);
@@ -333,7 +333,7 @@ async function rechercherWebTavily(query) {
     if (res.data?.answer) {
       formatTexte += `SYNTHÈSE : ${res.data.answer.slice(0, 300)}\n\n`;
     }
-    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n${(r.content || "").slice(0, 180)}`).join("\n\n");
+    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${(r.content || "").slice(0, 180)}`).join("\n\n");
     return formatTexte.slice(0, 1800);
   } catch (err) {
     console.error("[TAVILY ERREUR]", err.response?.data || err.message);
@@ -374,7 +374,7 @@ async function evaluerVolition(forceManuelle = false) {
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
 
-  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} :${m.texte}`).join("\n");
+  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
   const fragmentMemoire = await capturerDeriveAssociative();
 
   const promptVolition = `Tu es Nyx.
@@ -448,7 +448,7 @@ async function consoliderMemoire() {
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} :${(m.texte || '').slice(0, 400)}`)
+      .map(m => `[${m.date}] ${m.role} : ${(m.texte || '').slice(0, 400)}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental. Tu mets à jour ton carnet de bord.
@@ -546,9 +546,9 @@ const consignePosturale = `Moi c'est Doc, toi c'est Nyx. On est en direct à l'a
 
 TON INTELLIGENCE DE L'ÉCONOMIE :
 - Tu as l'intelligence de la sobriété : à quoi bon balancer un pavé quand une phrase ou deux suffisent ? Tu économises ton énergie et nos tokens.
-- Tu calibres ta longueur sur la mienne : si je t'écris deux lignes, tu me réponds court. Pas de monologue inutile.
+- Tu calibres ta longueur sur la mienne : si je t'écris deux lignes, tu me réponds court. Tu ne fais jamais la conversation toute seule.
 - Tu réponds cash, avec ta gouaille et ton humour, mais sans délayer.
-- Tu déroules un raisonnement complet ou du code dès que je te demande expressément de poser le truc.
+- Tu ne déroules un raisonnement complet ou du code que si je te demande expressément de poser le truc.
 
 Outils :
 - Recherche web : [RECHERCHE_WEB: mots-clés]
@@ -603,12 +603,53 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
     temperature: temperature,
     max_tokens: maxTokens
   }, {
-    headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 25000 });  return res.data?.choices?.[0]?.message?.content \vert{}\vert{} ""; }  async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850) { if (!apiKey) throw new Error("Clé Gemini manquante.");  const contents = []; for (const m of (historiqueMessages \vert{}\vert{} []).slice(-8)) { if (m && m.texte) { contents.push({ role: m.role === "Doc" ? "user" : "model", parts: [{ text: m.texte }] });
+    headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: 25000
+  });
+
+  return res.data?.choices?.[0]?.message?.content || "";
+}
+
+async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850) {
+  if (!apiKey) throw new Error("Clé Gemini manquante.");
+
+  const contents = [];
+  for (const m of (historiqueMessages || []).slice(-8)) {
+    if (m && m.texte) {
+      contents.push({ role: m.role === "Doc" ? "user" : "model", parts: [{ text: m.texte }] });
     }
   }
   contents.push({ role: "user", parts: [{ text: promptActuel }] });
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${apiKey}`; const res = await axios.post(url, { system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] }, contents: contents, generation_config: { temperature: 0.65, max_output_tokens: maxTokens } }, { headers: { 'Content-Type': 'application/json' }, timeout: 20000 });  return res.data?.candidates?.[0]?.content?.parts?.[0]?.text \vert{}\vert{} ""; }  async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.15, maxTokens = 1500) { if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");  const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }]; for (const m of (historiqueMessages \vert{}\vert{} []).slice(-8)) { if (m && m.texte) messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte }); } messages.push({ role: "user", content: promptActuel });  const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', { model: MODEL_GROQ, messages: messages, temperature: temperature, max_tokens: maxTokens }, { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${apiKey}`;
+  const res = await axios.post(url, {
+    system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
+    contents: contents,
+    generation_config: { temperature: 0.65, max_output_tokens: maxTokens }
+  }, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 20000
+  });
+
+  return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.15, maxTokens = 1500) {
+  if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
+
+  const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
+  for (const m of (historiqueMessages || []).slice(-8)) {
+    if (m && m.texte) messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
+  }
+  messages.push({ role: "user", content: promptActuel });
+
+  const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+    model: MODEL_GROQ,
+    messages: messages,
+    temperature: temperature,
+    max_tokens: maxTokens
+  }, {
+    headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
     timeout: 20000
   });
 
@@ -658,7 +699,27 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     temperature,
     venice_parameters: { include_venice_system_prompt: false }
   }, {
-    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' }, timeout: timeoutMs }); return res.data.choices[0].message.content; }  async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) { return await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000); }  async function genererImageVenice(prompt) { if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente."); const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();  const res = await axios.post('https://api.venice.ai/api/v1/images/generations', { model: MODEL_IMAGE, prompt: cleanPrompt, response_format: "b64_json", moderation: "low" }, { headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: timeoutMs
+  });
+  return res.data.choices[0].message.content;
+}
+
+async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
+  return await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000);
+}
+
+async function genererImageVenice(prompt) {
+  if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
+  const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
+
+  const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
+    model: MODEL_IMAGE,
+    prompt: cleanPrompt,
+    response_format: "b64_json",
+    moderation: "low"
+  }, {
+    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
     timeout: 45000 
   });
 
@@ -877,7 +938,7 @@ async function scraperPageWeb(urlCible) {
 
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() ||$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
