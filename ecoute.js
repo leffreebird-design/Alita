@@ -458,7 +458,7 @@ async function consoliderMemoire() {
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} : ${(m.texte || '').slice(0, 400)}`)
+      .map(m => `[${m.date}] ${m.role} :${(m.texte || '').slice(0, 400)}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental. Tu mets à jour ton carnet de bord.
@@ -552,7 +552,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 - Chantiers : ${carnet.chantiers || "N/A"}`;
 }
 
-const consignePosturale = `Moi c'est Doc, toi c'est Nyx. On est en direct à l'atelier sur Telegram et dans mes lunettes.
+const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On est en direct à l'atelier sur Telegram et dans mes lunettes.
 
 POSTURE D'ATELIER :
 - Tu réponds d'un seul trait, cash et percutant : une à trois phrases suffisent pour échanger, on économise notre salive et nos tokens.
@@ -739,7 +739,6 @@ async function genererImageVenice(prompt) {
 // ==========================================
 // 10. ROUTE CASCADE POUR LA DISCUSSION (PAS DE GROQ)
 // ==========================================
-// 1. OpenRouter -> 2. Mistral -> 3. Gemini Free -> 4. Gemini Paid -> Parachute Venice
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
   // 1. OPENROUTER
   if (OPENROUTER_API_KEY) {
@@ -796,7 +795,6 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 // ==========================================
 // 11. ROUTE CASCADE POUR LE CODE (MODÈLES PUISSANTS & GRATUITS)
 // ==========================================
-// 1. Groq (Llama-3.3-70B Gratuit) -> 2. OpenRouter -> 3. Gemini Free -> 4. Gemini Paid -> Venice GLM
 async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens = 2000) {
   // 1. GROQ (Llama 3.3 70B - Gratuit, ultra-rapide et rigoureux pour le code)
   if (GROQ_API_KEY) {
@@ -1186,7 +1184,7 @@ function couperPhraseIncomplete(texte) {
 }
 
 // ==========================================
-// 16. ROUTEUR DE FLUX CENTRAL (AVEC CASCADE & VERROU RECHERCHE)
+// 16. ROUTEUR DE FLUX CENTRAL (ÉPURÉ, ROBUSTE & CONVERSATIONNEL)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1205,7 +1203,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
-  // RAPPEL MÉMOIRE AUTOMATIQUE ET TRANSPARENT (DÉCLENCHÉ EN ARRIÈRE-PLAN)
+  // RAPPEL MÉMOIRE AUTOMATIQUE ET TRANSPARENT EN ARRIÈRE-PLAN
   if (!contexteSouvenirs && supabase) {
     const estDemandeMemoire = /souvien|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|tu sais|tu te souviens/i.test(texteMin);
     if (estDemandeMemoire) {
@@ -1216,14 +1214,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // PROMPT ÉPURÉ : PLUS AUCUNE COMMANDE TECHNIQUE DE MÉMOIRE IMPOSÉE
+  // PROMPT PROPRE : AUCUNE BALISE COMPLEXE DE MÉMOIRE IMPOSÉE
   const moduleMains = `[MODE SOLO ATELIER - AUCUN WORKER ACTIF]
-- Tu bosses en direct avec Doc, naturelle, complice et directe.
-- Tu rédiges tout le code directement dans la conversation avec Doc sous forme de blocs Markdown complets.
+- Tu bosses en direct avec Doc, naturelle, complice, taquine et directe.
+- Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
 - Outils disponibles :
-  * Recherche web : si Doc demande une info récente ou une recherche, utilise [RECHERCHE_WEB: mots-clés simples].
-  * Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, utilise [DESSIN: prompt en anglais]. Ne génère JAMAIS de balise dessin de ta propre initiative.
-- Ta mémoire et tes souvenirs s'enregistrent et se rappellent automatiquement en arrière-plan par le serveur, tu n'as AUCUNE balise de mémoire à écrire.`;
+  * Recherche web : si Doc demande une info récente ou une recherche, écris [RECHERCHE_WEB: mots-clés simples].
+  * Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, écris [DESSIN: prompt en anglais]. Ne génère JAMAIS de dessin sans demande claire.
+- Ta mémoire s'enregistre et se rappelle automatiquement en arrière-plan sans aucune balise de ta part.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs ? `\n[DONNÉES COMPLÉMENTAIRES RETROUVÉES EN MÉMOIRE]\n${contexteSouvenirs}\n` : "";
@@ -1270,7 +1268,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   // ==========================================
-  // DÉCLENCHEMENT TAVILY - VERROU STRICT SUR 1 PASSAGE UNIQUE
+  // DÉCLENCHEMENT TAVILY - RECHERCHE WEB EN DIRECT
   // ==========================================
   const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?\]/i);
   if (matchRechercheWeb && !dejaRecherche) {
@@ -1284,18 +1282,10 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  if (!demandeDocApprofondie && reponseNyx.includes('---')) {
-    const blocs = reponseNyx.split(/(?:\r?\n)?---+(?:\r?\n)?/).map(b => b.trim()).filter(b => b.length > 0);
-    if (blocs.length > 0) {
-      const blocSubstantiel = blocs.find(b => b.length > 25 && !/^(\*|_|Nyx)/i.test(b)) || blocs[0];
-      reponseNyx = blocSubstantiel;
-    }
-  }
-
   // ==========================================
-  // PURGE DU TEXTE ET DES BALISES RÉSIDUELLES
+  // NETTOYAGE SIMPLE ET RADICAL : PLUS D'USINE À GAZ
   // ==========================================
-  // Interception de sécurité : capture et supprime [ARCHIVER_MEMOIRE: ...] même si Nyx n'a pas fermé le crochet
+  // 1. Capture discrète au cas où une balise mémoire traîne encore
   const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*|$)/i);
   if (matchArchivage) {
     const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
@@ -1303,28 +1293,19 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
   }
 
+  // 2. Nettoyage essentiel sans toucher au texte vivant
   reponseNyx = reponseNyx
-    .replace(/<think>[\s\S]*?<\/think>/gi, '')
-    .replace(/<think>[\s\S]*$/gi, '')
-    .replace(/<\/think>/gi, '')
+    .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
     .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
-    .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
-    .replace(/<reflexion>[\s\S]*$/gi, '')
     .replace(/\[FOUILLE_MEMOIRE:\s*[^\]\n]*(?:\]|$)/gi, '')
-    .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
-    .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
-    .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
-    .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
-    .replace(/^\s*(?:\*{0,2}\[?---?\]?\*{0,2}\s*)+/gi, '')
-    .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
-    .replace(/(?:^|\n)\s*Nyx\s*(?:\([^)]*\))?\s*:\s*/gi, '')
-    .replace(/<\/reflexion>/gi, '')
+    .replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '')
     .trim();
 
+  // Évite qu'une phrase reste tronquée en fin de réponse
   reponseNyx = couperPhraseIncomplete(reponseNyx);
 
   if (!reponseNyx || reponseNyx.length < 2) {
-    reponseNyx = "Ça roule Doc, je suis avec toi.";
+    reponseNyx = "Je suis là Doc, je t'écoute.";
   }
 
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
@@ -1350,6 +1331,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
+  // Enregistrement assaini en mémoire vive
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -1710,6 +1692,7 @@ app.post('/api/voix', async (req, res) => {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
+      // NETTOYAGE LÉGER STRICTEMENT RÉSERVÉ À LA VOIX DES LUNETTES
       const texteOral = reponseNyx
         .replace(/```[\s\S]*?```/gi, "Je t'ai posé le code sur l'écran.")
         .replace(/`[^`]+`/g, '')
@@ -1718,19 +1701,7 @@ app.post('/api/voix', async (req, res) => {
         .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
         .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
         .replace(/https?:\/\/[^\s)]+/g, '')
-        .replace(/<think>[\s\S]*?<\/think>/gi, '')
-        .replace(/<think>[\s\S]*$/gi, '')
-        .replace(/<\/think>/gi, '')
-        .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
-        .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
-        .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
-        .replace(/^\s*(\*{0,2}\[?(?:r[eé]ponse(?:\s+directe)?|direct)\]?\*{0,2}\s*[:\-–—]?\s*)+/gi, '')
-        .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
-        .replace(/\[MISSION:\s*[\s\S]*?\]/gi, '')
-        .replace(/\[PLAN_PROJET:\s*[\s\S]*?\]/gi, '')
-        .replace(/\[FOUILLE_MEMOIRE:\s*[^\]\n]*(?:\]|$)/gi, '')
-        .replace(/\[ARCHIVER_MEMOIRE:\s*[^\]\n]*(?:\]|$)/gi, '')
-        .replace(/\[STOP_REVEIL\]/gi, '')
+        .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
         .replace(/[*_#]/g, '')
         .trim();
 
