@@ -1152,8 +1152,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
-  const demandeDocApprofondie = /d[eé]veloppe|approfondi|d[eé]taille|explique en d[eé]tail|pose le truc|analyse bien/i.test(texteNet);
-  const plafondTokens = (estComplexe || demandeDocApprofondie) ? 2000 : 850;
+  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien)\b/i.test(texteNet);
+  const docEstBref = texteNet.length < 120 && !estComplexe && !demandeDocApprofondie;
+  const plafondTokens = demandeDocApprofondie ? 1800 : (estComplexe ? 1500 : (docEstBref ? 500 : 750));
 
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
