@@ -333,7 +333,7 @@ async function rechercherWebTavily(query) {
     if (res.data?.answer) {
       formatTexte += `SYNTHÈSE : ${res.data.answer.slice(0, 300)}\n\n`;
     }
-    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${(r.content || "").slice(0, 180)}`).join("\n\n");
+    formatTexte += results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n${(r.content || "").slice(0, 180)}`).join("\n\n");
     return formatTexte.slice(0, 1800);
   } catch (err) {
     console.error("[TAVILY ERREUR]", err.response?.data || err.message);
@@ -374,7 +374,7 @@ async function evaluerVolition(forceManuelle = false) {
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
 
-  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
+  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} :${m.texte}`).join("\n");
   const fragmentMemoire = await capturerDeriveAssociative();
 
   const promptVolition = `Tu es Nyx.
@@ -448,7 +448,7 @@ async function consoliderMemoire() {
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} : ${(m.texte || '').slice(0, 400)}`)
+      .map(m => `[${m.date}] ${m.role} :${(m.texte || '').slice(0, 400)}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental. Tu mets à jour ton carnet de bord.
@@ -557,7 +557,7 @@ Outils :
 // ==========================================
 // 9. CONNECTEURS LLM INDIVIDUELS
 // ==========================================
-async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.4, maxTokens = 850) {
+async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.5, maxTokens = 850) {
   if (!OPENROUTER_API_KEY) throw new Error("Clé OPENROUTER_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -571,8 +571,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   const res = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
     model: modelCible,
     messages: messages,
-    temperature: 0.4,
-    stop: ["\n---", "\n___", "---"],
+    temperature: temperature,
     max_tokens: maxTokens
   }, {
     headers: {
@@ -587,7 +586,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   return res.data?.choices?.[0]?.message?.content || "";
 }
 
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.4, maxTokens = 850) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 850) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -602,18 +601,9 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
     model: MODEL_MISTRAL,
     messages: messages,
     temperature: temperature,
-    stop: ["\n---", "\n___", "---"],
     max_tokens: maxTokens
   }, {
-    headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: 25000
-  });
-
-  return res.data?.choices?.[0]?.message?.content || "";
-}
-
-async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850) {
-  if (!apiKey) throw new Error("Clé Gemini manquante.");
+    headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 25000 });  return res.data?.choices?.[0]?.message?.content \vert{}\vert{} ""; }  async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850) { if (!apiKey) throw new Error("Clé Gemini manquante.");
 
   const contents = [];
   for (const m of (historiqueMessages || []).slice(-8)) {
@@ -623,35 +613,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
   }
   contents.push({ role: "user", parts: [{ text: promptActuel }] });
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${apiKey}`;
-  const res = await axios.post(url, {
-    system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
-    contents: contents,
-    generation_config: { temperature: 0.4, max_output_tokens: maxTokens, stopSequences: ["\n---", "\n___", "---"] }
-  }, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 20000
-  });
-
-  return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-}
-
-async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.15, maxTokens = 1500) {
-  if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
-
-  const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  for (const m of (historiqueMessages || []).slice(-8)) {
-    if (m && m.texte) messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
-  }
-  messages.push({ role: "user", content: promptActuel });
-
-  const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-    model: MODEL_GROQ,
-    messages: messages,
-    temperature: temperature,
-    max_tokens: maxTokens
-  }, {
-    headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_GEMINI}:generateContent?key=${apiKey}`; const res = await axios.post(url, { system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] }, contents: contents, generation_config: { temperature: 0.65, max_output_tokens: maxTokens } }, { headers: { 'Content-Type': 'application/json' }, timeout: 20000 });  return res.data?.candidates?.[0]?.content?.parts?.[0]?.text \vert{}\vert{} ""; }  async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, temperature = 0.15, maxTokens = 1500) { if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");  const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }]; for (const m of (historiqueMessages \vert{}\vert{} []).slice(-8)) { if (m && m.texte) messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte }); } messages.push({ role: "user", content: promptActuel });  const res = await axios.post('https://api.groq.com/openai/v1/chat/completions', { model: MODEL_GROQ, messages: messages, temperature: temperature, max_tokens: maxTokens }, { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
     timeout: 20000
   });
 
@@ -677,7 +639,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
-    generation_config: { temperature: 0.5, max_output_tokens: 900 }
+    generation_config: { temperature: 0.7, max_output_tokens: 900 }
   }, {
     headers: { 'Content-Type': 'application/json' },
     timeout: 25000
@@ -686,7 +648,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.5, timeoutMs = 20000) {
+async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7, timeoutMs = 20000) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -699,30 +661,9 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     model,
     messages,
     temperature,
-    stop: ["\n---", "\n___", "---"],
     venice_parameters: { include_venice_system_prompt: false }
   }, {
-    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: timeoutMs
-  });
-  return res.data.choices[0].message.content;
-}
-
-async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.5) {
-  return await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000);
-}
-
-async function genererImageVenice(prompt) {
-  if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
-  const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
-
-  const res = await axios.post('https://api.venice.ai/api/v1/images/generations', {
-    model: MODEL_IMAGE,
-    prompt: cleanPrompt,
-    response_format: "b64_json",
-    moderation: "low"
-  }, {
-    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' }, timeout: timeoutMs }); return res.data.choices[0].message.content; }  async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) { return await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000); }  async function genererImageVenice(prompt) { if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente."); const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();  const res = await axios.post('https://api.venice.ai/api/v1/images/generations', { model: MODEL_IMAGE, prompt: cleanPrompt, response_format: "b64_json", moderation: "low" }, { headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
     timeout: 45000 
   });
 
@@ -737,7 +678,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   // 1. DEEPSEEK CHAT GRATUIT (OpenRouter)
   if (OPENROUTER_API_KEY) {
     try {
-      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.4, plafondTokens);
+      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.55, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
       console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
@@ -747,7 +688,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   // 2. MISTRAL AI
   if (MISTRAL_API_KEY) {
     try {
-      const res = await appelerMistral(systemBase, historique, prompt, 0.4, plafondTokens);
+      const res = await appelerMistral(systemBase, historique, prompt, 0.55, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e2) {
       console.warn("[CASCADE CHAT] 2. Mistral KO :", e2.message);
@@ -777,7 +718,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   // 5. PARACHUTE ULTIME VENICE
   if (VENICE_API_KEY) {
     try {
-      return await appelerVeniceDark(systemBase, historique, prompt, 0.5);
+      return await appelerVeniceDark(systemBase, historique, prompt, 0.7);
     } catch (eV) {
       console.warn("[CASCADE CHAT] 5. Venice KO :", eV.message);
     }
@@ -941,7 +882,7 @@ async function scraperPageWeb(urlCible) {
 
     const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() ||$('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() \vert{}\vert{}$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
