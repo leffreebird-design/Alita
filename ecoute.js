@@ -572,7 +572,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
     model: modelCible,
     messages: messages,
     temperature: 0.4,
-    stop: ["\n---", "\n___", "---"]
+    stop: ["\n---", "\n___", "---"],
     max_tokens: maxTokens
   }, {
     headers: {
