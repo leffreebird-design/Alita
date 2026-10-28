@@ -569,7 +569,8 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   const res = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
     model: modelCible,
     messages: messages,
-    temperature: temperature,
+    temperature: 0.4,
+    stop: ["\n---", "\n___", "---"]
     max_tokens: maxTokens
   }, {
     headers: {
@@ -1234,6 +1235,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
     .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
     .replace(/<reflexion>[\s\S]*$/gi, '')
+    .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
+    .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
     .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
     .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
     .replace(/^\s*(?:\*{0,2}\[?---?\]?\*{0,2}\s*)+/gi, '')
