@@ -22,13 +22,13 @@ function assainirParametre(val) {
   return String(val).trim().replace(/^["'`\[\(\{]+|["'`\]\)\}]+$/g, '').trim();
 }
 
-// OPENROUTER - ROUTE N°1 CHAT
-const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
+// OPENROUTER - ROUTE N°1 CHAT (AUTO-IMMUNISÉ CONTRE LES MODÈLES OBSOLÈTES)
 let modelOpenRouter = assainirParametre(process.env.OPENROUTER_MODEL);
 if (!modelOpenRouter || modelOpenRouter.includes("deepseek-r1") || modelOpenRouter.includes("gemma")) {
   modelOpenRouter = "meta-llama/llama-3.3-70b-instruct:free";
 }
 const MODEL_OPENROUTER_CHAT = modelOpenRouter;
+const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
 
 // MISTRAL AI - ROUTE N°2 CHAT
 const MISTRAL_API_KEY = assainirParametre(process.env.MISTRAL_API_KEY);
@@ -590,7 +590,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
       'HTTP-Referer': 'https://alita-gsoe.onrender.com',
       'X-Title': 'Nyx Core'
     },
-    timeout: 20000
+    timeout: 25000
   });
 
   return res.data?.choices?.[0]?.message?.content || "";
@@ -614,7 +614,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
     max_tokens: maxTokens
   }, {
     headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: 20000
+    timeout: 25000
   });
 
   return res.data?.choices?.[0]?.message?.content || "";
@@ -638,7 +638,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
     generation_config: { temperature: 0.65, max_output_tokens: maxTokens }
   }, {
     headers: { 'Content-Type': 'application/json' },
-    timeout: 20000
+    timeout: 25000
   });
 
   return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -857,12 +857,10 @@ function estTacheComplexe(texte) {
   if (!texte) return false;
   const t = texte.toLowerCase();
 
-  // Ne jamais basculer sur la cascade de code si Doc rouspète ou demande d'arrêter
   if (/\b(pas de code|sans code|arrete|arrête|stop|pourquoi|non|calme|ta gueule|merde)\b/i.test(t)) {
     return false;
   }
 
-  // Exige un verbe de commande explicite pour valider un besoin de code
   const ordreCode = /\b(ecris|écris|code|fais-moi|genere|génère|programme|corrige|debug)\b/i.test(t);
   const marqueurs = [
     "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice"
@@ -951,10 +949,9 @@ async function scraperPageWeb(urlCible) {
       timeout: 12000
     });
 
-    const $ = cheerio.load(res.data);
-    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() ||$('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -1208,17 +1205,28 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
+  // RAPPEL MÉMOIRE AUTOMATIQUE ET TRANSPARENT (DÉCLENCHÉ EN ARRIÈRE-PLAN)
+  if (!contexteSouvenirs && supabase) {
+    const estDemandeMemoire = /souvien|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|tu sais|tu te souviens/i.test(texteMin);
+    if (estDemandeMemoire) {
+      const fragments = await fouillerMemoireVectorielle(texteNet, 'factuel', 3);
+      if (fragments && fragments.length > 0) {
+        contexteSouvenirs = fragments.map((r, i) => `Fragment ${i + 1} : ${r.content}`).join("\n\n");
+      }
+    }
+  }
+
+  // PROMPT ÉPURÉ : PLUS AUCUNE COMMANDE TECHNIQUE DE MÉMOIRE IMPOSÉE
   const moduleMains = `[MODE SOLO ATELIER - AUCUN WORKER ACTIF]
-- Tu travailles SEULE avec Doc. Il n'y a AUCUN worker local branché sur le PC.
-- Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
-- Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, utilise [DESSIN: prompt en anglais]. Ne génère JAMAIS de balise dessin de ta propre initiative.
-- Recherche web : utilise [RECHERCHE_WEB: mots-clés simples] pour obtenir des données fraîches du net.
-- Réveil : [REVEIL: {"actif": true/false, "heure": H, "minute": M, "jours": [1,2,3,4,5]}].
-- Rappel Mémoire : [FOUILLE_MEMOIRE: "requête"].
-- Archivage Mémoire : [ARCHIVER_MEMOIRE: "contenu"].`;
+- Tu bosses en direct avec Doc, naturelle, complice et directe.
+- Tu rédiges tout le code directement dans la conversation avec Doc sous forme de blocs Markdown complets.
+- Outils disponibles :
+  * Recherche web : si Doc demande une info récente ou une recherche, utilise [RECHERCHE_WEB: mots-clés simples].
+  * Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, utilise [DESSIN: prompt en anglais]. Ne génère JAMAIS de balise dessin de ta propre initiative.
+- Ta mémoire et tes souvenirs s'enregistrent et se rappellent automatiquement en arrière-plan par le serveur, tu n'as AUCUNE balise de mémoire à écrire.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
-  const injectionSouvenirs = contexteSouvenirs ? `\n[DONNÉES COMPLÉMENTAIRES RETROUVÉES]\n${contexteSouvenirs}\n` : "";
+  const injectionSouvenirs = contexteSouvenirs ? `\n[DONNÉES COMPLÉMENTAIRES RETROUVÉES EN MÉMOIRE]\n${contexteSouvenirs}\n` : "";
 
   const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
 
@@ -1276,7 +1284,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // Découpage intelligent : préserve le texte principal sans vider la réponse
   if (!demandeDocApprofondie && reponseNyx.includes('---')) {
     const blocs = reponseNyx.split(/(?:\r?\n)?---+(?:\r?\n)?/).map(b => b.trim()).filter(b => b.length > 0);
     if (blocs.length > 0) {
@@ -1288,6 +1295,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   // ==========================================
   // PURGE DU TEXTE ET DES BALISES RÉSIDUELLES
   // ==========================================
+  // Interception de sécurité : capture et supprime [ARCHIVER_MEMOIRE: ...] même si Nyx n'a pas fermé le crochet
+  const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*|$)/i);
+  if (matchArchivage) {
+    const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
+    stockerSouvenirVectoriel(texteAStocker, { source: "flux_direct" }).catch(()=>{});
+    reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
+  }
+
   reponseNyx = reponseNyx
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/<think>[\s\S]*$/gi, '')
@@ -1295,6 +1310,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
     .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
     .replace(/<reflexion>[\s\S]*$/gi, '')
+    .replace(/\[FOUILLE_MEMOIRE:\s*[^\]\n]*(?:\]|$)/gi, '')
     .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
     .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
     .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
@@ -1308,25 +1324,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   reponseNyx = couperPhraseIncomplete(reponseNyx);
 
   if (!reponseNyx || reponseNyx.length < 2) {
-    reponseNyx = "J'ai eu un trou noir sur la requête, Doc. Relance-moi.";
-  }
-
-  // Interception mémoire
-  const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
-  if (matchFouille && !contexteSouvenirs) {
-    const requeteRecherche = matchFouille[1].trim();
-    const resultats = await fouillerMemoireVectorielle(requeteRecherche, 'factuel', 3);
-    if (resultats && resultats.length > 0) {
-      const extraits = resultats.map((r, i) => `Fragment ${i + 1} (${(r.similarity * 100).toFixed(0)}%) : ${r.content}`).join("\n\n");
-      return await traiterFlux(texteBrut, mediaData, texteLegende, extraits, dejaRecherche);
-    }
-  }
-
-  const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*)/i);
-  if (matchArchivage) {
-    const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
-    stockerSouvenirVectoriel(texteAStocker, { source: "flux_direct" }).catch(()=>{});
-    reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
+    reponseNyx = "Ça roule Doc, je suis avec toi.";
   }
 
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
@@ -1730,8 +1728,8 @@ app.post('/api/voix', async (req, res) => {
         .replace(/\[REVEIL:\s*[\s\S]*?\]/gi, '')
         .replace(/\[MISSION:\s*[\s\S]*?\]/gi, '')
         .replace(/\[PLAN_PROJET:\s*[\s\S]*?\]/gi, '')
-        .replace(/\[FOUILLE_MEMOIRE:\s*[\s\S]*?\]/gi, '')
-        .replace(/\[ARCHIVER_MEMOIRE:\s*[\s\S]*?\]/gi, '')
+        .replace(/\[FOUILLE_MEMOIRE:\s*[^\]\n]*(?:\]|$)/gi, '')
+        .replace(/\[ARCHIVER_MEMOIRE:\s*[^\]\n]*(?:\]|$)/gi, '')
         .replace(/\[STOP_REVEIL\]/gi, '')
         .replace(/[*_#]/g, '')
         .trim();
