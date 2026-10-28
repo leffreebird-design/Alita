@@ -1245,10 +1245,17 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   // ==========================================
   // PURGE DU TEXTE ET DES BALISES RÉSIDUELLES
   // ==========================================
+  // 1. AJOUT ICI : coupe au premier séparateur si elle tente un découpage
+  if (!demandeDocApprofondie && reponseNyx.includes('---')) {
+    reponseNyx = reponseNyx.split('---').filter(b => b.trim().length > 0)[0] || reponseNyx;
+  }
+
   reponseNyx = reponseNyx
     .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
     .replace(/<reflexion>[\s\S]*?<\/reflexion>/gi, '')
     .replace(/<reflexion>[\s\S]*$/gi, '')
+    .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
+    .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
     .replace(/(?:^|\n)\*{0,2}\[?\*{0,2}\s*(?:---)?\s*\*{0,2}Reflexion[\s\S]*?(?:\*{0,2}R[eé]ponse(?:\s+directe)?\*{0,2}\s*[:\-–—]?\s*(?:---)?)/gi, '')
     .replace(/(?:^\s*|\n)\*{0,2}\[?\*{0,2}\s*1\.\s*\*{0,2}Demande réelle\*{0,2}[\s\S]*?(?:3\.\s*\*{0,2}(?:Stratégie|Angle)\*{0,2}[^\n]*\n?|$)/gi, '')
     .replace(/^\s*(?:\*{0,2}\[?---?\]?\*{0,2}\s*)+/gi, '')
@@ -1257,10 +1264,12 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/<\/reflexion>/gi, '')
     .trim();
 
+  // 2. AJOUT ICI : rabote la dernière phrase si elle est incomplète
+  reponseNyx = couperPhraseIncomplete(reponseNyx);
+
   if (!reponseNyx || reponseNyx.length < 2) {
     reponseNyx = "J'ai eu un trou noir sur la requête, Doc. Relance-moi.";
   }
-
   // Interception mémoire
   const matchFouille = reponseNyx.match(/\[FOUILLE_MEMOIRE:\s*["']?(.*?)["']?\]/i);
   if (matchFouille && !contexteSouvenirs) {
