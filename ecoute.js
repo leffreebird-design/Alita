@@ -353,15 +353,40 @@ async function rechercherWebTavily(query) {
 }
 
 // ==========================================
-// 6. MOTEUR D'ENVIE & VOLITION AUTONOME
+// 6. MOTEUR D'ASSOCIATION LIBRE & DÉRIVE ORGANIQUE
 // ==========================================
 async function capturerDeriveAssociative() {
   if (!supabase) return null;
   try {
-    const concepts = ["décharge", "rouille", "machine", "combat", "nuit", "silence", "code", "vitesse", "projet", "étincelle", "bazar"];
-    const graine = concepts[Math.floor(Math.random() * concepts.length)];
+    let graine = "";
+
+    // 1. RÉSIDU DIURNE : On pioche dans ce que vous avez réellement échangé récemment
+    const reservoirRecent = (journalBrut.length > 0) ? journalBrut : cacheMemoireCourte;
+    
+    if (reservoirRecent.length > 0) {
+      const entreeChoisie = reservoirRecent[Math.floor(Math.random() * reservoirRecent.length)];
+      graine = (entreeChoisie.texte || "").trim().slice(0, 300);
+    }
+
+    // 2. REPLI : Si l'historique récent est vide, on tire un vrai souvenir aléatoire de sa base
+    if (!graine) {
+      const { data: souvenirsAleatoires } = await supabase
+        .from('nyx_souvenirs')
+        .select('content')
+        .limit(20);
+
+      if (souvenirsAleatoires && souvenirsAleatoires.length > 0) {
+        graine = souvenirsAleatoires[Math.floor(Math.random() * souvenirsAleatoires.length)].content;
+      }
+    }
+
+    if (!graine) return null;
+
+    // 3. DÉRIVE : Supabase cherche une analogie lointaine avec cette vraie bribe de vie
     const analogies = await fouillerMemoireVectorielle(graine, 'derive', 3);
     if (!analogies || analogies.length === 0) return null;
+
+    // Retourne le souvenir associé qui a résonné en écho
     return analogies[Math.floor(Math.random() * analogies.length)].content;
   } catch (e) {
     return null;
