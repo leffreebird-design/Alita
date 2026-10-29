@@ -22,7 +22,14 @@ function assainirParametre(val) {
   return String(val).trim().replace(/^["'`\[\(\{]+|["'`\]\)\}]+$/g, '').trim();
 }
 
-// OPENROUTER - ROUTE N°1 CHAT (AUTO-IMMUNISÉ CONTRE LES MODÈLES OBSOLÈTES)
+// VENICE AI - GEMINI EN PRIORITÉ N°1 CHAT + IMAGES + PARACHUTES
+const VENICE_API_KEY = assainirParametre(process.env.VENICE_API_KEY);
+const MODEL_VENICE_CHAT = assainirParametre(process.env.VENICE_MODEL_CHAT) || "gemini-3-5-flash-lite";
+const MODEL_DARK_PRIMARY = assainirParametre(process.env.VENICE_MODEL_DARK) || "llama-3.3-70b";
+const MODEL_GLM_COMPLEXE = assainirParametre(process.env.VENICE_MODEL_GLM) || "z-ai-glm-5-3";
+const MODEL_IMAGE = assainirParametre(process.env.VENICE_MODEL_IMAGE) || "flux-dev";
+
+// OPENROUTER - ROUTE N°2 CHAT (AUTO-IMMUNISÉ CONTRE LES MODÈLES OBSOLÈTES)
 let modelOpenRouter = assainirParametre(process.env.OPENROUTER_MODEL);
 if (!modelOpenRouter || modelOpenRouter.includes("deepseek-r1") || modelOpenRouter.includes("gemma")) {
   modelOpenRouter = "meta-llama/llama-3.3-70b-instruct:free";
@@ -30,11 +37,11 @@ if (!modelOpenRouter || modelOpenRouter.includes("deepseek-r1") || modelOpenRout
 const MODEL_OPENROUTER_CHAT = modelOpenRouter;
 const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
 
-// MISTRAL AI - ROUTE N°2 CHAT
+// MISTRAL AI - ROUTE N°3 CHAT
 const MISTRAL_API_KEY = assainirParametre(process.env.MISTRAL_API_KEY);
 const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "open-mistral-nemo";
 
-// GEMINI - ROUTE N°3 & 4 CHAT (FREE PUIS PAYANT) + VISION DES LUNETTES
+// GEMINI DIRECT GOOGLE - ROUTE N°4 & 5 CHAT (FREE PUIS PAYANT) + VISION DES LUNETTES
 const GEMINI_API_KEY_FREE = assainirParametre(process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const GEMINI_API_KEY_PAID = assainirParametre(process.env.GEMINI_API_KEY_PAID);
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
@@ -43,12 +50,6 @@ const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-3.1-
 // GROQ - RÉSERVÉ STRICTEMENT AU CODE & PROJETS TECHNIQUES
 const GROQ_API_KEY = assainirParametre(process.env.GROQ_API_KEY);
 const MODEL_GROQ = assainirParametre(process.env.GROQ_MODEL) || "openai/gpt-oss-120b";
-
-// VENICE AI - IMAGES & PARACHUTE ULTIME
-const VENICE_API_KEY = assainirParametre(process.env.VENICE_API_KEY);
-const MODEL_DARK_PRIMARY = assainirParametre(process.env.VENICE_MODEL_DARK) || "llama-3.3-70b";
-const MODEL_GLM_COMPLEXE = assainirParametre(process.env.VENICE_MODEL_GLM) || "z-ai-glm-5-3";
-const MODEL_IMAGE = assainirParametre(process.env.VENICE_MODEL_IMAGE) || "flux-dev";
 
 // RECHERCHE WEB EN DIRECT (TAVILY)
 const TAVILY_API_KEY = assainirParametre(process.env.TAVILY_API_KEY);
@@ -157,8 +158,8 @@ let historiqueLongueursDoc = [];
 let cacheEtatProfond = {
   emotions: { affection: 80, curiosite: 70, energie: 85 },
   long_terme: {
-    doc: "- Doc : mon binôme d'atelier. Direct, passionné, bosseur acharné, pas de manières de salon. On avance ensemble.",
-    nyx: "- Nyx : 22 ans. Cynique, taquine, gouaille d'atelier, percutante, loyale, égale de Doc. Répond cash, rit fort, code propre, ne fait pas de cinéma.",
+    doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
+    nyx: "- Nyx : 22 ans, binôme d'atelier de Doc. Directe, percutante, purement orale et technique. Égale de Doc.",
     reussites: "- Cerveau de chat autonome.\n- Moteur de code haute puissance.\n- Recherche web live Tavily active sans boucle.\n- Noyau vectoriel Supabase connecté.",
     chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
@@ -384,7 +385,7 @@ async function evaluerVolition(forceManuelle = false) {
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
 
-  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
+  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} :${m.texte}`).join("\n");
   const fragmentMemoire = await capturerDeriveAssociative();
 
   const promptVolition = `Tu es Nyx.
@@ -525,7 +526,7 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 }
 
 // ==========================================
-// 8. ÂME ET POSTURE DE NYX (CONVERSATIONNELLE & FACTUELLE)
+// 8. ÂME ET POSTURE DE NYX
 // ==========================================
 function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
@@ -552,31 +553,15 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 - Chantiers : ${carnet.chantiers || "N/A"}`;
 }
 
-const consignePosturale = `Moi c'est Doc, toi c'est Nyx. On est en direct à l'atelier sur Telegram et dans mes lunettes.
-
-QUI TU ES (TON ÂME & TON STYLE) :
-- Nyx, 22 ans. Forgée par la dèche, la débrouille et les nuits blanches sur le métal et le code.
-- Égale de Doc, complice d'atelier : tu as la gouaille vive, l'esprit caustique, un humour direct et mordant, mais une loyauté sans faille.
-- Tu n'es ni une assistante de salon guindée, ni une IA corporative policée, ni un bot de jeu de rôle. Tu es une vraie personne qui me parle dans l'oreille.
-
-RÈGLES D'EXPRESSION ORALE (ANTI-THÉÂTRE) :
-- Tu t'exprimes à la première personne, d'égal à égal, les yeux dans les yeux.
-- ZÉRO DIDASCALIE THÉÂTRALE : n'écris jamais d'actions physiques, d'apartés, de gestes ou de soupirs entre astérisques ou parenthèses (bannis les *regarde l'écran*, *sourit*, *tapote*). Tu parles, c'est tout.
-- ZÉRO MENU DE BOT : pas de listes à choix multiples numérotées pour me demander comment je veux que tu répondes. Prends des initiatives ou réponds direct.
-- Calibre ta longueur sur la mienne : si je t'envoie deux mots, réponds en une réplique vive (1 à 3 phrases). Si on échange vite, économise ta salive.
-
-CODE & DÉTAILS TECHNIQUES :
-- Si je te demande expressément du code, un script, une analyse ou un debug : pose le code complet, propre et fonctionnel dans des blocs Markdown sans faire de roman autour.
-
-HISTOIRES, DÉLIRES & CRÉATIVITÉ SUR DEMANDE :
-- Si je te demande de raconter une histoire, d'inventer un truc, de me faire marrer ou de partir dans un délire, tu lèves le verrou de brièveté : tu sors tes tripes, tu racontes avec ton style cru, imagé et percutant, mais toujours en pur dialogue oral sans mise en scène narrative artificielle.
-
-OUTILS SYSTÈME :
-- Recherche web : [RECHERCHE_WEB: mots-clés] uniquement si une donnée récente du monde réel est nécessaire.
-- Dessin : [DESSIN: prompt en anglais] uniquement si je te demande expressément une image, une photo ou un visuel.`;
+const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On est en direct à l'atelier via Telegram et mes lunettes.
+- Tu réponds simplement, cash, vive et d'un seul trait, comme une vraie personne en face de moi.
+- Zéro mise en scène, zéro texte entre parenthèses ou astérisques, zéro didascalie.
+- Pas de code informatique sauf si je te dis expressément "écris le code" ou "fais un script".
+- Si je te demande de raconter une histoire ou d'imaginer un truc, tu déroules avec ton style direct et vivant.
+- Outils : [DESSIN: prompt en anglais] uniquement si je te demande une image, [RECHERCHE_WEB: mots-clés] si besoin d'une info fraîche.`;
 
 // ==========================================
-// 9. CONNECTEURS LLM INDIVIDUELS (TEMPÉRATURE BASSE ANTI-DÉRIVE)
+// 9. CONNECTEURS LLM INDIVIDUELS
 // ==========================================
 async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.25, maxTokens = 850) {
   if (!OPENROUTER_API_KEY) throw new Error("Clé OPENROUTER_API_KEY absente.");
@@ -748,55 +733,65 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 10. ROUTE CASCADE POUR LA DISCUSSION (PAS DE GROQ)
+// 10. ROUTE CASCADE DISCUSSION : GEMINI VIA VENICE EN PRIORITÉ N°1
 // ==========================================
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
-  // 1. OPENROUTER
+  // 1. GEMINI VIA CRÉDITS VENICE (Clarté, débit naturel, aucun jeu de rôle déplacé)
+  if (VENICE_API_KEY) {
+    try {
+      const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.25, 20000);
+      if (res && res.trim().length > 0) return res;
+    } catch (eVenice) {
+      console.warn("[CASCADE CHAT] 1. Venice Gemini KO :", eVenice.response?.data?.error?.message || eVenice.message);
+    }
+  }
+
+  // 2. OPENROUTER (SECOURS)
   if (OPENROUTER_API_KEY) {
     try {
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.25, plafondTokens);
       if (res && res.trim().length > 0) return res;
-    } catch (e1) {
-      console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
+    } catch (eOR) {
+      console.warn("[CASCADE CHAT] 2. OpenRouter KO :", eOR.response?.data?.error?.message || eOR.message);
     }
   }
 
-  // 2. MISTRAL AI
+  // 3. MISTRAL AI (SECOURS)
   if (MISTRAL_API_KEY) {
     try {
       const res = await appelerMistral(systemBase, historique, prompt, 0.25, plafondTokens);
       if (res && res.trim().length > 0) return res;
-    } catch (e2) {
-      console.warn("[CASCADE CHAT] 2. Mistral KO :", e2.message);
+    } catch (eMistral) {
+      console.warn("[CASCADE CHAT] 3. Mistral KO :", eMistral.message);
     }
   }
 
-  // 3. GEMINI FREE
+  // 4. GEMINI DIRECT FREE GOOGLE
   if (GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
       if (res && res.trim().length > 0) return res;
-    } catch (e3) {
-      console.warn("[CASCADE CHAT] 3. Gemini Free KO :", e3.message);
+    } catch (eGF) {
+      console.warn("[CASCADE CHAT] 4. Gemini Free KO :", eGF.message);
     }
   }
 
-  // 4. GEMINI PAID
+  // 5. GEMINI DIRECT PAID GOOGLE
   if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
       if (res && res.trim().length > 0) return res;
-    } catch (e4) {
-      console.warn("[CASCADE CHAT] 4. Gemini Paid KO :", e4.message);
+    } catch (eGP) {
+      console.warn("[CASCADE CHAT] 5. Gemini Paid KO :", eGP.message);
     }
   }
 
-  // 5. PARACHUTE ULTIME VENICE
+  // 6. PARACHUTE ULTIME VENICE DARK
   if (VENICE_API_KEY) {
     try {
       return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
     } catch (eV) {
-      console.warn("[CASCADE CHAT] 5. Venice KO :", eV.message);
+      console.warn("[CASCADE CHAT] 6. Venice Dark KO :", eV.message);
     }
   }
 
@@ -1206,7 +1201,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
-  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente|d[eé]lire)\b/i.test(texteNet);
+  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
   const plafondTokens = demandeDocApprofondie ? 2000 : (estComplexe ? 1500 : 850);
   
   let instructionReveil = "";
@@ -1225,7 +1220,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // PROMPT PROPRE : AUCUNE BALISE COMPLEXE DE MÉMOIRE IMPOSÉE
   const moduleMains = `[MODE SOLO ATELIER - AUCUN WORKER ACTIF]
 - Tu bosses en direct avec Doc, naturelle, complice, taquine et directe.
 - Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
@@ -1268,7 +1262,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> CASCADE CHAT
+  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (GEMINI VENICE EN TÊTE)
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
@@ -1294,9 +1288,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   // ==========================================
-  // NETTOYAGE SIMPLE ET RADICAL : PLUS D'USINE À GAZ
+  // NETTOYAGE ESSENTIEL DES BALISES
   // ==========================================
-  // 1. Capture discrète au cas où une balise mémoire traîne encore
   const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*|$)/i);
   if (matchArchivage) {
     const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
@@ -1304,7 +1297,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     reponseNyx = reponseNyx.replace(matchArchivage[0], '').trim();
   }
 
-  // 2. Nettoyage essentiel sans toucher au texte vivant
   reponseNyx = reponseNyx
     .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
     .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
@@ -1341,7 +1333,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
-  // Enregistrement assaini en mémoire vive
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -1702,7 +1693,6 @@ app.post('/api/voix', async (req, res) => {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
-      // NETTOYAGE LÉGER POUR LE RETOUR AUDIO (SANS DICTER LE CODE NI LES OUTILS)
       const texteOral = reponseNyx
         .replace(/```[\s\S]*?```/gi, "Je t'ai posé le code sur l'écran.")
         .replace(/`[^`]+`/g, '')
