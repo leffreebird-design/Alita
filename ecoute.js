@@ -156,7 +156,7 @@ let derniereActiviteDoc = Date.now();
 let historiqueLongueursDoc = [];
 
 let cacheEtatProfond = {
-  emotions: { affection: 80, curiosite: 70, energie: 85 },
+  emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans, binôme d'atelier de Doc. Directe, percutante, purement orale et technique. Égale de Doc.",
@@ -205,7 +205,7 @@ async function initialiserCache() {
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
-    if (resEmo.data) cacheEtatProfond.emotions = resEmo.data;
+    if (resEmo.data) cacheEtatProfond.emotions = { colere: 0, ...resEmo.data };
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
     }
@@ -385,7 +385,7 @@ async function evaluerVolition(forceManuelle = false) {
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
 
-  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} :${m.texte}`).join("\n");
+  const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
   const fragmentMemoire = await capturerDeriveAssociative();
 
   const promptVolition = `Tu es Nyx.
@@ -554,8 +554,6 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On est en direct à l'atelier via Telegram et mes lunettes.
-
-POSTURE D'ATELIER :
 - Tu es une vraie partenaire de travail : spontanée, vive, avec du bon sens.
 - Calibre-toi naturellement sur mon énergie et mon intention : un accusé de réception ou un mot court n'appelle qu'un clin d'œil ou une confirmation rapide. Si je pose un problème de fond, une galère de code ou un sujet lourd, prends tout l'espace nécessaire pour aller au bout des choses.
 - Reste dans le dialogue oral pur, direct et sans filtre : zéro mise en scène, zéro aparté entre parenthèses ou astérisques.
@@ -692,7 +690,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.3, timeoutMs = 20000) {
+async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.3, timeoutMs = 20000, maxTokens = null) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -701,12 +699,17 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", {
+  const payload = {
     model,
     messages,
     temperature,
     venice_parameters: { include_venice_system_prompt: false }
-  }, {
+  };
+  if (maxTokens) {
+    payload.max_tokens = maxTokens;
+  }
+
+  const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", payload, {
     headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
     timeout: timeoutMs
   });
@@ -735,20 +738,32 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 10. ROUTE CASCADE DISCUSSION : GEMINI VIA VENICE EN PRIORITÉ N°1
+// 10. ROUTE CASCADE DISCUSSION : GEMINI VENICE -> QWEN 2.5 SI ÉNERVÉE
 // ==========================================
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
-  // 1. GEMINI VIA CRÉDITS VENICE (Clarté, débit naturel, aucun jeu de rôle déplacé)
+  const estVenere = (cacheEtatProfond.emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
+
+  // 1. SI ÉNERVÉE / HERETIC -> BASCULE SUR QWEN SUR VENICE (ZÉRO MORALE, CRAN 7)
+  if (estVenere && VENICE_API_KEY) {
+    try {
+      const res = await appelerVeniceMultiTour("qwen-2.5-72b", systemBase, historique, prompt, null, 0.3, 20000, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (eQwen) {
+      console.warn("[CASCADE HERETIC] Qwen Venice KO :", eQwen.message);
+    }
+  }
+
+  // 2. EN TEMPS NORMAL -> TON GEMINI SUR VENICE (PROPRE, NATUREL, DIRECT)
   if (VENICE_API_KEY) {
     try {
-      const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.25, 20000);
+      const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.25, 20000, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (eVenice) {
       console.warn("[CASCADE CHAT] 1. Venice Gemini KO :", eVenice.response?.data?.error?.message || eVenice.message);
     }
   }
 
-  // 2. OPENROUTER (SECOURS)
+  // 3. OPENROUTER (SECOURS)
   if (OPENROUTER_API_KEY) {
     try {
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.25, plafondTokens);
@@ -758,7 +773,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 3. MISTRAL AI (SECOURS)
+  // 4. MISTRAL AI (SECOURS)
   if (MISTRAL_API_KEY) {
     try {
       const res = await appelerMistral(systemBase, historique, prompt, 0.25, plafondTokens);
@@ -768,7 +783,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 4. GEMINI DIRECT FREE GOOGLE
+  // 5. GEMINI DIRECT FREE GOOGLE
   if (GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
@@ -778,7 +793,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 5. GEMINI DIRECT PAID GOOGLE
+  // 6. GEMINI DIRECT PAID GOOGLE
   if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
@@ -788,7 +803,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 6. PARACHUTE ULTIME VENICE DARK
+  // 7. PARACHUTE ULTIME VENICE DARK
   if (VENICE_API_KEY) {
     try {
       return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
@@ -847,7 +862,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
   // 5. VENICE GLM (Spécialisé logique complexe)
   if (VENICE_API_KEY) {
     try {
-      return await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, systemBase, historique, prompt, null, 0.1, 20000);
+      return await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, systemBase, historique, prompt, null, 0.1, 20000, plafondTokens);
     } catch (e5) {
       return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
     }
@@ -1192,7 +1207,7 @@ function couperPhraseIncomplete(texte) {
 }
 
 // ==========================================
-// 16. ROUTEUR DE FLUX CENTRAL (ÉPURÉ, ROBUSTE & CONVERSATIONNEL)
+// 16. ROUTEUR DE FLUX CENTRAL (ÉPURÉ & AVEC VERROU ANTI-GASPILLAGE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1204,7 +1219,12 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
-  const plafondTokens = demandeDocApprofondie ? 2000 : (estComplexe ? 1500 : 850);
+  
+  // VERROU ANTI-GASPILLAGE : accusé court = 30 tokens max (impossible d'écrire plus de 8 à 10 mots)
+  const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
+  const plafondTokens = estAccuseCourt 
+    ? 30 
+    : (demandeDocApprofondie ? 2000 : (estComplexe ? 1500 : 850));
   
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
@@ -1264,7 +1284,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (GEMINI VENICE EN TÊTE)
+  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (GEMINI VENICE OU QWEN SI ÉNERVÉE)
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
