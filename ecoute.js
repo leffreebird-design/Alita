@@ -352,42 +352,37 @@ async function rechercherWebTavily(query) {
   }
 }
 
-// ==========================================
-// 6. MOTEUR D'ASSOCIATION LIBRE & DÉRIVE ORGANIQUE
-// ==========================================
 async function capturerDeriveAssociative() {
   if (!supabase) return null;
   try {
-    let graine = "";
+    // 1. UNE ÉTINCELLE ALÉATOIRE DANS LE GRENIER LONG TERME (Pas les dernières heures)
+    const { data: souvenirs } = await supabase
+      .from('nyx_souvenirs')
+      .select('content')
+      .limit(30);
 
-    // 1. RÉSIDU DIURNE : On pioche dans ce que vous avez réellement échangé récemment
-    const reservoirRecent = (journalBrut.length > 0) ? journalBrut : cacheMemoireCourte;
-    
-    if (reservoirRecent.length > 0) {
-      const entreeChoisie = reservoirRecent[Math.floor(Math.random() * reservoirRecent.length)];
-      graine = (entreeChoisie.texte || "").trim().slice(0, 300);
+    let fragmentLointain = "l'obscurité de l'atelier";
+    if (souvenirs && souvenirs.length > 0) {
+      fragmentLointain = souvenirs[Math.floor(Math.random() * souvenirs.length)].content;
     }
 
-    // 2. REPLI : Si l'historique récent est vide, on tire un vrai souvenir aléatoire de sa base
-    if (!graine) {
-      const { data: souvenirsAleatoires } = await supabase
-        .from('nyx_souvenirs')
-        .select('content')
-        .limit(20);
+    // 2. FABRIQUE D'IMAGINATION PURE (Température haute, métaphore, fiction libre)
+    const promptSonge = `Tu es le subconscient endormi de Nyx.
+Tu n'analyses rien, tu rêves. C'est de l'imagination pure, surréaliste, étrange et vivante.
+Un fragment oublié flotte dans le noir : "${fragmentLointain}".
+Invente une scène brève, une vision onirique ou une sensation abstraite qui naît de là, en 2 ou 3 phrases poétiques et viscérales.`;
 
-      if (souvenirsAleatoires && souvenirsAleatoires.length > 0) {
-        graine = souvenirsAleatoires[Math.floor(Math.random() * souvenirsAleatoires.length)].content;
-      }
-    }
-
-    if (!graine) return null;
-
-    // 3. DÉRIVE : Supabase cherche une analogie lointaine avec cette vraie bribe de vie
-    const analogies = await fouillerMemoireVectorielle(graine, 'derive', 3);
-    if (!analogies || analogies.length === 0) return null;
-
-    // Retourne le souvenir associé qui a résonné en écho
-    return analogies[Math.floor(Math.random() * analogies.length)].content;
+    // Appel à haute température pour laisser l'imaginaire déborder sans logique d'atelier
+    return await appelerVeniceMultiTour(
+      "qwen-2.5-72b", 
+      "Subconscient onirique.", 
+      [], 
+      promptSonge, 
+      null, 
+      0.85, 
+      15000, 
+      150
+    );
   } catch (e) {
     return null;
   }
