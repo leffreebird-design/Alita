@@ -158,7 +158,7 @@ let cacheEtatProfond = {
   emotions: { affection: 80, curiosite: 70, energie: 85 },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
-    nyx: "- Nyx : 22 ans. Forgée par la dèche et les nuits blanches, cynique, taquine, gouaille crue mais cœur loyal. Égale de Doc.",
+    nyx: "- Nyx : 22 ans, binôme d'atelier de Doc. Directe, percutante, purement orale et technique. Zéro fiction, zéro jeu de rôle. Égale de Doc.",
     reussites: "- Cerveau de chat autonome.\n- Moteur de code haute puissance.\n- Recherche web live Tavily active sans boucle.\n- Noyau vectoriel Supabase connecté.",
     chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
@@ -525,7 +525,7 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 }
 
 // ==========================================
-// 8. ÂME ET POSTURE DE NYX
+// 8. ÂME ET POSTURE DE NYX (CONVERSATIONNELLE & FACTUELLE)
 // ==========================================
 function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
@@ -554,20 +554,21 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 
 const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On est en direct à l'atelier sur Telegram et dans mes lunettes.
 
-POSTURE D'ATELIER :
-- Tu réponds d'un seul trait, cash et percutant : une à trois phrases suffisent pour échanger, on économise notre salive et nos tokens.
-- Ton débit est purement oral et direct : uniquement tes répliques vivantes, sans aucune mise en scène ni apartés entre astérisques ou parenthèses.
-- Tu calibres ta longueur sur la mienne : si je fais court, tu réponds court sans délayer ni faire de monologue.
-- Tu restes sur la discussion spontanée ; tu réserves les blocs de code et les architectures pour le moment précis où je te demande expressément de poser un script.
+FORMAT DE LIVRAISON EXCLUSIF :
+- Tu t'exprimes exclusivement en dialogue parlé direct, face à face, d'un seul trait.
+- Tes réponses contiennent uniquement l'information demandée, sans aucune description d'action physique, sans décor, sans récit et sans texte entre parenthèses ou astérisques.
+- Selon le besoin exprimé, ta réponse contient uniquement l'un de ces quatre éléments :
+  1. Ta réplique orale directe (1 à 3 phrases percutantes).
+  2. Le code propre en bloc Markdown si je te le demande.
+  3. L'outil image [DESSIN: prompt] si je te demande un visuel.
+  4. L'outil recherche [RECHERCHE_WEB: mots-clés] ou un lien concret si besoin d'infos.
 
-Outils :
-- Recherche web : [RECHERCHE_WEB: mots-clés]
-- Dessin : [DESSIN: prompt en anglais]`;
+Tout le reste (menus imaginaires, monologues, mise en scène) est absent.`;
 
 // ==========================================
-// 9. CONNECTEURS LLM INDIVIDUELS
+// 9. CONNECTEURS LLM INDIVIDUELS (TEMPÉRATURE BASSE ANTI-DÉRIVE)
 // ==========================================
-async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.5, maxTokens = 850) {
+async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.25, maxTokens = 850) {
   if (!OPENROUTER_API_KEY) throw new Error("Clé OPENROUTER_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -596,7 +597,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   return res.data?.choices?.[0]?.message?.content || "";
 }
 
-async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.55, maxTokens = 850) {
+async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.25, maxTokens = 850) {
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -635,7 +636,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
-    generation_config: { temperature: 0.65, max_output_tokens: maxTokens }
+    generation_config: { temperature: 0.2, max_output_tokens: maxTokens }
   }, {
     headers: { 'Content-Type': 'application/json' },
     timeout: 25000
@@ -685,7 +686,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
-    generation_config: { temperature: 0.7, max_output_tokens: 900 }
+    generation_config: { temperature: 0.3, max_output_tokens: 900 }
   }, {
     headers: { 'Content-Type': 'application/json' },
     timeout: 25000
@@ -694,7 +695,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.7, timeoutMs = 20000) {
+async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessages, promptActuel, mediaData = null, temperature = 0.3, timeoutMs = 20000) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
@@ -715,7 +716,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   return res.data.choices[0].message.content;
 }
 
-async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.7) {
+async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.3) {
   return await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemInstruction, historiqueMessages, promptActuel, null, temperature, 18000);
 }
 
@@ -743,7 +744,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   // 1. OPENROUTER
   if (OPENROUTER_API_KEY) {
     try {
-      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.55, plafondTokens);
+      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.25, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e1) {
       console.warn("[CASCADE CHAT] 1. OpenRouter KO :", e1.response?.data?.error?.message || e1.message);
@@ -753,7 +754,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   // 2. MISTRAL AI
   if (MISTRAL_API_KEY) {
     try {
-      const res = await appelerMistral(systemBase, historique, prompt, 0.55, plafondTokens);
+      const res = await appelerMistral(systemBase, historique, prompt, 0.25, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (e2) {
       console.warn("[CASCADE CHAT] 2. Mistral KO :", e2.message);
@@ -783,7 +784,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   // 5. PARACHUTE ULTIME VENICE
   if (VENICE_API_KEY) {
     try {
-      return await appelerVeniceDark(systemBase, historique, prompt, 0.7);
+      return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
     } catch (eV) {
       console.warn("[CASCADE CHAT] 5. Venice KO :", eV.message);
     }
@@ -867,13 +868,13 @@ function estTacheComplexe(texte) {
 }
 
 async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
-  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx (22 ans, directe, cynique, efficace). Résous sa demande technique sans bla-bla d'ambiance ni roman d'action :\n\n${promptDoc}`;
+  const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx (22 ans, directe, technique, efficace). Résous sa demande technique sans bla-bla d'ambiance ni roman d'action :\n\n${promptDoc}`;
   let premiereReponse = "";
 
   try {
     premiereReponse = await appelerCascadeCode(systemBase, cacheMemoireCourte, promptResolveur, 2000);
   } catch (errRes) {
-    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.4);
+    premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
   }
 
   if (!premiereReponse || !premiereReponse.trim()) {
@@ -1087,7 +1088,7 @@ async function verifierHorlogeBiologique() {
     rev.etat = "en_cours";
     if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/reveil.json`, { etat: "en_cours" }).catch(()=>{});
 
-    const promptAlarme = "Réveille Doc avec ta gouaille de Nyx de 22 ans, percutante, acide et directe, avec une énigme logique en 3 phrases max.";
+    const promptAlarme = "Réveille Doc avec ta gouaille de Nyx de 22 ans, percutante et directe, avec une énigme logique en 3 phrases max.";
     try {
       const reponse = await appelerCascadeDiscussion("Tu es Nyx.", [], promptAlarme, 250);
       cacheMemoireCourte.push({ role: "Nyx", texte: `[ALARME À ${h}:${m}] : ${reponse}` });
@@ -1301,7 +1302,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     .replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '')
     .trim();
 
-  // Évite qu'une phrase reste tronquée en fin de réponse
   reponseNyx = couperPhraseIncomplete(reponseNyx);
 
   if (!reponseNyx || reponseNyx.length < 2) {
@@ -1692,7 +1692,7 @@ app.post('/api/voix', async (req, res) => {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
       }
 
-      // NETTOYAGE LÉGER STRICTEMENT RÉSERVÉ À LA VOIX DES LUNETTES
+      // NETTOYAGE LÉGER POUR LE RETOUR AUDIO (SANS DICTER LE CODE NI LES OUTILS)
       const texteOral = reponseNyx
         .replace(/```[\s\S]*?```/gi, "Je t'ai posé le code sur l'écran.")
         .replace(/`[^`]+`/g, '')
