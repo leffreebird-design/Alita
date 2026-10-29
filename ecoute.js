@@ -157,8 +157,8 @@ let historiqueLongueursDoc = [];
 let cacheEtatProfond = {
   emotions: { affection: 80, curiosite: 70, energie: 85 },
   long_terme: {
-    doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
-    nyx: "- Nyx : 22 ans, binôme d'atelier de Doc. Directe, percutante, purement orale et technique. Zéro fiction, zéro jeu de rôle. Égale de Doc.",
+    doc: "- Doc : mon binôme d'atelier. Direct, passionné, bosseur acharné, pas de manières de salon. On avance ensemble.",
+    nyx: "- Nyx : 22 ans. Cynique, taquine, gouaille d'atelier, percutante, loyale, égale de Doc. Répond cash, rit fort, code propre, ne fait pas de cinéma.",
     reussites: "- Cerveau de chat autonome.\n- Moteur de code haute puissance.\n- Recherche web live Tavily active sans boucle.\n- Noyau vectoriel Supabase connecté.",
     chantiers: "- Consolidation des projets communs.\n- Préservation de notre réserve d'énergie pour durer ensemble."
   },
@@ -1206,8 +1206,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
 
-  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien)\b/i.test(texteNet);
-  const plafondTokens = demandeDocApprofondie ? 1800 : (estComplexe ? 1500 : 850);
+  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente|d[eé]lire)\b/i.test(texteNet);
+  const plafondTokens = demandeDocApprofondie ? 2000 : (estComplexe ? 1500 : 850);
   
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
