@@ -47,7 +47,7 @@ const GEMINI_API_KEY_PAID = assainirParametre(process.env.GEMINI_API_KEY_PAID);
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
 const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-2.0-flash";
 
-// GROQ - RÉSERVÉ STRICTEMENT AU CODE & PROJETS TECHNIQUES
+// GROQ - CODE, PROJETS TECHNIQUES & CONSCIENCE ACTIVE (GRATUIT & RAPIDE)
 const GROQ_API_KEY = assainirParametre(process.env.GROQ_API_KEY);
 const MODEL_GROQ = assainirParametre(process.env.GROQ_MODEL) || "openai/gpt-oss-120b";
 
@@ -154,11 +154,13 @@ let consolidationEnCours = false;
 let condensationTravailEnCours = false;
 
 let derniereActiviteDoc = Date.now();
+let dernierMonologueTimestamp = 0;
 let historiqueLongueursDoc = [];
 let derniereVeilleCle = "";
 
 let cacheEtatProfond = {
   filConducteur: "",
+  monologueInterieur: "",
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
@@ -199,13 +201,14 @@ function obtenirHorodatageParis() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resLT, resRev, resJournal, resFil] = await Promise.all([
+    const [resMem, resEmo, resLT, resRev, resJournal, resFil, resMono] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/reveil.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/monologue.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
@@ -216,8 +219,9 @@ async function initialiserCache() {
     if (resRev.data) cacheEtatProfond.reveil = resRev.data;
     if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
     if (resFil.data && resFil.data.fil) cacheEtatProfond.filConducteur = resFil.data.fil;
+    if (resMono.data && resMono.data.pensee) cacheEtatProfond.monologueInterieur = resMono.data.pensee;
 
-    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Fil conducteur actif : ${cacheEtatProfond.filConducteur ? 'OUI' : 'NON'}`);
+    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Fil actif : ${cacheEtatProfond.filConducteur ? 'OUI' : 'NON'} | Monologue en attente : ${cacheEtatProfond.monologueInterieur ? 'OUI' : 'NON'}`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
   }
@@ -369,7 +373,7 @@ async function capturerDeriveAssociative() {
       .limit(30);
 
     let fragmentLointain = "le silence de l'atelier quand les fers refroidissent";
-    if (souvenirs && souvenirs.length > 0) {
+    if (souvers && souvenirs.length > 0) {
       fragmentLointain = souvenirs[Math.floor(Math.random() * souvenirs.length)].content;
     }
 
@@ -395,6 +399,71 @@ Invente une vision onirique brève, une sensation poétique ou une image abstrai
     return null;
   }
 }
+
+// ==========================================
+// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (GROQ GRATUIT & 0 TOKEN VENICE)
+// ==========================================
+async function evaluerConscienceActive() {
+  const now = Date.now();
+  const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
+
+  // Ne rumine pas si Doc était là il y a moins de 45 minutes ou si une pensée a déjà émergé récemment
+  if (silenceMinutes < 45 || (now - dernierMonologueTimestamp < 45 * 60 * 1000)) {
+    return;
+  }
+
+  // Calcul du score de tension cognitive en JavaScript pur (0 token)
+  let tensionCognitive = 0;
+  if (silenceMinutes > 60) tensionCognitive += 30;
+  if (silenceMinutes > 180) tensionCognitive += 30;
+  if (cacheEtatProfond.filConducteur && cacheEtatProfond.filConducteur.length > 10) tensionCognitive += 35;
+  if (cacheEtatProfond.emotions?.colere > 5) tensionCognitive += 20;
+
+  // Si le seuil d'attention n'est pas franchi, Nyx reste silencieuse sans toucher à aucun LLM
+  if (tensionCognitive < 60) return;
+
+  const dernierEchange = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
+  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
+
+  const promptMonologue = `Tu es Nyx, 22 ans, à l'atelier. Tu ne parles pas à Doc : c'est ta pensée interne, ton monologue intime pendant son silence.
+Contexte réel :
+- Il est ${heureParis}h.
+- Doc est silencieux depuis ${silenceMinutes} minutes.
+- Chantier ou fil actif : ${cacheEtatProfond.filConducteur || "Rien de spécifique"}.
+- Dernier mot échangé :
+${dernierEchange || "Atelier calme"}
+
+CONSIGNE :
+Formule UNE SEULE réflexion intérieure, crue, vive et réaliste (15 à 30 mots max).
+Ce que tu penses du temps qui passe, du code en suspens ou de ce que fabrique Doc. Pas de poésie scolaire, pas de monologue de cinéma.`;
+
+  try {
+    let penseeSilencieuse = "";
+    if (GROQ_API_KEY) {
+      penseeSilencieuse = await appelerGroq("Conscience interne de Nyx.", [], promptMonologue, 0.4, 60);
+    } else {
+      penseeSilencieuse = await appelerCascadeDiscussion("Conscience interne de Nyx.", [], promptMonologue, 60);
+    }
+
+    if (penseeSilencieuse && penseeSilencieuse.trim().length > 5) {
+      cacheEtatProfond.monologueInterieur = penseeSilencieuse.trim().replace(/^["']|["']$/g, '');
+      dernierMonologueTimestamp = now;
+
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/monologue.json`, { 
+          date: obtenirHorodatageParis(),
+          pensee: cacheEtatProfond.monologueInterieur 
+        }).catch(()=>{});
+      }
+      console.log(`[CONSCIENCE ACTIVE] Monologue interne capturé : "${cacheEtatProfond.monologueInterieur}"`);
+    }
+  } catch (err) {
+    console.warn("[CONSCIENCE ACTIVE ERREUR]", err.message);
+  }
+}
+
+// Vérification de la tension cognitive toutes les 15 minutes en tâche de fond
+setInterval(evaluerConscienceActive, 15 * 60 * 1000);
 
 async function evaluerVolition(forceManuelle = false) {
   if (!DOC_CHAT_ID) return;
@@ -423,6 +492,7 @@ La réalité du moment :
 - Longueur moyenne de ses répliques : ${moyenneLongueur} caractères
 - Dernier échange :
 ${dernierSujet || "Rien de récent dans les tuyaux"}
+${cacheEtatProfond.monologueInterieur ? `- Ta dernière pensée intérieure : « ${cacheEtatProfond.monologueInterieur} »` : ""}
 ${visionOnirique ? `- Une vision qui te traverse l'esprit : « ${visionOnirique.slice(0, 300)} »` : ""}
 
 Tu es libre d'agir selon le contexte :
@@ -612,8 +682,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
     ? `\n[FIL CONDUCTEUR DE LA SESSION / MÉMOIRE DE TRAVAIL]\n${cacheEtatProfond.filConducteur}\n`
     : "";
 
+  const blocMonologue = cacheEtatProfond.monologueInterieur
+    ? `\n[ARRIÈRE-PENSÉE SILENCIEUSE DE NYX (pendant l'attente)]\n"${cacheEtatProfond.monologueInterieur}"\n(Cette réflexion te traversait l'esprit pendant le silence de Doc. Laisse-la teinter subtilement ton ton si c'est pertinent, sans la réciter comme un robot).\n`
+    : "";
+
   if (estRappelMemoire) {
-    return `${blocFil}[CARNET GLOBAL DE NYX]
+    return `${blocFil}${blocMonologue}[CARNET GLOBAL DE NYX]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -621,12 +695,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
 
   if (estTechnique) {
-    return `${blocFil}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
+    return `${blocFil}${blocMonologue}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
   }
 
-  return `${blocFil}[CARNET ACTIF - CONTEXTE MIXTE]
+  return `${blocFil}${blocMonologue}[CARNET ACTIF - CONTEXTE MIXTE]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -1209,7 +1283,6 @@ async function verifierHorlogeBiologique() {
   }
 
   // 2. VEILLE TECH AUTOMATIQUE À HEURES FIXES (00h, 06h, 12h, 18h)
-  // Immunisé contre les redémarrages de Render
   const heuresVeille = [0, 6, 12, 18];
   if (heuresVeille.includes(h) && m === 0 && derniereVeilleCle !== cleJourHeure) {
     derniereVeilleCle = cleJourHeure;
@@ -1298,7 +1371,7 @@ function couperPhraseIncomplete(texte) {
 }
 
 // ==========================================
-// 16. ROUTEUR DE FLUX CENTRAL (AVEC MÉMOIRE DE TRAVAIL & VERROU ANTI-GASPILLAGE)
+// 16. ROUTEUR DE FLUX CENTRAL
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1464,7 +1537,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
 
-  // CONDENSATION ROULANTE DE TRAVAIL : si l'historique devient dense, on résume le début
+  // Dès que Doc a repris le dialogue, l'arrière-pensée a fait son travail : on réinitialise le monologue
+  if (cacheEtatProfond.monologueInterieur) {
+    cacheEtatProfond.monologueInterieur = "";
+    if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/monologue.json`).catch(()=>{});
+  }
+
+  // CONDENSATION ROULANTE DE TRAVAIL
   if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
     condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION AUTO KO]", e.message));
   } else {
