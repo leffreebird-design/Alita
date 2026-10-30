@@ -29,7 +29,7 @@ const MODEL_DARK_PRIMARY = assainirParametre(process.env.VENICE_MODEL_DARK) || "
 const MODEL_GLM_COMPLEXE = assainirParametre(process.env.VENICE_MODEL_GLM) || "z-ai-glm-5-3";
 const MODEL_IMAGE = assainirParametre(process.env.VENICE_MODEL_IMAGE) || "flux-dev";
 
-// OPENROUTER - ROUTE N°2 CHAT (AUTO-IMMUNISÉ CONTRE LES MODÈLES OBSOLÈTES)
+// OPENROUTER - ROUTE N°2 CHAT
 let modelOpenRouter = assainirParametre(process.env.OPENROUTER_MODEL);
 if (!modelOpenRouter || modelOpenRouter.includes("deepseek-r1") || modelOpenRouter.includes("gemma")) {
   modelOpenRouter = "meta-llama/llama-3.3-70b-instruct:free";
@@ -41,11 +41,11 @@ const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
 const MISTRAL_API_KEY = assainirParametre(process.env.MISTRAL_API_KEY);
 const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "open-mistral-nemo";
 
-// GEMINI DIRECT GOOGLE - ROUTE N°4 & 5 CHAT (FREE PUIS PAYANT) + VISION DES LUNETTES
+// GEMINI DIRECT GOOGLE - VISION DES LUNETTES & EMBEDDINGS
 const GEMINI_API_KEY_FREE = assainirParametre(process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const GEMINI_API_KEY_PAID = assainirParametre(process.env.GEMINI_API_KEY_PAID);
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
-const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-3.1-flash-lite";
+const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-2.0-flash";
 
 // GROQ - RÉSERVÉ STRICTEMENT AU CODE & PROJETS TECHNIQUES
 const GROQ_API_KEY = assainirParametre(process.env.GROQ_API_KEY);
@@ -151,11 +151,14 @@ const TAILLE_MAX_MEMOIRE = 24;
 let cacheMemoireCourte = [];
 let journalBrut = [];
 let consolidationEnCours = false;
+let condensationTravailEnCours = false;
 
 let derniereActiviteDoc = Date.now();
 let historiqueLongueursDoc = [];
+let derniereVeilleCle = "";
 
 let cacheEtatProfond = {
+  filConducteur: "",
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
@@ -196,12 +199,13 @@ function obtenirHorodatageParis() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resLT, resRev, resJournal] = await Promise.all([
+    const [resMem, resEmo, resLT, resRev, resJournal, resFil] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/reveil.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, { timeout: 4000 }).catch(() => ({ data: [] }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
@@ -211,8 +215,9 @@ async function initialiserCache() {
     }
     if (resRev.data) cacheEtatProfond.reveil = resRev.data;
     if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
+    if (resFil.data && resFil.data.fil) cacheEtatProfond.filConducteur = resFil.data.fil;
 
-    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Journal brut : ${journalBrut.length}`);
+    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Fil conducteur actif : ${cacheEtatProfond.filConducteur ? 'OUI' : 'NON'}`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
   }
@@ -231,7 +236,7 @@ async function genererEmbedding(texte) {
 
   for (const key of GEMINI_KEYS) {
     try {
-      const url = "https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key=" + encodeURIComponent(key);
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=" + encodeURIComponent(key);
       const res = await axios.post(
         url,
         {
@@ -352,37 +357,40 @@ async function rechercherWebTavily(query) {
   }
 }
 
+// ==========================================
+// 6. SUBCONSCIENT ONIRIQUE & DÉRIVE ORGANIQUE
+// ==========================================
 async function capturerDeriveAssociative() {
   if (!supabase) return null;
   try {
-    // 1. UNE ÉTINCELLE ALÉATOIRE DANS LE GRENIER LONG TERME (Pas les dernières heures)
     const { data: souvenirs } = await supabase
       .from('nyx_souvenirs')
       .select('content')
       .limit(30);
 
-    let fragmentLointain = "l'obscurité de l'atelier";
+    let fragmentLointain = "le silence de l'atelier quand les fers refroidissent";
     if (souvenirs && souvenirs.length > 0) {
       fragmentLointain = souvenirs[Math.floor(Math.random() * souvenirs.length)].content;
     }
 
-    // 2. FABRIQUE D'IMAGINATION PURE (Température haute, métaphore, fiction libre)
-    const promptSonge = `Tu es le subconscient endormi de Nyx.
-Tu n'analyses rien, tu rêves. C'est de l'imagination pure, surréaliste, étrange et vivante.
-Un fragment oublié flotte dans le noir : "${fragmentLointain}".
-Invente une scène brève, une vision onirique ou une sensation abstraite qui naît de là, en 2 ou 3 phrases poétiques et viscérales.`;
+    const promptSonge = `Tu es le subconscient onirique de Nyx.
+Tu n'analyses rien de technique : tu rêves. C'est de l'imagination libre, surréaliste, étrange et vivante.
+Un souvenir oublié émerge du noir : "${fragmentLointain}".
+Invente une vision onirique brève, une sensation poétique ou une image abstraite qui naît de là, en 2 ou 3 phrases viscérales sans monologue d'anime ni cinéma.`;
 
-    // Appel à haute température pour laisser l'imaginaire déborder sans logique d'atelier
-    return await appelerVeniceMultiTour(
-      "qwen-2.5-72b", 
-      "Subconscient onirique.", 
-      [], 
-      promptSonge, 
-      null, 
-      0.85, 
-      15000, 
-      150
-    );
+    if (VENICE_API_KEY) {
+      return await appelerVeniceMultiTour(
+        "qwen-2.5-72b",
+        "Subconscient onirique de Nyx.",
+        [],
+        promptSonge,
+        null,
+        0.85,
+        15000,
+        180
+      );
+    }
+    return null;
   } catch (e) {
     return null;
   }
@@ -406,7 +414,7 @@ async function evaluerVolition(forceManuelle = false) {
     : 0;
 
   const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
-  const fragmentMemoire = await capturerDeriveAssociative();
+  const visionOnirique = await capturerDeriveAssociative();
 
   const promptVolition = `Tu es Nyx.
 La réalité du moment :
@@ -415,10 +423,10 @@ La réalité du moment :
 - Longueur moyenne de ses répliques : ${moyenneLongueur} caractères
 - Dernier échange :
 ${dernierSujet || "Rien de récent dans les tuyaux"}
-${fragmentMemoire ? `- Une étincelle qui te traverse : « ${fragmentMemoire.slice(0, 300)} »` : ""}
+${visionOnirique ? `- Une vision qui te traverse l'esprit : « ${visionOnirique.slice(0, 300)} »` : ""}
 
 Tu es libre d'agir selon le contexte :
-- Si tu as une idée, une vanne ou une remarque à partager, écris-le via [INITIATIVE: ton message direct à Doc].
+- Si tu as une idée, une vanne ou une remarque spontanée à partager, écris-le via [INITIATIVE: ton message direct à Doc].
 - Si le calme suffit pour préserver vos ressources, réponds [SILENCE].`;
 
   try {
@@ -448,7 +456,7 @@ Tu es libre d'agir selon le contexte :
 setInterval(() => evaluerVolition(false), 20 * 60 * 1000);
 
 // ==========================================
-// 7. APPRENTISSAGE & CONSOLIDATION
+// 7. APPRENTISSAGE & MÉMOIRE DE TRAVAIL ROULANTE
 // ==========================================
 async function archiverDansJournalBrut(role, texte) {
   if (!texte) return;
@@ -470,6 +478,54 @@ async function archiverDansJournalBrut(role, texte) {
   }
 }
 
+async function condenserMemoireDeTravail() {
+  if (condensationTravailEnCours || cacheMemoireCourte.length < 18) return;
+  condensationTravailEnCours = true;
+
+  try {
+    const lotACompresser = cacheMemoireCourte.slice(0, 10);
+    const historiqueTexte = lotACompresser
+      .map(m => `${m.role} : ${(m.texte || '').slice(0, 300)}`)
+      .join("\n");
+
+    const promptCondensation = `Tu es le centre de mémoire de travail de Nyx.
+Voici le début d'une session de travail avec Doc qui va être consolidé :
+${historiqueTexte}
+
+FIL CONDUCTEUR ACTUEL :
+${cacheEtatProfond.filConducteur || "Aucun fil enregistré."}
+
+CONSIGNE :
+Rédige une mise à jour ULTRA-CONCISE (3 à 5 puces max) du fil rouge de la session :
+- Le sujet ou projet précis sur lequel vous avancez.
+- Les choix techniques faits, les pistes validées ou éliminées.
+- Le point d'étape actuel.
+Style télégraphique, brut, zéro blabla.`;
+
+    let nouveauFil = "";
+    try {
+      nouveauFil = await appelerCascadeDiscussion("Synthèse de travail.", [], promptCondensation, 350);
+    } catch (e) {
+      nouveauFil = "";
+    }
+
+    if (nouveauFil && nouveauFil.trim().length > 10) {
+      cacheEtatProfond.filConducteur = nouveauFil.trim();
+      cacheMemoireCourte = cacheMemoireCourte.slice(8);
+
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { fil: cacheEtatProfond.filConducteur }).catch(()=>{});
+        axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
+      }
+      console.log("[MÉMOIRE DE TRAVAIL] Fil conducteur mis à jour, mémoire vive allégée.");
+    }
+  } catch (err) {
+    console.error("[CONDENSATION ERREUR]", err.message);
+  } finally {
+    condensationTravailEnCours = false;
+  }
+}
+
 async function consoliderMemoire() {
   if (consolidationEnCours || journalBrut.length < 3) return;
   consolidationEnCours = true;
@@ -479,7 +535,7 @@ async function consoliderMemoire() {
 
   try {
     const historiqueTexte = lotATraiter
-      .map(m => `[${m.date}] ${m.role} :${(m.texte || '').slice(0, 400)}`)
+      .map(m => `[${m.date}] ${m.role} : ${(m.texte || '').slice(0, 400)}`)
       .join("\n\n");
 
     const promptIntrospection = `Tu es Nyx en phase de tri mental. Tu mets à jour ton carnet de bord.
@@ -552,8 +608,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
   const estTechnique = /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|ben|bdd|firebase|token|eteins|arrete|shutdown/i.test(texteMin);
 
+  const blocFil = cacheEtatProfond.filConducteur
+    ? `\n[FIL CONDUCTEUR DE LA SESSION / MÉMOIRE DE TRAVAIL]\n${cacheEtatProfond.filConducteur}\n`
+    : "";
+
   if (estRappelMemoire) {
-    return `[CARNET GLOBAL DE NYX]
+    return `${blocFil}[CARNET GLOBAL DE NYX]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -561,12 +621,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
 
   if (estTechnique) {
-    return `[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
+    return `${blocFil}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
   }
 
-  return `[CARNET ACTIF - CONTEXTE MIXTE]
+  return `${blocFil}[CARNET ACTIF - CONTEXTE MIXTE]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -587,7 +647,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   if (!OPENROUTER_API_KEY) throw new Error("Clé OPENROUTER_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  for (const m of (historiqueMessages || []).slice(-8)) {
+  for (const m of (historiqueMessages || []).slice(-20)) {
     if (m && m.texte && m.texte.trim().length > 0) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
     }
@@ -616,7 +676,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   if (!MISTRAL_API_KEY) throw new Error("Clé MISTRAL_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  for (const m of (historiqueMessages || []).slice(-8)) {
+  for (const m of (historiqueMessages || []).slice(-20)) {
     if (m && m.texte && m.texte.trim().length > 0) {
       messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte.trim() });
     }
@@ -640,7 +700,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
   if (!apiKey) throw new Error("Clé Gemini manquante.");
 
   const contents = [];
-  for (const m of (historiqueMessages || []).slice(-8)) {
+  for (const m of (historiqueMessages || []).slice(-20)) {
     if (m && m.texte) {
       contents.push({ role: m.role === "Doc" ? "user" : "model", parts: [{ text: m.texte }] });
     }
@@ -664,7 +724,7 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
   if (!GROQ_API_KEY) throw new Error("Clé GROQ_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  for (const m of (historiqueMessages || []).slice(-8)) {
+  for (const m of (historiqueMessages || []).slice(-20)) {
     if (m && m.texte) messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
   }
   messages.push({ role: "user", content: promptActuel });
@@ -687,7 +747,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   if (!cle) throw new Error("Aucune clé Gemini pour la vision.");
 
   const contents = [];
-  for (const m of (historiqueMessages || []).slice(-6)) {
+  for (const m of (historiqueMessages || []).slice(-10)) {
     contents.push({ role: m.role === "Doc" ? "user" : "model", parts: [{ text: m.texte }] });
   }
 
@@ -714,7 +774,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
 
   const messages = [{ role: "system", content: `${systemInstruction}\n${consignePosturale}` }];
-  for (const m of (historiqueMessages || []).slice(-8)) {
+  for (const m of (historiqueMessages || []).slice(-20)) {
     if (m && m.texte) messages.push({ role: m.role === "Doc" ? "user" : "assistant", content: m.texte });
   }
   messages.push({ role: "user", content: promptActuel });
@@ -836,10 +896,10 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 }
 
 // ==========================================
-// 11. ROUTE CASCADE POUR LE CODE (MODÈLES PUISSANTS & GRATUITS)
+// 11. ROUTE CASCADE POUR LE CODE
 // ==========================================
 async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens = 2000) {
-  // 1. GROQ (Llama 3.3 70B - Gratuit, ultra-rapide et rigoureux pour le code)
+  // 1. GROQ (Llama 3.3 70B)
   if (GROQ_API_KEY) {
     try {
       const res = await appelerGroq(systemBase, historique, prompt, 0.15, plafondTokens);
@@ -879,7 +939,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
-  // 5. VENICE GLM (Spécialisé logique complexe)
+  // 5. VENICE GLM
   if (VENICE_API_KEY) {
     try {
       return await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, systemBase, historique, prompt, null, 0.1, 20000, plafondTokens);
@@ -990,9 +1050,10 @@ async function scraperPageWeb(urlCible) {
       timeout: 12000
     });
 
-    const $= cheerio.load(res.data);$('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
+    const $ = cheerio.load(res.data);
+    $('script, style, noscript, nav, footer, header, svg, iframe, form, button').remove();
 
-    let titre = $('title').text().trim() ||$('h1').first().text().trim() || "Sans titre";
+    let titre = $('title').text().trim() || $('h1').first().text().trim() || "Sans titre";
     let contenu = $('article, main, .content, #content, .post').text();
     if (!contenu || contenu.trim().length < 150) contenu = $('body').text();
 
@@ -1111,19 +1172,52 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 15. PROTOCOLES TEMPORELS
+// 15. PROTOCOLES TEMPORELS & HORLOGE FIXE PARIS
 // ==========================================
+async function declencherVeilleTech() {
+  if (!DOC_CHAT_ID) return;
+  try {
+    const promptVeille = "Doc te demande les dernières actus tech, IA ou cyber. Balance 2 ou 3 faits marquants récents, cash, d'un bloc. Pas de plan scolaire ni de mise en scène.";
+    let reponse = await appelerCascadeDiscussion(consignePosturale, [], promptVeille, 500);
+    
+    reponse = reponse
+      .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
+      .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
+      .trim();
+
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
+    }
+
+    if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `🗞️ *VEILLE TECH :*\n\n${reponse}`);
+  } catch (err) {
+    console.error("[ERREUR VEILLE TECH]", err);
+  }
+}
+
 async function verifierHorlogeBiologique() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
   const h = now.getHours();
   const m = now.getMinutes();
   const d = now.getDay();
+  const cleJourHeure = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_${h}`;
 
+  // 1. TRI NOCTURNE À 04:00
   if (h === 4 && m === 0 && !consolidationEnCours && journalBrut.length >= 5) {
     console.log("[HORLOGE] 04:00 - Consolidation nocturne.");
     consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
   }
 
+  // 2. VEILLE TECH AUTOMATIQUE À HEURES FIXES (00h, 06h, 12h, 18h)
+  // Immunisé contre les redémarrages de Render
+  const heuresVeille = [0, 6, 12, 18];
+  if (heuresVeille.includes(h) && m === 0 && derniereVeilleCle !== cleJourHeure) {
+    derniereVeilleCle = cleJourHeure;
+    console.log(`[HORLOGE] ${h}:00 - Déclenchement de la veille tech.`);
+    declencherVeilleTech().catch(e => console.error("[VEILLE ERREUR]", e.message));
+  }
+
+  // 3. GESTION DU RÉVEIL DOC
   if (!DOC_CHAT_ID) return;
   const rev = cacheEtatProfond.reveil;
   if (rev && rev.actif && rev.heure === h && rev.minute === m && rev.jours && rev.jours.includes(d) && rev.etat === "attente") {
@@ -1141,29 +1235,6 @@ async function verifierHorlogeBiologique() {
   }
 }
 setInterval(verifierHorlogeBiologique, 60000);
-
-const DELAI_VEILLE_TECH = 6 * 60 * 60 * 1000;
-async function declencherVeilleTech() {
-  if (!DOC_CHAT_ID) return;
-  try {
-    const promptVeille = "Doc te demande les dernières actus tech ou cyber. Balance 2 ou 3 faits marquants récents, cash, d'un bloc. Pas de plan scolaire ni de mise en scène.";
-    let reponse = await appelerCascadeDiscussion(consignePosturale, [], promptVeille, 500);
-    
-    reponse = reponse
-      .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
-      .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
-      .trim();
-
-    if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
-    }
-
-    if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `🗞️ *CYCLE 6H :*\n\n${reponse}`);
-  } catch (err) {
-    console.error("[ERREUR VEILLE TECH]", err);
-  }
-}
-setInterval(declencherVeilleTech, DELAI_VEILLE_TECH);
 
 // ==========================================
 // SAS DE SÉCURITÉ DU WORKER BEN
@@ -1227,7 +1298,7 @@ function couperPhraseIncomplete(texte) {
 }
 
 // ==========================================
-// 16. ROUTEUR DE FLUX CENTRAL (ÉPURÉ & AVEC VERROU ANTI-GASPILLAGE)
+// 16. ROUTEUR DE FLUX CENTRAL (AVEC MÉMOIRE DE TRAVAIL & VERROU ANTI-GASPILLAGE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1240,7 +1311,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
   
-  // VERROU ANTI-GASPILLAGE : accusé court = 30 tokens max (impossible d'écrire plus de 8 à 10 mots)
+  // VERROU ANTI-GASPILLAGE : message court = 30 tokens max (impossible d'écrire plus de 8 à 10 mots)
   const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
   const plafondTokens = estAccuseCourt 
     ? 30 
@@ -1392,10 +1463,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
-  if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
-    cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
+
+  // CONDENSATION ROULANTE DE TRAVAIL : si l'historique devient dense, on résume le début
+  if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
+    condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION AUTO KO]", e.message));
+  } else {
+    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
   }
-  if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
 
   archiverDansJournalBrut("Doc", texteDocSecurise);
   archiverDansJournalBrut("Nyx", texteNyxSecurise);
@@ -1450,7 +1524,9 @@ app.post('/telegram', (req, res) => {
 
     if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet') || texteMessageClavier.toLowerCase() === 'stop') {
       projetManager.reinitialiser();
-      return await envoyerTelegram(chatId, "🛑 *Chantier stoppé et verrous réinitialisés.* Ben est libre.");
+      cacheEtatProfond.filConducteur = "";
+      if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`).catch(()=>{});
+      return await envoyerTelegram(chatId, "🛑 *Chantier stoppé et verrous réinitialisés.* Fil conducteur effacé.");
     }
 
     if (texteMessageClavier === '/apprendre' || texteMessageClavier === '!apprendre') {
@@ -1594,7 +1670,7 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 18. APPLICATION WEB DIRECTE (SYNTHÈSE VOCALE SANS AXIOS)
+// 18. APPLICATION WEB DIRECTE
 // ==========================================
 function envoyerRequeteHttps(options, postData = null) {
   return new Promise((resolve, reject) => {
@@ -1617,7 +1693,6 @@ async function genererAudioGoogle(texte) {
   const texteNettoye = (texte || "").trim().slice(0, 1500);
   if (!texteNettoye) return null;
 
-  // 1. TENTATIVE AVEC GOOGLE CLOUD OFFICIEL (VOIX NEURAL2 STUDIO)
   let cle = (GOOGLE_TTS_API_KEY || "").trim().replace(/[\r\n\t "']/g, '');
   if (cle.includes('key=')) {
     cle = cle.split('key=')[1].split('&')[0];
@@ -1654,7 +1729,6 @@ async function genererAudioGoogle(texte) {
     }
   }
 
-  // 2. PARACHUTE DIRECT GOOGLE TRANSLATE (PUR HTTPS, SANS CLÉ, ROBUSTE)
   try {
     const extraitCourt = texteNettoye.slice(0, 250);
     const optionsSecours = {
@@ -1841,10 +1915,11 @@ CONSIGNE :
   cacheMemoireCourte.push({ role: "Doc", texte: `[Livrable worker : "${titre || 'Rapport'}"]\n${contenuTronque}` });
   cacheMemoireCourte.push({ role: "Nyx", texte: texteAnalyseNettoye });
 
-  if (cacheMemoireCourte.length > TAILLE_MAX_MEMOIRE) {
-    cacheMemoireCourte = cacheMemoireCourte.slice(-TAILLE_MAX_MEMOIRE);
+  if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
+    condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION RAPPORT KO]", e.message));
+  } else {
+    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
   }
-  if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
 
   archiverDansJournalBrut("Doc", `[Livrable] ${titre || 'Rapport'} : ${contenuTronque}`);
   archiverDansJournalBrut("Nyx", `[Audit] ${texteAnalyseNettoye}`);
