@@ -1,13 +1,10 @@
+// =========================================================================
+// 1. NEUTRALISATION DU PROXY SYSTÈME (Ligne 1)
+// =========================================================================
 ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy'].forEach(k => {
   delete process.env[k];
 });
 
-const express = require('express');
-const axios = require('axios');
-const https = require('https');
-
-// Forçage global sur l'ensemble des requêtes Axios
-axios.defaults.proxy = false;
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
@@ -18,6 +15,8 @@ const mammoth = require('mammoth');
 const cheerio = require('cheerio');
 const { createClient } = require('@supabase/supabase-js');
 const { z } = require('zod');
+
+axios.defaults.proxy = false;
 
 // GESTIONNAIRE DE PROJETS DÉDIÉ (GROQ / LLAMA-3.3-70B)
 const ProjectManager = require('./nyx_project_manager');
