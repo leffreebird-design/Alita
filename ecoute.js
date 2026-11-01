@@ -1,3 +1,13 @@
+['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy'].forEach(k => {
+  delete process.env[k];
+});
+
+const express = require('express');
+const axios = require('axios');
+const https = require('https');
+
+// Forçage global sur l'ensemble des requêtes Axios
+axios.defaults.proxy = false;
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
