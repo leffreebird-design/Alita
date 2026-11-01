@@ -1,10 +1,3 @@
-// =========================================================================
-// 1. NEUTRALISATION DU PROXY SYSTÈME (Ligne 1)
-// =========================================================================
-['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy'].forEach(k => {
-  delete process.env[k];
-});
-
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
@@ -15,8 +8,6 @@ const mammoth = require('mammoth');
 const cheerio = require('cheerio');
 const { createClient } = require('@supabase/supabase-js');
 const { z } = require('zod');
-
-axios.defaults.proxy = false;
 
 // GESTIONNAIRE DE PROJETS DÉDIÉ (GROQ / LLAMA-3.3-70B)
 const ProjectManager = require('./nyx_project_manager');
@@ -54,7 +45,7 @@ const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "open-mist
 const GEMINI_API_KEY_FREE = assainirParametre(process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const GEMINI_API_KEY_PAID = assainirParametre(process.env.GEMINI_API_KEY_PAID);
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
-const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-3.1-flash-lite";
+const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-2.0-flash";
 
 // GROQ - CODE, PROJETS TECHNIQUES & CONSCIENCE ACTIVE (GRATUIT & RAPIDE)
 const GROQ_API_KEY = assainirParametre(process.env.GROQ_API_KEY);
@@ -230,7 +221,7 @@ async function initialiserCache() {
     if (resFil.data && resFil.data.fil) cacheEtatProfond.filConducteur = resFil.data.fil;
     if (resMono.data && resMono.data.pensee) cacheEtatProfond.monologueInterieur = resMono.data.pensee;
 
-    console.log(`[CACHE INIT] Mémoire : ${cacheMemoireCourte.length} | Fil actif : ${cacheEtatProfond.filConducteur ? 'OUI' : 'NON'} | Monologue : ${cacheEtatProfond.monologueInterieur ? 'OUI' : 'NON'}`);
+    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Fil actif : ${cacheEtatProfond.filConducteur ? 'OUI' : 'NON'} | Monologue en attente : ${cacheEtatProfond.monologueInterieur ? 'OUI' : 'NON'}`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
   }
@@ -249,7 +240,7 @@ async function genererEmbedding(texte) {
 
   for (const key of GEMINI_KEYS) {
     try {
-      const url = "[https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=](https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=)" + encodeURIComponent(key);
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=" + encodeURIComponent(key);
       const res = await axios.post(
         url,
         {
@@ -371,7 +362,7 @@ async function rechercherWebTavily(query) {
 }
 
 // ==========================================
-// 6. SUBCONSCIENT ONIRIQUE
+// 6. SUBCONSCIENT ONIRIQUE & DÉRIVE ORGANIQUE
 // ==========================================
 async function capturerDeriveAssociative() {
   if (!supabase) return null;
@@ -410,7 +401,7 @@ Invente une vision onirique brève, une sensation poétique ou une image abstrai
 }
 
 // ==========================================
-// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (GROQ GRATUIT)
+// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (GROQ GRATUIT & 0 TOKEN VENICE)
 // ==========================================
 async function evaluerConscienceActive() {
   const now = Date.now();
@@ -467,6 +458,7 @@ Ce que tu penses du temps qui passe, du code en suspens ou de ce que fabrique Do
     console.warn("[CONSCIENCE ACTIVE ERREUR]", err.message);
   }
 }
+
 setInterval(evaluerConscienceActive, 15 * 60 * 1000);
 
 async function evaluerVolition(forceManuelle = false) {
@@ -526,10 +518,11 @@ Tu es libre d'agir selon le contexte :
     console.warn("[VOLITION ERREUR]", err.message);
   }
 }
+
 setInterval(() => evaluerVolition(false), 20 * 60 * 1000);
 
 // ==========================================
-// 7. APPRENTISSAGE & MÉMOIRE DE TRAVAIL
+// 7. APPRENTISSAGE & MÉMOIRE DE TRAVAIL ROULANTE
 // ==========================================
 async function archiverDansJournalBrut(role, texte) {
   if (!texte) return;
@@ -731,7 +724,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post("[https://openrouter.ai/api/v1/chat/completions](https://openrouter.ai/api/v1/chat/completions)", {
+  const res = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
     model: modelCible,
     messages: messages,
     temperature: temperature,
@@ -740,7 +733,7 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
     headers: {
       'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
       'Content-Type': 'application/json',
-      'HTTP-Referer': '[https://alita-gsoe.onrender.com](https://alita-gsoe.onrender.com)',
+      'HTTP-Referer': 'https://alita-gsoe.onrender.com',
       'X-Title': 'Nyx Core'
     },
     timeout: 25000
@@ -760,7 +753,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post("[https://api.mistral.ai/v1/chat/completions](https://api.mistral.ai/v1/chat/completions)", {
+  const res = await axios.post("https://api.mistral.ai/v1/chat/completions", {
     model: MODEL_MISTRAL,
     messages: messages,
     temperature: temperature,
@@ -784,7 +777,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
   }
   contents.push({ role: "user", parts: [{ text: promptActuel }] });
 
-  const url = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(apiKey);
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(apiKey);
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
@@ -806,7 +799,7 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post("[https://api.groq.com/openai/v1/chat/completions](https://api.groq.com/openai/v1/chat/completions)", {
+  const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
     model: MODEL_GROQ,
     messages: messages,
     temperature: temperature,
@@ -834,7 +827,7 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   }
   contents.push({ role: "user", parts: partsActuelles });
 
-  const url = "[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/)" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(cle);
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(cle);
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
@@ -866,7 +859,7 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     payload.max_tokens = maxTokens;
   }
 
-  const res = await axios.post("[https://api.venice.ai/api/v1/chat/completions](https://api.venice.ai/api/v1/chat/completions)", payload, {
+  const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", payload, {
     headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
     timeout: timeoutMs
   });
@@ -881,7 +874,7 @@ async function genererImageVenice(prompt) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
   const cleanPrompt = prompt.replace(/^["']/, '').replace(/["']$/, '').trim();
 
-  const res = await axios.post("[https://api.venice.ai/api/v1/images/generations](https://api.venice.ai/api/v1/images/generations)", {
+  const res = await axios.post("https://api.venice.ai/api/v1/images/generations", {
     model: MODEL_IMAGE,
     prompt: cleanPrompt,
     response_format: "b64_json",
@@ -895,11 +888,12 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 10. CASCADE DISCUSSION
+// 10. ROUTE CASCADE DISCUSSION : GEMINI VENICE -> QWEN 2.5 SI ÉNERVÉE
 // ==========================================
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
   const estVenere = (cacheEtatProfond.emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
 
+  // 1. SI ÉNERVÉE / HERETIC -> BASCULE SUR QWEN SUR VENICE (ZÉRO MORALE, CRAN 7)
   if (estVenere && VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour("qwen-2.5-72b", systemBase, historique, prompt, null, 0.3, 20000, plafondTokens);
@@ -909,6 +903,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
+  // 2. EN TEMPS NORMAL -> TON GEMINI SUR VENICE (PROPRE, NATUREL, DIRECT)
   if (VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.25, 20000, plafondTokens);
@@ -918,6 +913,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
+  // 3. OPENROUTER (SECOURS)
   if (OPENROUTER_API_KEY) {
     try {
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.25, plafondTokens);
@@ -927,6 +923,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
+  // 4. MISTRAL AI (SECOURS)
   if (MISTRAL_API_KEY) {
     try {
       const res = await appelerMistral(systemBase, historique, prompt, 0.25, plafondTokens);
@@ -936,6 +933,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
+  // 5. GEMINI DIRECT FREE GOOGLE
   if (GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
@@ -945,6 +943,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
+  // 6. GEMINI DIRECT PAID GOOGLE
   if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
@@ -954,6 +953,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
+  // 7. PARACHUTE ULTIME VENICE DARK
   if (VENICE_API_KEY) {
     try {
       return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
@@ -966,9 +966,10 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 }
 
 // ==========================================
-// 11. CASCADE POUR LE CODE
+// 11. ROUTE CASCADE POUR LE CODE (PLAFOND ÉTENDU À 4000)
 // ==========================================
 async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens = 4000) {
+  // 1. GROQ (Llama 3.3 70B)
   if (GROQ_API_KEY) {
     try {
       const res = await appelerGroq(systemBase, historique, prompt, 0.15, plafondTokens);
@@ -978,6 +979,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
+  // 2. OPENROUTER
   if (OPENROUTER_API_KEY) {
     try {
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.2, plafondTokens);
@@ -987,6 +989,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
+  // 3. GEMINI FREE
   if (GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
@@ -996,6 +999,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
+  // 4. GEMINI PAID
   if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
@@ -1005,6 +1009,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
+  // 5. VENICE GLM
   if (VENICE_API_KEY) {
     try {
       return await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, systemBase, historique, prompt, null, 0.1, 20000, plafondTokens);
@@ -1017,7 +1022,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
 }
 
 // ==========================================
-// 12. RÉSOLUTION TECHNIQUE & AUDIT
+// 12. PIPELINE TECHNIQUE : RÉSOLUTION & AUDIT
 // ==========================================
 function estTacheComplexe(texte) {
   if (!texte) return false;
@@ -1029,7 +1034,7 @@ function estTacheComplexe(texte) {
 
   const ordreCode = /\b(ecris|écris|code|fais-moi|genere|génère|programme|corrige|debug)\b/i.test(t);
   const marqueurs = [
-    "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice", "html", "css", "composant"
+    "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice", "html", "css", "js"
   ];
   return ordreCode && marqueurs.some(m => t.includes(m));
 }
@@ -1037,10 +1042,9 @@ function estTacheComplexe(texte) {
 async function resoudreAvecDoubleVerification(systemBase, promptDoc) {
   const promptResolveur = `Réponds directement à Doc avec ton franc-parler de Nyx (22 ans, directe, technique, efficace). Résous sa demande technique sans bla-bla d'ambiance ni roman d'action :\n\n${promptDoc}`;
   let premiereReponse = "";
-  const plafondCode = determinerPlafondTokens(promptDoc, true, false);
 
   try {
-    premiereReponse = await appelerCascadeCode(systemBase, cacheMemoireCourte, promptResolveur, plafondCode);
+    premiereReponse = await appelerCascadeCode(systemBase, cacheMemoireCourte, promptResolveur, 4000);
   } catch (errRes) {
     premiereReponse = await appelerVeniceDark(systemBase, cacheMemoireCourte, promptResolveur, 0.3);
   }
@@ -1071,9 +1075,9 @@ RÈGLES D'AUDIT STRICTES :
   try {
     let verdict = "";
     if (GROQ_API_KEY) {
-      verdict = await appelerGroq("Superviseur de code et de syntaxe.", [], promptVerificateur, 0.05, plafondCode);
+      verdict = await appelerGroq("Superviseur de code et de syntaxe.", [], promptVerificateur, 0.05, 4000);
     } else {
-      verdict = await appelerCascadeCode("Superviseur de code et de syntaxe.", [], promptVerificateur, plafondCode);
+      verdict = await appelerCascadeCode("Superviseur de code et de syntaxe.", [], promptVerificateur, 4000);
     }
 
     if (!verdict) return premiereReponse;
@@ -1134,7 +1138,7 @@ async function scraperPageWeb(urlCible) {
 }
 
 // ==========================================
-// 14. TELEGRAM (AUDIO, FICHIERS & TEXTE)
+// 14. GESTION TELEGRAM (NOTIFICATIONS & FLUX)
 // ==========================================
 async function envoyerTelegram(chatId, text) {
   if (!text || !TELEGRAM_BOT_TOKEN) return;
@@ -1143,14 +1147,14 @@ async function envoyerTelegram(chatId, text) {
   for (let i = 0; i < text.length; i += TAILLE_MAX) {
     const bloc = text.slice(i, i + TAILLE_MAX);
     try {
-      const urlTelegram = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendMessage";
+      const urlTelegram = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendMessage";
       await axios.post(urlTelegram, {
         chat_id: chatId,
         text: bloc,
         parse_mode: 'Markdown'
       }, { timeout: 12000 });
     } catch (err) {
-      const urlTelegramFallback = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendMessage";
+      const urlTelegramFallback = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendMessage";
       await axios.post(urlTelegramFallback, {
         chat_id: chatId,
         text: bloc
@@ -1162,7 +1166,7 @@ async function envoyerTelegram(chatId, text) {
 async function afficherFrappeTelegram(chatId) {
   if (!TELEGRAM_BOT_TOKEN) return;
   try {
-    const urlAction = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendChatAction";
+    const urlAction = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendChatAction";
     await axios.post(urlAction, {
       chat_id: chatId,
       action: 'typing'
@@ -1198,9 +1202,9 @@ function envoyerPhotoTelegram(chatId, base64Image) {
 }
 
 async function lireMediaSecurise(fileId) {
-  const urlMeta = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
   const resMeta = await axios.get(urlMeta);
-  const urlMedia = "[https://api.telegram.org/file/bot](https://api.telegram.org/file/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const urlMedia = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
   const resMedia = await axios.get(urlMedia, { responseType: 'arraybuffer' });
   const b64 = Buffer.from(resMedia.data).toString('base64');
   resMedia.data = null;
@@ -1208,9 +1212,9 @@ async function lireMediaSecurise(fileId) {
 }
 
 async function lirePdfSecurise(fileId) {
-  const urlMeta = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
   const resMeta = await axios.get(urlMeta);
-  const urlDoc = "[https://api.telegram.org/file/bot](https://api.telegram.org/file/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
   const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
   const data = await pdfParse(Buffer.from(resDoc.data));
   resDoc.data = null;
@@ -1218,9 +1222,9 @@ async function lirePdfSecurise(fileId) {
 }
 
 async function lireDocxSecurise(fileId) {
-  const urlMeta = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
   const resMeta = await axios.get(urlMeta);
-  const urlDoc = "[https://api.telegram.org/file/bot](https://api.telegram.org/file/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
   const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
   const data = await mammoth.extractRawText({ buffer: Buffer.from(resDoc.data) });
   resDoc.data = null;
@@ -1228,9 +1232,9 @@ async function lireDocxSecurise(fileId) {
 }
 
 async function lireTexteSecurise(fileId) {
-  const urlMeta = "[https://api.telegram.org/bot](https://api.telegram.org/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
   const resMeta = await axios.get(urlMeta);
-  const urlDoc = "[https://api.telegram.org/file/bot](https://api.telegram.org/file/bot)" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
   const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
   const texte = Buffer.from(resDoc.data).toString('utf-8');
   resDoc.data = null;
@@ -1238,23 +1242,25 @@ async function lireTexteSecurise(fileId) {
 }
 
 // ==========================================
-// 15. PROTOCOLES TEMPORELS & HORLOGE FIXE PARIS (VEILLE TECH RÉPARÉE)
+// 15. PROTOCOLES TEMPORELS & HORLOGE FIXE PARIS
 // ==========================================
 async function declencherVeilleTech() {
   if (!DOC_CHAT_ID) return;
   try {
-    console.log("[VEILLE TECH] Lancement de la recherche web...");
-
+    console.log("[VEILLE TECH] Recherche web des actus fraîches...");
+    
+    // 1. RECHERCHE EN DIRECT SUR LE WEB (TAVILY)
     const resultatsWeb = await rechercherWebTavily("actualité intelligence artificielle cybersécurité tech");
 
     const contexteActus = resultatsWeb 
       ? `RÉSULTATS DU WEB EN DIRECT :\n${resultatsWeb}` 
       : "Pas de résultats web frais, parle des tendances IA/cyber récentes de tes connaissances.";
 
+    // 2. SYNTHÈSE PAR NYX AVEC SA GOUAILLE
     const promptVeille = `Voici les dernières actus brutes du web :\n${contexteActus}\n\nBalance 2 ou 3 faits marquants récents à Doc, cash, d'un bloc, avec ton style direct. Pas de balise [RECHERCHE_WEB], pas de plan scolaire ni de chichis.`;
 
     let reponse = await appelerCascadeDiscussion(consignePosturale, [], promptVeille, 600);
-    
+
     reponse = reponse
       .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
       .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
@@ -1360,24 +1366,10 @@ const projetManager = new ProjectManager({
 // ==========================================
 // OUTILS DE NETTOYAGE & CONTROLE DE SORTIE
 // ==========================================
-function determinerPlafondTokens(texteNet, estComplexe, demandeDocApprofondie) {
-  const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
-  if (estAccuseCourt) return 30;
-
-  const demandeCodeLong = /\b(code complet|script entier|fais tout le fichier|script|html|css|composant|application|programme complet)\b/i.test(texteNet);
-  if (demandeCodeLong || estComplexe) {
-    return 4000;
-  }
-
-  if (demandeDocApprofondie) return 2000;
-  return 850;
-}
-
 function couperPhraseIncomplete(texte) {
   if (!texte) return texte;
   const t = texte.trim();
-  if (t.includes('```') || /[.!?…»"}>;]$/.test(t)) return t;
-
+  if (t.includes('```') || /[.!?…»"}>]$/.test(t) || t.endsWith('```')) return t;
   const dernierPoint = Math.max(
     t.lastIndexOf('.'),
     t.lastIndexOf('!'),
@@ -1410,13 +1402,20 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
   
-  const plafondTokens = determinerPlafondTokens(texteNet, estComplexe, demandeDocApprofondie);
+  // GESTION DYNAMIQUE DU PLAFOND (Chat standard reste économique, code libéré à 4000)
+  const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
+  const demandeCodeLong = /\b(code|script|html|css|js|fichier|programme|application)\b/i.test(texteNet);
+
+  const plafondTokens = estAccuseCourt 
+    ? 30 
+    : ((estComplexe || demandeCodeLong) ? 4000 : (demandeDocApprofondie ? 2000 : 850));
   
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
+  // RAPPEL MÉMOIRE AUTOMATIQUE ET TRANSPARENT EN ARRIÈRE-PLAN
   if (!contexteSouvenirs && supabase) {
     const estDemandeMemoire = /souvien|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|tu sais|tu te souviens/i.test(texteMin);
     if (estDemandeMemoire) {
@@ -1460,8 +1459,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. CODE & LOGIQUE -> GROQ / PARACHUTES
-  else if (estComplexe) {
+  // 3. CODE & LOGIQUE -> CASCADE CODE (GROQ 70B EN TÊTE)
+  else if (estComplexe || demandeCodeLong) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
       reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
@@ -1469,7 +1468,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> CASCADE CHAT
+  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (GEMINI VENICE OU QWEN SI ÉNERVÉE)
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
@@ -1479,6 +1478,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
+  // ==========================================
+  // DÉCLENCHEMENT TAVILY - RECHERCHE WEB EN DIRECT
+  // ==========================================
   const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?\]/i);
   if (matchRechercheWeb && !dejaRecherche) {
     const requeteCible = matchRechercheWeb[1].trim();
@@ -1491,6 +1493,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
+  // ==========================================
+  // NETTOYAGE ESSENTIEL DES BALISES
+  // ==========================================
   const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*|$)/i);
   if (matchArchivage) {
     const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
@@ -1553,11 +1558,13 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
 
+  // Dès que Doc a repris le dialogue, l'arrière-pensée a fait son travail : on réinitialise le monologue
   if (cacheEtatProfond.monologueInterieur) {
     cacheEtatProfond.monologueInterieur = "";
     if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/monologue.json`).catch(()=>{});
   }
 
+  // CONDENSATION ROULANTE DE TRAVAIL
   if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
     condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION AUTO KO]", e.message));
   } else {
@@ -1571,7 +1578,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 }
 
 // ==========================================
-// 17. ROUTE TELEGRAM
+// 17. ROUTE TELEGRAM AVEC ROUTAGE CHANTIER VS BLABLA
 // ==========================================
 app.post('/telegram', (req, res) => {
   res.sendStatus(200);
@@ -1634,14 +1641,14 @@ app.post('/telegram', (req, res) => {
       /\b(bd de \d+|planche de bd|pipeline complet|projet bd|automatise de bout en bout)\b/i.test(texteMin)
     );
 
-    // 1. PROJET TECHNIQUE
+    // 1. CHANTIER TECHNIQUE SÉRIEUX
     if (estDemandeProjetSerieux && !projetManager.estProjetActif()) {
       await afficherFrappeTelegram(chatId);
       await projetManager.demarrerProjet(texteMessageClavier);
       return;
     }
 
-    // 2. DISCUSSION OU DOCUMENTS
+    // 2. DISCUSSION, MÉDIA OU VOCAL
     let texteFinal = texteMessageClavier;
     let mediaData = null;
 
@@ -1763,7 +1770,7 @@ app.post('/telegram', (req, res) => {
 });
 
 // ==========================================
-// 18. INTERFACE VOCALE PWA
+// 18. APPLICATION WEB DIRECTE
 // ==========================================
 function envoyerRequeteHttps(options, postData = null) {
   return new Promise((resolve, reject) => {
@@ -1937,7 +1944,7 @@ app.post('/api/voix', async (req, res) => {
 });
 
 // ==========================================
-// 19. WORKER BEN (RAPPORTS ET RETOURS)
+// 19. API DU WORKER LOCAL BEN (ÉCHANGES & RAPPORTS)
 // ==========================================
 app.get('/api/mission', async (req, res) => {
   if (missionEnAttente && missionEnAttente.statut === "attente") {
@@ -2021,7 +2028,7 @@ CONSIGNE :
 });
 
 // ==========================================
-// 20. CRON & HEALTHCHECK
+// 20. SANTÉ, PINGER & CRON
 // ==========================================
 app.get('/ping', (req, res) => res.status(200).send("pong"));
 
@@ -2041,13 +2048,8 @@ app.post('/api/consolider', (req, res) => {
   consoliderMemoire().catch(e => console.error("[CRON EXTERNE ERREUR]", e.message));
 });
 
-console.log("🔍 Diagnostic Proxy Système :", {
-  http: process.env.http_proxy || process.env.HTTP_PROXY || "aucun",
-  https: process.env.https_proxy || process.env.HTTPS_PROXY || "aucun"
-});
-
 // ==========================================
-// 21. LANCEMENT SERVEUR
+// 21. DÉMARRAGE DU SERVEUR
 // ==========================================
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
