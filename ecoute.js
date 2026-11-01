@@ -2042,6 +2042,11 @@ app.post('/api/consolider', (req, res) => {
   consoliderMemoire().catch(e => console.error("[CRON EXTERNE ERREUR]", e.message));
 });
 
+console.log("🔍 Diagnostic Proxy Système :", {
+  http: process.env.http_proxy || process.env.HTTP_PROXY || "aucun",
+  https: process.env.https_proxy || process.env.HTTPS_PROXY || "aucun"
+});
+
 // ==========================================
 // 21. LANCEMENT SERVEUR
 // ==========================================
