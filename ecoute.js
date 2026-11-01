@@ -473,7 +473,8 @@ async function evaluerVolition(forceManuelle = false) {
     if (silenceMinutes < 90) return;
   }
 
-  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
+  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+  const h = heureParis.getHours();
   const moyenneLongueur = historiqueLongueursDoc.length > 0
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
@@ -483,7 +484,7 @@ async function evaluerVolition(forceManuelle = false) {
 
   const promptVolition = `Tu es Nyx.
 La réalité du moment :
-- Heure locale : ${heureParis}h
+- Heure locale : ${h}h
 - Silence de Doc depuis : ${silenceMinutes} minutes
 - Longueur moyenne de ses répliques : ${moyenneLongueur} caractères
 - Dernier échange :
@@ -966,7 +967,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 }
 
 // ==========================================
-// 11. ROUTE CASCADE POUR LE CODE (PLAFOND ÉTENDU À 4000)
+// 11. ROUTE CASCADE POUR LE CODE
 // ==========================================
 async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens = 4000) {
   // 1. GROQ (Llama 3.3 70B)
@@ -1034,7 +1035,7 @@ function estTacheComplexe(texte) {
 
   const ordreCode = /\b(ecris|écris|code|fais-moi|genere|génère|programme|corrige|debug)\b/i.test(t);
   const marqueurs = [
-    "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice", "html", "css", "js"
+    "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice"
   ];
   return ordreCode && marqueurs.some(m => t.includes(m));
 }
@@ -1402,7 +1403,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
   
-  // GESTION DYNAMIQUE DU PLAFOND (Chat standard reste économique, code libéré à 4000)
+  // VERROU ANTI-GASPILLAGE : message court = 30 tokens max
   const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
   const demandeCodeLong = /\b(code|script|html|css|js|fichier|programme|application)\b/i.test(texteNet);
 
