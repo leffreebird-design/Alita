@@ -45,7 +45,7 @@ const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "open-mist
 const GEMINI_API_KEY_FREE = assainirParametre(process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const GEMINI_API_KEY_PAID = assainirParametre(process.env.GEMINI_API_KEY_PAID);
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
-const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-2.0-flash";
+const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-3.1-flash-lite";
 
 // GROQ - CODE, PROJETS TECHNIQUES & CONSCIENCE ACTIVE (GRATUIT & RAPIDE)
 const GROQ_API_KEY = assainirParametre(process.env.GROQ_API_KEY);
