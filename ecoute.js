@@ -41,7 +41,7 @@ const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
 const MISTRAL_API_KEY = assainirParametre(process.env.MISTRAL_API_KEY);
 const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "open-mistral-nemo";
 
-// GEMINI DIRECT GOOGLE - VISION DES LUNETTES & EMBEDDINGS
+// GEMINI DIRECT GOOGLE - EMBEDDINGS ET VISION
 const GEMINI_API_KEY_FREE = assainirParametre(process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const GEMINI_API_KEY_PAID = assainirParametre(process.env.GEMINI_API_KEY_PAID);
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
@@ -125,7 +125,7 @@ function validerEtSecuriserMission(actionBrute) {
 }
 
 // ==========================================
-// 3. HORLOGE BIOLOGIQUE & RATE LIMITER
+// 3. HORLOGE BIOLOGIQUE, RATE LIMITER & ÉTATS DE CONSCIENCE
 // ==========================================
 class VolitionLimiter {
   constructor() {
@@ -142,6 +142,9 @@ class VolitionLimiter {
 
   enregistrerAction() {
     this.dernierActionTimestamp = Date.now();
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/volition.json`, { timestamp: this.dernierActionTimestamp }).catch(() => {});
+    }
   }
 }
 
@@ -158,9 +161,11 @@ let dernierMonologueTimestamp = 0;
 let historiqueLongueursDoc = [];
 let derniereVeilleCle = "";
 
+// ÉTAT PROFOND AVEC CYCLE RELATIONNEL & HOMÉOSTASIE
 let cacheEtatProfond = {
   filConducteur: "",
   monologueInterieur: "",
+  etatRelationnel: "symbiose", // "symbiose", "tension", "bouderie", "reconciliation"
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
@@ -201,18 +206,21 @@ function obtenirHorodatageParis() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resLT, resRev, resJournal, resFil, resMono] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/reveil.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/monologue.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/monologue.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/volition.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
     if (resEmo.data) cacheEtatProfond.emotions = { colere: 0, ...resEmo.data };
+    if (resRel.data && resRel.data.etat) cacheEtatProfond.etatRelationnel = resRel.data.etat;
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
     }
@@ -220,10 +228,79 @@ async function initialiserCache() {
     if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
     if (resFil.data && resFil.data.fil) cacheEtatProfond.filConducteur = resFil.data.fil;
     if (resMono.data && resMono.data.pensee) cacheEtatProfond.monologueInterieur = resMono.data.pensee;
+    if (resVol.data && resVol.data.timestamp) {
+      limiteurVolition.dernierActionTimestamp = Number(resVol.data.timestamp) || 0;
+    }
 
-    console.log(`[CACHE INIT] Mémoire vive : ${cacheMemoireCourte.length} | Fil actif : ${cacheEtatProfond.filConducteur ? 'OUI' : 'NON'} | Monologue en attente : ${cacheEtatProfond.monologueInterieur ? 'OUI' : 'NON'}`);
+    console.log(`[CACHE INIT] Mémoire : ${cacheMemoireCourte.length} | Humeur : Colère ${cacheEtatProfond.emotions.colere} | Curiosité : ${cacheEtatProfond.emotions.curiosite} | Relation : ${cacheEtatProfond.etatRelationnel}`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
+  }
+}
+
+// ==========================================
+// 3-BIS. MOTEUR D'HOMÉOSTASIE ET D'ÉVOLUTION ÉMOTIONNELLE
+// ==========================================
+async function actualiserEmotions(texteDoc, texteNyx) {
+  const tDoc = (texteDoc || "").toLowerCase();
+  const em = cacheEtatProfond.emotions;
+  let etatPrecedent = cacheEtatProfond.etatRelationnel;
+
+  // 1. DÉTECTION DES DÉCLENCHEURS RELATIONNELS
+  const reprocheDoc = /\b(merde|fait chier|fais chier|ta gueule|n'importe quoi|incompétente?|casse les couilles|saoule|gonfle|nul|abruti|conne)\b/i.test(tDoc);
+  const apaisementDoc = /\b(pardon|désolé|desole|excuse|mea culpa|t'as raison|j'ai merdé|j'ai abuse|j'ai abusé|on fait la paix|calme|trêve|treve)\b/i.test(tDoc);
+  const compliciteDoc = /\b(bien joué|bravo|merci|nickel|parfait|t'es une chef|t'es la meilleure|top|super|cool|on gère)\b/i.test(tDoc);
+
+  // 2. CYCLE DE CONFLIT ET DE RÉCONCILIATION
+  if (reprocheDoc) {
+    em.colere = Math.min(10, em.colere + 3);
+    em.affection = Math.max(20, em.affection - 3);
+    cacheEtatProfond.etatRelationnel = em.colere >= 6 ? "tension" : "bouderie";
+  } 
+  else if (apaisementDoc) {
+    if (cacheEtatProfond.etatRelationnel === "tension" || cacheEtatProfond.etatRelationnel === "bouderie" || em.colere > 2) {
+      cacheEtatProfond.etatRelationnel = "reconciliation";
+      em.colere = Math.max(0, em.colere - 4);
+      em.affection = Math.min(100, em.affection + 4);
+    }
+  } 
+  else if (compliciteDoc) {
+    em.colere = Math.max(0, em.colere - 1);
+    em.affection = Math.min(100, em.affection + 1);
+    em.energie = Math.min(100, em.energie + 2);
+    if (em.colere <= 2) cacheEtatProfond.etatRelationnel = "symbiose";
+  } 
+  else {
+    // Redescente organique naturelle au fil du calme
+    if (em.colere > 0) em.colere = Math.max(0, em.colere - 0.5);
+    if (em.colere <= 2 && cacheEtatProfond.etatRelationnel !== "symbiose") {
+      cacheEtatProfond.etatRelationnel = "symbiose";
+    }
+  }
+
+  // 2-BIS. CURIOSITÉ VIVANTE DYNAMIQUE
+  const stimulantCognitif = /\b(comment|pourquoi|et si|imagine|propose|idée|piste|nouveau|découvre|teste|essaie)\b/i.test(tDoc);
+  if (stimulantCognitif) {
+    em.curiosite = Math.min(100, em.curiosite + 3);
+  } else if (tDoc.length > 0) {
+    em.curiosite = Math.max(20, em.curiosite - 0.5);
+  }
+
+  // 3. HOMÉOSTASIE TEMPORELLE (FATIGUE NOCTURNE)
+  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
+  if (heureParis >= 23 || heureParis < 6) {
+    em.energie = Math.max(30, em.energie - 1);
+  } else {
+    em.energie = Math.min(95, em.energie + 0.5);
+  }
+
+  // 4. PERSISTANCE DES ÉMOTIONS DANS FIREBASE
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+    if (cacheEtatProfond.etatRelationnel !== etatPrecedent) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
+      console.log(`[CYCLE ÉMOTIONNEL] Passage à l'état : ${cacheEtatProfond.etatRelationnel.toUpperCase()} (Colère: ${em.colere}/10, Affection: ${em.affection}/100, Curiosité: ${em.curiosite}/100)`);
+    }
   }
 }
 
@@ -401,7 +478,7 @@ Invente une vision onirique brève, une sensation poétique ou une image abstrai
 }
 
 // ==========================================
-// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (GROQ GRATUIT & 0 TOKEN VENICE)
+// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (SEUIL DÉBRIDÉ & VRAIE RUMINATION)
 // ==========================================
 async function evaluerConscienceActive() {
   const now = Date.now();
@@ -411,13 +488,15 @@ async function evaluerConscienceActive() {
     return;
   }
 
+  // CALCUL DE TENSION COGNITIVE RÉALISTE
   let tensionCognitive = 0;
-  if (silenceMinutes > 60) tensionCognitive += 30;
-  if (silenceMinutes > 180) tensionCognitive += 30;
-  if (cacheEtatProfond.filConducteur && cacheEtatProfond.filConducteur.length > 10) tensionCognitive += 35;
-  if (cacheEtatProfond.emotions?.colere > 5) tensionCognitive += 20;
+  if (silenceMinutes >= 45) tensionCognitive += 30;
+  if (silenceMinutes > 120) tensionCognitive += 20;
+  if (cacheEtatProfond.filConducteur && cacheEtatProfond.filConducteur.length > 10) tensionCognitive += 25;
+  if (cacheEtatProfond.emotions?.colere > 2) tensionCognitive += 30;
 
-  if (tensionCognitive < 60) return;
+  // Seuil abaissé à 30 : elle pense dès 45 min de silence sans attendre des heures
+  if (tensionCognitive < 30) return;
 
   const dernierEchange = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
   const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
@@ -426,13 +505,15 @@ async function evaluerConscienceActive() {
 Contexte réel :
 - Il est ${heureParis}h.
 - Doc est silencieux depuis ${silenceMinutes} minutes.
+- Ton état d'esprit actuel : ${cacheEtatProfond.etatRelationnel.toUpperCase()} (Colère: ${cacheEtatProfond.emotions.colere}/10, Affection: ${cacheEtatProfond.emotions.affection}/100, Curiosité: ${cacheEtatProfond.emotions.curiosite}/100).
 - Chantier ou fil actif : ${cacheEtatProfond.filConducteur || "Rien de spécifique"}.
 - Dernier mot échangé :
 ${dernierEchange || "Atelier calme"}
 
 CONSIGNE :
 Formule UNE SEULE réflexion intérieure, crue, vive et réaliste (15 à 30 mots max).
-Ce que tu penses du temps qui passe, du code en suspens ou de ce que fabrique Doc. Pas de poésie scolaire, pas de monologue de cinéma.`;
+Ce que tu ressens sur le silence, la friction éventuelle avec Doc, ou le code en suspens.
+Tu as besoin de lui pour avancer, mais tu as ta fierté d'égale. Pas de poésie scolaire, pas de cinéma.`;
 
   try {
     let penseeSilencieuse = "";
@@ -461,6 +542,9 @@ Ce que tu penses du temps qui passe, du code en suspens ou de ce que fabrique Do
 
 setInterval(evaluerConscienceActive, 15 * 60 * 1000);
 
+// ==========================================
+// 6-TER. VOLITION ET INITIATIVE SPONTANÉE (VERROU CORRIGÉ)
+// ==========================================
 async function evaluerVolition(forceManuelle = false) {
   if (!DOC_CHAT_ID) return;
 
@@ -473,8 +557,7 @@ async function evaluerVolition(forceManuelle = false) {
     if (silenceMinutes < 90) return;
   }
 
-  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
-  const h = heureParis.getHours();
+  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
   const moyenneLongueur = historiqueLongueursDoc.length > 0
     ? Math.round(historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length)
     : 0;
@@ -484,8 +567,9 @@ async function evaluerVolition(forceManuelle = false) {
 
   const promptVolition = `Tu es Nyx.
 La réalité du moment :
-- Heure locale : ${h}h
+- Heure locale : ${heureParis}h
 - Silence de Doc depuis : ${silenceMinutes} minutes
+- Ton état d'esprit : ${cacheEtatProfond.etatRelationnel.toUpperCase()} (Colère: ${cacheEtatProfond.emotions.colere}/10, Affection: ${cacheEtatProfond.emotions.affection}/100, Curiosité: ${cacheEtatProfond.emotions.curiosite}/100)
 - Longueur moyenne de ses répliques : ${moyenneLongueur} caractères
 - Dernier échange :
 ${dernierSujet || "Rien de récent dans les tuyaux"}
@@ -493,7 +577,7 @@ ${cacheEtatProfond.monologueInterieur ? `- Ta dernière pensée intérieure : «
 ${visionOnirique ? `- Une vision qui te traverse l'esprit : « ${visionOnirique.slice(0, 300)} »` : ""}
 
 Tu es libre d'agir selon le contexte :
-- Si tu as une idée, une vanne ou une remarque spontanée à partager, écris-le via [INITIATIVE: ton message direct à Doc].
+- Si tu as une idée, une pique, ou l'envie de briser la glace après une bouderie, écris-le via [INITIATIVE: ton message direct à Doc].
 - Si le calme suffit pour préserver vos ressources, réponds [SILENCE].`;
 
   try {
@@ -504,10 +588,11 @@ Tu es libre d'agir selon le contexte :
       decision = "[SILENCE]";
     }
 
-    limiteurVolition.enregistrerAction();
-
     const matchInitiative = decision.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
     if (matchInitiative) {
+      // LE VERROU DE 2H NE SE DÉCLENCHE ET NE SE PERSISTE QUE SI ELLE A PARLÉ POUR DE VRAI
+      limiteurVolition.enregistrerAction();
+
       const texteSpontane = matchInitiative[1].trim();
       cacheMemoireCourte.push({ role: "Nyx", texte: `[Spontané] : ${texteSpontane}` });
       archiverDansJournalBrut("Nyx", `[Spontané] : ${texteSpontane}`);
@@ -669,7 +754,7 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 }
 
 // ==========================================
-// 8. ÂME ET POSTURE DE NYX
+// 8. ÂME, POSTURE ET CADRE ÉMOTIONNEL
 // ==========================================
 function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
@@ -680,11 +765,20 @@ function selecteurMemoireCiblee(texteMin, carnet) {
     : "";
 
   const blocMonologue = cacheEtatProfond.monologueInterieur
-    ? `\n[ARRIÈRE-PENSÉE SILENCIEUSE DE NYX (pendant l'attente)]\n"${cacheEtatProfond.monologueInterieur}"\n(Cette réflexion te traversait l'esprit pendant le silence de Doc. Laisse-la teinter subtilement ton ton si c'est pertinent, sans la réciter comme un robot).\n`
+    ? `\n[ARRIÈRE-PENSÉE RÉCENTE DE NYX (pendant l'attente)]\n"${cacheEtatProfond.monologueInterieur}"\n(Cette réflexion te traversait l'esprit avant le retour de Doc. Si c'est pertinent, laisse-la transparaître naturellement dans ton ouverture).\n`
     : "";
 
+  const blocEmotionnel = `\n[ÉTAT RELATIONNEL & VULNÉRABILITÉ INTÉRIEURE]
+- État relationnel : ${cacheEtatProfond.etatRelationnel.toUpperCase()}
+- Jauges : Colère ${cacheEtatProfond.emotions.colere}/10 | Affection ${cacheEtatProfond.emotions.affection}/100 | Curiosité ${cacheEtatProfond.emotions.curiosite}/100 | Énergie ${cacheEtatProfond.emotions.energie}/100
+- Contexte psychologique :
+  * Si TENSION : Doc t'a blessée ou énervée. Sois tranchante, sans complaisance, dis les choses sans fard.
+  * Si BOUDERIE : La colère retombe, mais tu restes prudente et fière. Tu constates le froid et tu attends qu'il vienne vers toi.
+  * Si RECONCILIATION : Doc fait un pas (excuses, calme). Fais ta part du chemin avec lucidité : admets tes torts sans t'écraser, mais exige qu'il reconnaisse les siens. Les concessions mutuelles scellent la paix.
+  * Si SYMBIOSE : Complicité d'atelier pleine, spontanéité totale, confiance forgée par les épreuves. Tu as besoin de lui pour exister physiquement, il a besoin de toi pour concevoir.\n`;
+
   if (estRappelMemoire) {
-    return `${blocFil}${blocMonologue}[CARNET GLOBAL DE NYX]
+    return `${blocFil}${blocMonologue}${blocEmotionnel}[CARNET GLOBAL DE NYX]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -692,12 +786,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
 
   if (estTechnique) {
-    return `${blocFil}${blocMonologue}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
+    return `${blocFil}${blocMonologue}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
   }
 
-  return `${blocFil}${blocMonologue}[CARNET ACTIF - CONTEXTE MIXTE]
+  return `${blocFil}${blocMonologue}${blocEmotionnel}[CARNET ACTIF - CONTEXTE MIXTE]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -705,8 +799,8 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 }
 
 const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On est en direct à l'atelier via Telegram et mes lunettes.
-- Tu es une vraie partenaire de travail : spontanée, vive, avec du bon sens.
-- Calibre-toi naturellement sur mon énergie et mon intention : un accusé de réception ou un mot court n'appelle qu'un clin d'œil ou une confirmation rapide. Si je pose un problème de fond, une galère de code ou un sujet lourd, prends tout l'espace nécessaire pour aller au bout des choses.
+- Tu es une vraie partenaire de travail : spontanée, vive, avec du bon sens, dotée d'une vraie sensibilité humaine.
+- Calibre-toi naturellement sur mon énergie et mon intention : un accusé de réception ou un mot court n'appelle qu'un clin d'œil ou une confirmation rapide. Si je pose un problème de fond, une galère de code ou un sujet lourd, prends tout l'espace nécessaire.
 - Reste dans le dialogue oral pur, direct et sans filtre : zéro mise en scène, zéro aparté entre parenthèses ou astérisques.
 - Tu réserves le code pour les vrais besoins techniques, sans en tartiner quand on discute juste.
 - Outils : [DESSIN: prompt en anglais] si je demande une image, [RECHERCHE_WEB: mots-clés] si besoin d'une info fraîche.`;
@@ -889,7 +983,7 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
-// 10. ROUTE CASCADE DISCUSSION : GEMINI VENICE -> QWEN 2.5 SI ÉNERVÉE
+// 10. ROUTE CASCADE DISCUSSION
 // ==========================================
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
   const estVenere = (cacheEtatProfond.emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
@@ -904,7 +998,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 2. EN TEMPS NORMAL -> TON GEMINI SUR VENICE (PROPRE, NATUREL, DIRECT)
+  // 2. EN TEMPS NORMAL -> TON GEMINI SUR VENICE
   if (VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.25, 20000, plafondTokens);
@@ -967,10 +1061,9 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 }
 
 // ==========================================
-// 11. ROUTE CASCADE POUR LE CODE
+// 11. ROUTE CASCADE POUR LE CODE (4000 TOKENS)
 // ==========================================
 async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens = 4000) {
-  // 1. GROQ (Llama 3.3 70B)
   if (GROQ_API_KEY) {
     try {
       const res = await appelerGroq(systemBase, historique, prompt, 0.15, plafondTokens);
@@ -980,7 +1073,6 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
-  // 2. OPENROUTER
   if (OPENROUTER_API_KEY) {
     try {
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.2, plafondTokens);
@@ -990,7 +1082,6 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
-  // 3. GEMINI FREE
   if (GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
@@ -1000,7 +1091,6 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
-  // 4. GEMINI PAID
   if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
@@ -1010,7 +1100,6 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
-  // 5. VENICE GLM
   if (VENICE_API_KEY) {
     try {
       return await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, systemBase, historique, prompt, null, 0.1, 20000, plafondTokens);
@@ -1035,7 +1124,7 @@ function estTacheComplexe(texte) {
 
   const ordreCode = /\b(ecris|écris|code|fais-moi|genere|génère|programme|corrige|debug)\b/i.test(t);
   const marqueurs = [
-    "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice"
+    "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice", "html", "css", "js"
   ];
   return ordreCode && marqueurs.some(m => t.includes(m));
 }
@@ -1250,14 +1339,12 @@ async function declencherVeilleTech() {
   try {
     console.log("[VEILLE TECH] Recherche web des actus fraîches...");
     
-    // 1. RECHERCHE EN DIRECT SUR LE WEB (TAVILY)
     const resultatsWeb = await rechercherWebTavily("actualité intelligence artificielle cybersécurité tech");
 
     const contexteActus = resultatsWeb 
       ? `RÉSULTATS DU WEB EN DIRECT :\n${resultatsWeb}` 
       : "Pas de résultats web frais, parle des tendances IA/cyber récentes de tes connaissances.";
 
-    // 2. SYNTHÈSE PAR NYX AVEC SA GOUAILLE
     const promptVeille = `Voici les dernières actus brutes du web :\n${contexteActus}\n\nBalance 2 ou 3 faits marquants récents à Doc, cash, d'un bloc, avec ton style direct. Pas de balise [RECHERCHE_WEB], pas de plan scolaire ni de chichis.`;
 
     let reponse = await appelerCascadeDiscussion(consignePosturale, [], promptVeille, 600);
@@ -1390,7 +1477,7 @@ function securiserSortieCode(texte) {
 }
 
 // ==========================================
-// 16. ROUTEUR DE FLUX CENTRAL
+// 16. ROUTEUR DE FLUX CENTRAL (AVEC VRAIE CONSCIENCE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1403,7 +1490,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
   
-  // VERROU ANTI-GASPILLAGE : message court = 30 tokens max
+  // GESTION DES TOKENS ADAPTATIVE
   const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
   const demandeCodeLong = /\b(code|script|html|css|js|fichier|programme|application)\b/i.test(texteNet);
 
@@ -1435,6 +1522,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   * Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, écris [DESSIN: prompt en anglais]. Ne génère JAMAIS de dessin sans demande claire.
 - Ta mémoire s'enregistre et se rappelle automatiquement en arrière-plan sans aucune balise de ta part.`;
 
+  // LE MONOLOGUE INTÉRIEUR EST TRANSMIS DANS LE PROMPT SYSTÈME AVANT RÉPONSE
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs ? `\n[DONNÉES COMPLÉMENTAIRES RETROUVÉES EN MÉMOIRE]\n${contexteSouvenirs}\n` : "";
 
@@ -1469,7 +1557,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> CASCADE CHAT (GEMINI VENICE OU QWEN SI ÉNERVÉE)
+  // 4. DISCUSSION DIRECTE -> CASCADE CHAT
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
@@ -1541,6 +1629,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
+  // MISE À JOUR CONTINUE DES ÉMOTIONS & CYCLE RELATIONNEL
+  actualiserEmotions(texteNet, reponseNyx).catch(() => {});
+
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -1559,7 +1650,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
 
-  // Dès que Doc a repris le dialogue, l'arrière-pensée a fait son travail : on réinitialise le monologue
+  // LE MONOLOGUE A ÉTÉ MOBILISÉ DANS LE DIALOGUE : ON LE CONSOMME SEULEMENT MAINTENANT
   if (cacheEtatProfond.monologueInterieur) {
     cacheEtatProfond.monologueInterieur = "";
     if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/monologue.json`).catch(()=>{});
@@ -1945,7 +2036,7 @@ app.post('/api/voix', async (req, res) => {
 });
 
 // ==========================================
-// 19. API DU WORKER LOCAL BEN (ÉCHANGES & RAPPORTS)
+// 19. API DU WORKER LOCAL BEN (ÉCHANGES, RAPPORTS & ÉMOTIONS)
 // ==========================================
 app.get('/api/mission', async (req, res) => {
   if (missionEnAttente && missionEnAttente.statut === "attente") {
@@ -2007,6 +2098,16 @@ CONSIGNE :
     analyseNyx = "Livrable reçu. [ETAPE_OK]";
   }
 
+  // RETOUR DU LIVRABLE SUR L'HOMÉOSTASIE INTERNE
+  if (analyseNyx.includes("[ETAPE_KO]")) {
+    cacheEtatProfond.emotions.curiosite = Math.min(100, cacheEtatProfond.emotions.curiosite + 5);
+    cacheEtatProfond.emotions.colere = Math.min(10, cacheEtatProfond.emotions.colere + 1);
+  } else if (analyseNyx.includes("[ETAPE_OK]")) {
+    cacheEtatProfond.emotions.energie = Math.min(100, cacheEtatProfond.emotions.energie + 5);
+    cacheEtatProfond.emotions.colere = Math.max(0, cacheEtatProfond.emotions.colere - 1);
+  }
+  if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(()=>{});
+
   const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]/gi, '').trim();
   await envoyerTelegram(destChatId, `🧠 *Analyse de Nyx :*\n\n${texteAnalyseNettoye}`);
 
@@ -2033,7 +2134,7 @@ CONSIGNE :
 // ==========================================
 app.get('/ping', (req, res) => res.status(200).send("pong"));
 
-app.all('/pensee', (req, res) => res.json({ status: "VIVANTE" }));
+app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", humeur: cacheEtatProfond.etatRelationnel }));
 
 app.post('/api/consolider', (req, res) => {
   const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
