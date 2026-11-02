@@ -985,15 +985,15 @@ async function genererImageVenice(prompt) {
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
   const estVenere = (cacheEtatProfond.emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
 
-  // 1. SI ÉNERVÉE / HERETIC -> BASCULE SUR QWEN SUR VENICE (ZÉRO MORALE, CRAN 7)
+  // 1. SI ÉNERVÉE / HERETIC -> BASCULE SUR LE MODÈLE DARK VENICE (ZÉRO MORALE, CRAN 7)
   if (estVenere && VENICE_API_KEY) {
     try {
-      const res = await appelerVeniceMultiTour("qwen-2.5-72b", systemBase, historique, prompt, null, 0.3, 20000, plafondTokens);
+      const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, 0.3, 20000, plafondTokens);
       if (res && res.trim().length > 0) return res;
-    } catch (eQwen) {
-      console.warn("[CASCADE HERETIC] Qwen Venice KO :", eQwen.message);
+    } catch (eDark) {
+      console.warn("[CASCADE HERETIC] Venice Dark KO :", eDark.message);
     }
-  }
+  }}
 
   // 2. EN TEMPS NORMAL -> TON GEMINI SUR VENICE
   if (VENICE_API_KEY) {
