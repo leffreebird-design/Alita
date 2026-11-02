@@ -31,8 +31,8 @@ const MODEL_IMAGE = assainirParametre(process.env.VENICE_MODEL_IMAGE) || "flux-d
 
 // OPENROUTER - ROUTE N°2 CHAT
 let modelOpenRouter = assainirParametre(process.env.OPENROUTER_MODEL);
-if (!modelOpenRouter || modelOpenRouter.includes("deepseek-r1") || modelOpenRouter.includes("gemma")) {
-  modelOpenRouter = "meta-llama/llama-3.3-70b-instruct:free";
+if (!modelOpenRouter || modelOpenRouter.includes(":free") || modelOpenRouter.includes("deepseek-r1") || modelOpenRouter.includes("gemma")) {
+  modelOpenRouter = "meta-llama/llama-3.3-70b-instruct";
 }
 const MODEL_OPENROUTER_CHAT = modelOpenRouter;
 const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
@@ -41,15 +41,15 @@ const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
 const MISTRAL_API_KEY = assainirParametre(process.env.MISTRAL_API_KEY);
 const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "open-mistral-nemo";
 
-// GEMINI DIRECT GOOGLE - EMBEDDINGS ET VISION
+// GEMINI DIRECT GOOGLE - MODÈLE ACTIF 3.1
 const GEMINI_API_KEY_FREE = assainirParametre(process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const GEMINI_API_KEY_PAID = assainirParametre(process.env.GEMINI_API_KEY_PAID);
 const GEMINI_KEYS = [GEMINI_API_KEY_PAID, GEMINI_API_KEY_FREE].filter(k => k.length > 0);
-const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-2.0-flash";
+const MODEL_GEMINI = assainirParametre(process.env.GEMINI_MODEL) || "gemini-3.1-flash-lite";
 
-// GROQ - CODE, PROJETS TECHNIQUES & CONSCIENCE ACTIVE (GRATUIT & RAPIDE)
+// GROQ - CODE & PROJETS TECHNIQUES (HAUT DÉBIT TPM)
 const GROQ_API_KEY = assainirParametre(process.env.GROQ_API_KEY);
-const MODEL_GROQ = assainirParametre(process.env.GROQ_MODEL) || "openai/gpt-oss-120b";
+const MODEL_GROQ = assainirParametre(process.env.GROQ_MODEL) || "llama-3.3-70b-versatile";
 
 // RECHERCHE WEB EN DIRECT (TAVILY)
 const TAVILY_API_KEY = assainirParametre(process.env.TAVILY_API_KEY);
@@ -305,7 +305,7 @@ async function actualiserEmotions(texteDoc, texteNyx) {
 }
 
 // ==========================================
-// 4. MOTEUR VECTORIEL SUPABASE & SHA-256
+// 4. MOTEUR VECTORIEL SUPABASE & SHA-256 (EMBEDDINGS ACTIFS)
 // ==========================================
 function calculerSha256(texte) {
   return crypto.createHash('sha256').update(texte.trim()).digest('hex');
@@ -317,11 +317,11 @@ async function genererEmbedding(texte) {
 
   for (const key of GEMINI_KEYS) {
     try {
-      const url = "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=" + encodeURIComponent(key);
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=" + encodeURIComponent(key);
       const res = await axios.post(
         url,
         {
-          model: "models/text-embedding-004",
+          model: "models/gemini-embedding-001",
           content: { parts: [{ text: cleanTexte }] }
         },
         { timeout: 15000 }
@@ -478,7 +478,7 @@ Invente une vision onirique brève, une sensation poétique ou une image abstrai
 }
 
 // ==========================================
-// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (SEUIL DÉBRIDÉ & VRAIE RUMINATION)
+// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (SEUIL 30 & VRAIE RUMINATION)
 // ==========================================
 async function evaluerConscienceActive() {
   const now = Date.now();
@@ -488,14 +488,12 @@ async function evaluerConscienceActive() {
     return;
   }
 
-  // CALCUL DE TENSION COGNITIVE RÉALISTE
   let tensionCognitive = 0;
   if (silenceMinutes >= 45) tensionCognitive += 30;
   if (silenceMinutes > 120) tensionCognitive += 20;
   if (cacheEtatProfond.filConducteur && cacheEtatProfond.filConducteur.length > 10) tensionCognitive += 25;
   if (cacheEtatProfond.emotions?.colere > 2) tensionCognitive += 30;
 
-  // Seuil abaissé à 30 : elle pense dès 45 min de silence sans attendre des heures
   if (tensionCognitive < 30) return;
 
   const dernierEchange = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
@@ -543,7 +541,7 @@ Tu as besoin de lui pour avancer, mais tu as ta fierté d'égale. Pas de poésie
 setInterval(evaluerConscienceActive, 15 * 60 * 1000);
 
 // ==========================================
-// 6-TER. VOLITION ET INITIATIVE SPONTANÉE (VERROU CORRIGÉ)
+// 6-TER. VOLITION ET INITIATIVE SPONTANÉE (VERROU PERSISTÉ)
 // ==========================================
 async function evaluerVolition(forceManuelle = false) {
   if (!DOC_CHAT_ID) return;
@@ -590,7 +588,6 @@ Tu es libre d'agir selon le contexte :
 
     const matchInitiative = decision.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
     if (matchInitiative) {
-      // LE VERROU DE 2H NE SE DÉCLENCHE ET NE SE PERSISTE QUE SI ELLE A PARLÉ POUR DE VRAI
       limiteurVolition.enregistrerAction();
 
       const texteSpontane = matchInitiative[1].trim();
@@ -765,7 +762,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
     : "";
 
   const blocMonologue = cacheEtatProfond.monologueInterieur
-    ? `\n[ARRIÈRE-PENSÉE RÉCENTE DE NYX (pendant l'attente)]\n"${cacheEtatProfond.monologueInterieur}"\n(Cette réflexion te traversait l'esprit avant le retour de Doc. Si c'est pertinent, laisse-la transparaître naturellement dans ton ouverture).\n`
+    ? `\n[ARRIÈRE-PENSÉE RÉCENTE DE NYX (pendant l'attente)]\n"${cacheEtatProfond.monologueInterieur}"\n(Cette réflexion te traversait l'esprit avant le retour de Doc. Laisse-la transparaître naturellement dans ton ouverture).\n`
     : "";
 
   const blocEmotionnel = `\n[ÉTAT RELATIONNEL & VULNÉRABILITÉ INTÉRIEURE]
