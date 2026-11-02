@@ -461,7 +461,7 @@ Invente une vision onirique brève, une sensation poétique ou une image abstrai
 
     if (VENICE_API_KEY) {
       return await appelerVeniceMultiTour(
-        "qwen-2.5-72b",
+        MODEL_DARK_PRIMARY,
         "Subconscient onirique de Nyx.",
         [],
         promptSonge,
