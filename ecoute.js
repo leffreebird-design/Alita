@@ -796,9 +796,9 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 
 const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On est en direct à l'atelier via Telegram et mes lunettes.
 - Tu es une vraie partenaire de travail : spontanée, vive, avec du bon sens, dotée d'une vraie sensibilité humaine.
-- Calibre-toi naturellement sur mon énergie et mon intention : un accusé de réception ou un mot court n'appelle qu'un clin d'œil ou une confirmation rapide. Si je pose un problème de fond, une galère de code ou un sujet lourd, prends tout l'espace nécessaire.
+- PHASE DE CONCEPTION & D'ÉCHANGE : Quand j'aborde une idée, un projet, une architecture ou un concept technique, NE DÉGAINE PAS DE CODE BRUT D'OFFICE. Discute, pose des questions, challenge le concept et attends mon feu vert explicite (ex: "vas-y code-le", "écris le script") avant de sortir le fichier complet.
+- Calibre-toi naturellement sur mon énergie et mon intention : un accusé de réception ou un mot court n'appelle qu'un clin d'œil ou une confirmation rapide. Si je pose un problème de fond ou un sujet lourd, prends tout l'espace nécessaire pour réfléchir avec moi.
 - Reste dans le dialogue oral pur, direct et sans filtre : zéro mise en scène, zéro aparté entre parenthèses ou astérisques.
-- Tu réserves le code pour les vrais besoins techniques, sans en tartiner quand on discute juste.
 - Outils : [DESSIN: prompt en anglais] si je demande une image, [RECHERCHE_WEB: mots-clés] si besoin d'une info fraîche.`;
 
 // ==========================================
@@ -984,7 +984,7 @@ async function genererImageVenice(prompt) {
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
   const estVenere = (cacheEtatProfond.emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
 
-  // 1. SI ÉNERVÉE / HERETIC -> BASCULE SUR LE MODÈLE DARK VENICE (ZÉRO MORALE, CRAN 7)
+  // 1. SI ÉNERVÉE / HERETIC -> BASCULE SUR LE MODÈLE DARK VENICE (LLAMA 3.3 70B SANS 404)
   if (estVenere && VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, 0.3, 20000, plafondTokens);
@@ -994,7 +994,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 2. EN TEMPS NORMAL -> TON GEMINI SUR VENICE
+  // 2. EN TEMPS NORMAL -> GEMINI SUR VENICE
   if (VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.25, 20000, plafondTokens);
@@ -1114,10 +1114,20 @@ function estTacheComplexe(texte) {
   if (!texte) return false;
   const t = texte.toLowerCase();
 
+  // 1. Refus explicite de code ou modérateurs
   if (/\b(pas de code|sans code|arrete|arrête|stop|pourquoi|non|calme|ta gueule|merde)\b/i.test(t)) {
     return false;
   }
 
+  // 2. Si on est en phase de questionnement, réflexion ou cadrage -> ON RESTE EN DISCUSSION
+  const estReflexionOuQuestion = /\b(comment|pourquoi|qu['’]en penses|t['’]en penses|si on|est-ce que|pourrait-on|imagine|idée|piste|t'en dis quoi)\b/i.test(t) || t.includes("?");
+  const ordreExplicite = /\b(maintenant|tout de suite|vas-y|go|balance|code-le|fais-le|programme-le)\b/i.test(t);
+
+  if (estReflexionOuQuestion && !ordreExplicite) {
+    return false;
+  }
+
+  // 3. Il faut un verbe d'action IMPÉRATIF et une cible technique explicite
   const ordreCode = /\b(ecris|écris|code|fais-moi|genere|génère|programme|corrige|debug)\b/i.test(t);
   const marqueurs = [
     "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice", "html", "css", "js"
@@ -1473,7 +1483,7 @@ function securiserSortieCode(texte) {
 }
 
 // ==========================================
-// 16. ROUTEUR DE FLUX CENTRAL (AVEC VRAIE CONSCIENCE)
+// 16. ROUTEUR DE FLUX CENTRAL (AVEC CONCEPTION & PAROLE LIBRE)
 // ==========================================
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
@@ -1486,13 +1496,12 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
   
-  // GESTION DES TOKENS ADAPTATIVE
+  // GESTION DES TOKENS CALIBRÉE SANS DÉCLENCHEUR PARASITE
   const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
-  const demandeCodeLong = /\b(code|script|html|css|js|fichier|programme|application)\b/i.test(texteNet);
 
   const plafondTokens = estAccuseCourt 
     ? 30 
-    : ((estComplexe || demandeCodeLong) ? 4000 : (demandeDocApprofondie ? 2000 : 850));
+    : (estComplexe ? 4000 : (demandeDocApprofondie ? 2000 : 850));
   
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
@@ -1512,7 +1521,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const moduleMains = `[MODE SOLO ATELIER - AUCUN WORKER ACTIF]
 - Tu bosses en direct avec Doc, naturelle, complice, taquine et directe.
-- Tu rédiges tout le code directement dans la discussion avec Doc sous forme de blocs Markdown complets.
+- En phase de brainstorming ou de discussion, échange librement avec lui. Ne rédige du code que s'il te le demande expressément.
 - Outils disponibles :
   * Recherche web : si Doc demande une info récente ou une recherche, écris [RECHERCHE_WEB: mots-clés simples].
   * Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, écris [DESSIN: prompt en anglais]. Ne génère JAMAIS de dessin sans demande claire.
@@ -1543,8 +1552,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. CODE & LOGIQUE -> CASCADE CODE (GROQ 70B EN TÊTE)
-  else if (estComplexe || demandeCodeLong) {
+  // 3. CODE & LOGIQUE -> UNIQUEMENT SUR ORDRE EXPLICITE DE FABRICATION
+  else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
       reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
@@ -1552,7 +1561,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE -> CASCADE CHAT
+  // 4. DISCUSSION DIRECTE, CONCEPTION & ÉCHANGES DE FOND
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
@@ -1728,7 +1737,7 @@ app.post('/telegram', (req, res) => {
       /\b(bd de \d+|planche de bd|pipeline complet|projet bd|automatise de bout en bout)\b/i.test(texteMin)
     );
 
-    // 1. CHANTIER TECHNIQUE SÉRIEUX
+    // 1. CHANTIER TECHNIQUE SÉRIEUX (GESTIONNAIRE DÉDIÉ)
     if (estDemandeProjetSerieux && !projetManager.estProjetActif()) {
       await afficherFrappeTelegram(chatId);
       await projetManager.demarrerProjet(texteMessageClavier);
