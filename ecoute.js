@@ -165,7 +165,7 @@ let derniereVeilleCle = "";
 let cacheEtatProfond = {
   filConducteur: "",
   monologueInterieur: "",
-  etatRelationnel: "symbiose", // "symbiose", "tension", "bouderie", "reconciliation"
+  etatRelationnel: "symbiose",
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
@@ -271,7 +271,6 @@ async function actualiserEmotions(texteDoc, texteNyx) {
     if (em.colere <= 2) cacheEtatProfond.etatRelationnel = "symbiose";
   } 
   else {
-    // Redescente organique naturelle au fil du calme
     if (em.colere > 0) em.colere = Math.max(0, em.colere - 0.5);
     if (em.colere <= 2 && cacheEtatProfond.etatRelationnel !== "symbiose") {
       cacheEtatProfond.etatRelationnel = "symbiose";
@@ -286,7 +285,7 @@ async function actualiserEmotions(texteDoc, texteNyx) {
     em.curiosite = Math.max(20, em.curiosite - 0.5);
   }
 
-  // 3. HOMÉOSTASIE TEMPORELLE (FATIGUE NOCTURNE)
+  // 3. HOMÉOSTASIE TEMPORELLE
   const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
   if (heureParis >= 23 || heureParis < 6) {
     em.energie = Math.max(30, em.energie - 1);
@@ -305,7 +304,7 @@ async function actualiserEmotions(texteDoc, texteNyx) {
 }
 
 // ==========================================
-// 4. MOTEUR VECTORIEL SUPABASE & SHA-256 (EMBEDDINGS ACTIFS)
+// 4. MOTEUR VECTORIEL SUPABASE & SHA-256
 // ==========================================
 function calculerSha256(texte) {
   return crypto.createHash('sha256').update(texte.trim()).digest('hex');
@@ -478,7 +477,7 @@ Invente une vision onirique brève, une sensation poétique ou une image abstrai
 }
 
 // ==========================================
-// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (SEUIL 30 & VRAIE RUMINATION)
+// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE
 // ==========================================
 async function evaluerConscienceActive() {
   const now = Date.now();
@@ -541,7 +540,7 @@ Tu as besoin de lui pour avancer, mais tu as ta fierté d'égale. Pas de poésie
 setInterval(evaluerConscienceActive, 15 * 60 * 1000);
 
 // ==========================================
-// 6-TER. VOLITION ET INITIATIVE SPONTANÉE (VERROU PERSISTÉ)
+// 6-TER. VOLITION ET INITIATIVE SPONTANÉE
 // ==========================================
 async function evaluerVolition(forceManuelle = false) {
   if (!DOC_CHAT_ID) return;
@@ -993,7 +992,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     } catch (eDark) {
       console.warn("[CASCADE HERETIC] Venice Dark KO :", eDark.message);
     }
-  }}
+  }
 
   // 2. EN TEMPS NORMAL -> TON GEMINI SUR VENICE
   if (VENICE_API_KEY) {
@@ -1519,7 +1518,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   * Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, écris [DESSIN: prompt en anglais]. Ne génère JAMAIS de dessin sans demande claire.
 - Ta mémoire s'enregistre et se rappelle automatiquement en arrière-plan sans aucune balise de ta part.`;
 
-  // LE MONOLOGUE INTÉRIEUR EST TRANSMIS DANS LE PROMPT SYSTÈME AVANT RÉPONSE
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs ? `\n[DONNÉES COMPLÉMENTAIRES RETROUVÉES EN MÉMOIRE]\n${contexteSouvenirs}\n` : "";
 
@@ -2095,7 +2093,6 @@ CONSIGNE :
     analyseNyx = "Livrable reçu. [ETAPE_OK]";
   }
 
-  // RETOUR DU LIVRABLE SUR L'HOMÉOSTASIE INTERNE
   if (analyseNyx.includes("[ETAPE_KO]")) {
     cacheEtatProfond.emotions.curiosite = Math.min(100, cacheEtatProfond.emotions.curiosite + 5);
     cacheEtatProfond.emotions.colere = Math.min(10, cacheEtatProfond.emotions.colere + 1);
