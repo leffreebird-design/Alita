@@ -1325,20 +1325,18 @@ async function lirePdfSecurise(fileId) {
         console.warn("Échec pdfParse, passage au fallback visuel...", err.message);
     }
 
-    // 2. Secours multimodal : lecture visuelle directe par Gemini
-    // 2. Secours multimodal : lecture visuelle directe par Gemini
-    const geminiKey = process.env.GEMINI_API_KEY_FREE 
-                   || process.env.GEMINI_API_KEY_PAID 
-                   || process.env.GEMINI_API_KEY 
-                   || (typeof GEMINI_API_KEY !== 'undefined' ? GEMINI_API_KEY : null);
+    // 2. Secours multimodal : lecture visuelle directe par Gemini 3.1
+    const geminiKey = process.env.GEMINI_API_KEY_FREE
+                   || process.env.GEMINI_API_KEY_PAID
+                   || process.env.GEMINI_API_KEY;
 
     if (!geminiKey) {
         throw new Error("Clé GEMINI_API_KEY_FREE ou GEMINI_API_KEY_PAID absente sur Render.");
     }
 
-    const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+    const geminiModel = process.env.GEMINI_MODEL || "gemini-3.1-flash";
+    const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
 
-    const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
     const payload = {
         contents: [{
             parts: [
