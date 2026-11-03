@@ -1326,10 +1326,17 @@ async function lirePdfSecurise(fileId) {
     }
 
     // 2. Secours multimodal : lecture visuelle directe par Gemini
-    const geminiKey = process.env.GEMINI_API_KEY || (typeof GEMINI_API_KEY !== 'undefined' ? GEMINI_API_KEY : null);
+    // 2. Secours multimodal : lecture visuelle directe par Gemini
+    const geminiKey = process.env.GEMINI_API_KEY_FREE 
+                   || process.env.GEMINI_API_KEY_PAID 
+                   || process.env.GEMINI_API_KEY 
+                   || (typeof GEMINI_API_KEY !== 'undefined' ? GEMINI_API_KEY : null);
+
     if (!geminiKey) {
-        throw new Error("Clé GEMINI_API_KEY absente pour le secours OCR visuel.");
+        throw new Error("Clé GEMINI_API_KEY_FREE ou GEMINI_API_KEY_PAID absente sur Render.");
     }
+
+    const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
 
     const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
     const payload = {
