@@ -1308,13 +1308,52 @@ async function lireMediaSecurise(fileId) {
 }
 
 async function lirePdfSecurise(fileId) {
-  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
-  const resMeta = await axios.get(urlMeta);
-  const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
-  const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
-  const data = await pdfParse(Buffer.from(resDoc.data));
-  resDoc.data = null;
-  return data.text;
+    const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+    const resMeta = await axios.get(urlMeta);
+    const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+    const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(resDoc.data);
+    resDoc.data = null;
+
+    // 1. Essai rapide via pdf-parse
+    try {
+        const data = await pdfParse(buffer);
+        if (data.text && data.text.trim().length > 30) {
+            return data.text.trim();
+        }
+    } catch (err) {
+        console.warn("Échec pdfParse, passage au fallback visuel...", err.message);
+    }
+
+    // 2. Secours multimodal : lecture visuelle directe par Gemini
+    const geminiKey = process.env.GEMINI_API_KEY || (typeof GEMINI_API_KEY !== 'undefined' ? GEMINI_API_KEY : null);
+    if (!geminiKey) {
+        throw new Error("Clé GEMINI_API_KEY absente pour le secours OCR visuel.");
+    }
+
+    const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+    const payload = {
+        contents: [{
+            parts: [
+                { text: "Tu es Nyx. Lis et retranscris fidèlement l'intégralité du texte, des idées, des schémas et de la structure de cette présentation ou document PDF." },
+                {
+                    inline_data: {
+                        mime_type: "application/pdf",
+                        data: buffer.toString('base64')
+                    }
+                }
+            ]
+        }]
+    };
+
+    const resGemini = await axios.post(urlGemini, payload, { headers: { 'Content-Type': 'application/json' } });
+    const texteExtrait = resGemini.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!texteExtrait) {
+        throw new Error("Document vide ou sans OCR (échec de l'extraction visuelle).");
+    }
+
+    return texteExtrait.trim();
 }
 
 async function lireDocxSecurise(fileId) {
