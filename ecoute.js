@@ -1322,10 +1322,10 @@ async function lirePdfSecurise(fileId) {
             return data.text.trim();
         }
     } catch (err) {
-        console.warn("Échec pdfParse, passage au fallback visuel...", err.message);
+        console.warn("Échec pdfParse, passage au secours visuel...", err.message);
     }
 
-    // 2. Secours multimodal : lecture visuelle directe par Gemini 3.1
+    // 2. Clé Gemini active
     const geminiKey = process.env.GEMINI_API_KEY_FREE
                    || process.env.GEMINI_API_KEY_PAID
                    || process.env.GEMINI_API_KEY;
@@ -1334,9 +1334,15 @@ async function lirePdfSecurise(fileId) {
         throw new Error("Clé GEMINI_API_KEY_FREE ou GEMINI_API_KEY_PAID absente sur Render.");
     }
 
-    const geminiModel = process.env.GEMINI_MODEL || "gemini-3.1-flash";
-    const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${geminiKey}`;
+    // 3. Modèles de la génération 3 en vigueur
+    const modelesGamme3 = [
+        process.env.GEMINI_MODEL,
+        "gemini-3.5-flash",
+        "gemini-3-flash",
+        "gemini-3.6-flash"
+    ].filter(Boolean);
 
+    const base64Data = buffer.toString('base64');
     const payload = {
         contents: [{
             parts: [
@@ -1344,21 +1350,35 @@ async function lirePdfSecurise(fileId) {
                 {
                     inline_data: {
                         mime_type: "application/pdf",
-                        data: buffer.toString('base64')
+                        data: base64Data
                     }
                 }
             ]
         }]
     };
 
-    const resGemini = await axios.post(urlGemini, payload, { headers: { 'Content-Type': 'application/json' } });
-    const texteExtrait = resGemini.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    let erreurRetour = null;
 
-    if (!texteExtrait) {
-        throw new Error("Document vide ou sans OCR (échec de l'extraction visuelle).");
+    for (const model of modelesGamme3) {
+        try {
+            const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+            const resGemini = await axios.post(urlGemini, payload, { 
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 30000 
+            });
+
+            const texteExtrait = resGemini.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (texteExtrait && texteExtrait.trim().length > 0) {
+                console.log(`[PDF LECTURE] Succès avec : ${model}`);
+                return texteExtrait.trim();
+            }
+        } catch (err) {
+            erreurRetour = err;
+            console.warn(`[PDF LECTURE] Modèle ${model} non joignable (HTTP ${err.response?.status || 'ERR'})`);
+        }
     }
 
-    return texteExtrait.trim();
+    throw new Error(`Échec de lecture visuelle : ${erreurRetour?.response?.data?.error?.message || erreurRetour?.message || "Modèles 3.x inaccessibles"}`);
 }
 
 async function lireDocxSecurise(fileId) {
