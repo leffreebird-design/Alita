@@ -1364,7 +1364,7 @@ async function lirePdfSecurise(fileId) {
             const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
             const resGemini = await axios.post(urlGemini, payload, { 
                 headers: { 'Content-Type': 'application/json' },
-                timeout: 30000 
+                timeout: 120000 
             });
 
             const texteExtrait = resGemini.data?.candidates?.[0]?.content?.parts?.[0]?.text;
