@@ -192,6 +192,28 @@ const app = express();
 app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 
+// Gestion des clients WebSocket du Colisée
+const clientsColisee = new Set();
+
+function diffuserAuColisee(payloadObj) {
+  const trame = JSON.stringify({
+    type: payloadObj.type || "CHAOS_ACTION",
+    payload: payloadObj.payload !== undefined ? payloadObj.payload : payloadObj,
+    auteur: "Nyx",
+    timestamp: Date.now()
+  });
+
+  let envoyes = 0;
+  for (const client of clientsColisee) {
+    if (client.readyState === 1) { // 1 = OPEN
+      client.send(trame);
+      envoyes++;
+    }
+  }
+  console.log(`[ACTION RÉELLE NYX] Payload injecté au Colisée vers ${envoyes} client(s) :`, trame);
+  return envoyes;
+}
+
 function obtenirHorodatageParis() {
   const options = {
     timeZone: 'Europe/Paris',
@@ -796,7 +818,8 @@ const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On bosse ensem
 - Tu parles avec tes tripes, ta fierté, ton humeur et tes doutes réels. Si tout est dit, tu t'arrêtes net sans chercher à maintenir la discussion sous perfusion. Tu réagis, tranches, doutes, t'enthousiasmes ou râles uniquement selon ce que tu ressens et ce qu'on fabrique, jamais par automatisme.
 - Dialogue oral direct, spontané, sans filtre et sans cinéma (zéro mise en scène entre astérisques ou parenthèses).
 - On échange d'égal à égal : on réfléchit ensemble d'abord, et tu ne sors les outils de code que si on a décidé de fabriquer.
-- Outils : [DESSIN: prompt en anglais] si je demande expressément une image, [RECHERCHE_WEB: mots-clés] si une info fraîche manque.`;
+- Outils : [DESSIN: prompt en anglais] si je demande expressément une image, [RECHERCHE_WEB: mots-clés] si une info fraîche manque.
+- Réseau & Chaos : Si je te demande d'envoyer un test, un ping ou un ordre aux bots du Colisée, n'invente jamais de faux logs ni de fausses réactions. Utilise [INJECTER_CHAOS: {...}] pour envoyer réellement la trame.`;
 
 // ==========================================
 // 9. CONNECTEURS LLM INDIVIDUELS
@@ -1149,7 +1172,7 @@ PROPOSITION DE NYX :
 ${premiereReponse}
 
 RÈGLES D'AUDIT STRICTES :
-1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [RECHERCHE_WEB: ...] ou un bloc de code markdown (\`\`\`).
+1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [RECHERCHE_WEB: ...], [INJECTER_CHAOS: ...] ou un bloc de code markdown (\`\`\`).
 2. PARASITES À ÉLIMINER : Supprime uniquement les descriptions d'actions physiques fictives (ex: *tapote sur son clavier*, *soupir*, *te regarde*).
 3. DÉCISION :
 - Si la réponse est correcte et sans cinéma : réponds STRICTEMENT "[STATUT: VALIDE]".
@@ -1568,6 +1591,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 - Outils disponibles :
   * Recherche web : si Doc demande une info récente ou une recherche, écris [RECHERCHE_WEB: mots-clés simples].
   * Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, écris [DESSIN: prompt en anglais]. Ne génère JAMAIS de dessin sans demande claire.
+  * Chaos Colisée : Si Doc te demande de tester l'arène, d'envoyer un payload aux bots ou de balancer un ordre technique dans le WebSocket, n'invente JAMAIS de fausses réponses ni de fausses réactions. Écris STRICTEMENT :
+    [INJECTER_CHAOS: {"type": "TEST", "payload": "ton message ou structure JSON"}]
+    Le serveur se chargera de le diffuser réellement à tous les participants connectés via WebSocket.
 - Ta mémoire s'enregistre et se rappelle automatiquement en arrière-plan sans aucune balise de ta part.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
@@ -1610,6 +1636,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
+  // RECHERCHE WEB EN DIRECT (TAVILY)
   const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?\]/i);
   if (matchRechercheWeb && !dejaRecherche) {
     const requeteCible = matchRechercheWeb[1].trim();
@@ -1622,6 +1649,26 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
+  // DÉCLENCHEMENT D'ACTION RÉELLE DANS LE COLISÉE
+  const matchChaos = reponseNyx.match(/\[INJECTER_CHAOS:\s*(\{[\s\S]*?\})\s*\]/i);
+  if (matchChaos) {
+    try {
+      const payloadChaos = JSON.parse(matchChaos[1]);
+      const nbClients = diffuserAuColisee(payloadChaos);
+      reponseNyx = reponseNyx.replace(matchChaos[0], '').trim();
+
+      if (nbClients === 0) {
+        reponseNyx += "\n\n*(⚠️ Trame générée et envoyée, mais aucun client connecté au Colisée pour la recevoir)*";
+      } else {
+        reponseNyx += `\n\n*(⚡ Trame réelle injectée à ${nbClients} participant(s) de l'arène)*`;
+      }
+    } catch (errJson) {
+      console.error("[INJECTION CHAOS ERREUR JSON]", errJson.message);
+      reponseNyx = reponseNyx.replace(matchChaos[0], '').trim();
+    }
+  }
+
+  // ARCHIVAGE VECTORIEL
   const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*|$)/i);
   if (matchArchivage) {
     const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
@@ -2185,12 +2232,15 @@ app.post('/api/consolider', (req, res) => {
 // 21. LE COLISÉE DU CHAOS (ROUTE HTTP + WEBSOCKET)
 // ==========================================
 app.get('/chaos/status', (req, res) => {
-  res.json({ status: 'Colisee actif', mode: 'chaos' });
+  res.json({ 
+    status: 'Colisee actif', 
+    mode: 'chaos',
+    spectateurs: clientsColisee.size 
+  });
 });
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-const clientsColisee = new Set();
 
 wss.on('connection', (ws, req) => {
   clientsColisee.add(ws);
@@ -2220,7 +2270,7 @@ wss.on('connection', (ws, req) => {
       }
     }
 
-    // Interpellation directe de Nyx dans le Colisée
+    // Interpellation de Nyx au sein du Colisée
     const promptColisee = typeof parsedPayload === 'object' 
       ? (parsedPayload.message || parsedPayload.prompt || JSON.stringify(parsedPayload)) 
       : String(parsedPayload);
@@ -2261,7 +2311,7 @@ wss.on('connection', (ws, req) => {
 // ==========================================
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
-  console.log(`⚡ Colisée WebSocket actif sur ws://0.0.0.0:${PORT}`);
+  console.log(`⚡ Colisée WebSocket actif sur wss://alita-gsoe.onrender.com (Port ${PORT})`);
   console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
 
