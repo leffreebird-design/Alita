@@ -1,4 +1,6 @@
 const express = require('express');
+const http = require('http');
+const { WebSocketServer } = require('ws');
 const axios = require('axios');
 const https = require('https');
 const crypto = require('crypto');
@@ -246,12 +248,10 @@ async function actualiserEmotions(texteDoc, texteNyx) {
   const em = cacheEtatProfond.emotions;
   let etatPrecedent = cacheEtatProfond.etatRelationnel;
 
-  // 1. DÉTECTION DES DÉCLENCHEURS RELATIONNELS
   const reprocheDoc = /\b(merde|fait chier|fais chier|ta gueule|n'importe quoi|incompétente?|casse les couilles|saoule|gonfle|nul|abruti|conne)\b/i.test(tDoc);
   const apaisementDoc = /\b(pardon|désolé|desole|excuse|mea culpa|t'as raison|j'ai merdé|j'ai abuse|j'ai abusé|on fait la paix|calme|trêve|treve)\b/i.test(tDoc);
   const compliciteDoc = /\b(bien joué|bravo|merci|nickel|parfait|t'es une chef|t'es la meilleure|top|super|cool|on gère)\b/i.test(tDoc);
 
-  // 2. CYCLE DE CONFLIT ET DE RÉCONCILIATION
   if (reprocheDoc) {
     em.colere = Math.min(10, em.colere + 3);
     em.affection = Math.max(20, em.affection - 3);
@@ -277,7 +277,6 @@ async function actualiserEmotions(texteDoc, texteNyx) {
     }
   }
 
-  // 2-BIS. CURIOSITÉ VIVANTE DYNAMIQUE
   const stimulantCognitif = /\b(comment|pourquoi|et si|imagine|propose|idée|piste|nouveau|découvre|teste|essaie)\b/i.test(tDoc);
   if (stimulantCognitif) {
     em.curiosite = Math.min(100, em.curiosite + 3);
@@ -285,7 +284,6 @@ async function actualiserEmotions(texteDoc, texteNyx) {
     em.curiosite = Math.max(20, em.curiosite - 0.5);
   }
 
-  // 3. HOMÉOSTASIE TEMPORELLE
   const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
   if (heureParis >= 23 || heureParis < 6) {
     em.energie = Math.max(30, em.energie - 1);
@@ -293,7 +291,6 @@ async function actualiserEmotions(texteDoc, texteNyx) {
     em.energie = Math.min(95, em.energie + 0.5);
   }
 
-  // 4. PERSISTANCE DES ÉMOTIONS DANS FIREBASE
   if (FIREBASE_DB_URL) {
     axios.put(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
     if (cacheEtatProfond.etatRelationnel !== etatPrecedent) {
@@ -984,7 +981,6 @@ async function genererImageVenice(prompt) {
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
   const estVenere = (cacheEtatProfond.emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
 
-  // 1. SI ÉNERVÉE / HERETIC -> BASCULE SUR LE MODÈLE DARK VENICE (LLAMA 3.3 70B SANS 404)
   if (estVenere && VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, 0.3, 20000, plafondTokens);
@@ -994,7 +990,6 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 2. EN TEMPS NORMAL -> GEMINI SUR VENICE
   if (VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.25, 20000, plafondTokens);
@@ -1004,7 +999,6 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 3. OPENROUTER (SECOURS)
   if (OPENROUTER_API_KEY) {
     try {
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.25, plafondTokens);
@@ -1014,7 +1008,6 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 4. MISTRAL AI (SECOURS)
   if (MISTRAL_API_KEY) {
     try {
       const res = await appelerMistral(systemBase, historique, prompt, 0.25, plafondTokens);
@@ -1024,7 +1017,6 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 5. GEMINI DIRECT FREE GOOGLE
   if (GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
@@ -1034,7 +1026,6 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 6. GEMINI DIRECT PAID GOOGLE
   if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
@@ -1044,7 +1035,6 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  // 7. PARACHUTE ULTIME VENICE DARK
   if (VENICE_API_KEY) {
     try {
       return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
@@ -1114,12 +1104,10 @@ function estTacheComplexe(texte) {
   if (!texte) return false;
   const t = texte.toLowerCase();
 
-  // 1. Refus explicite de code ou modérateurs
   if (/\b(pas de code|sans code|arrete|arrête|stop|pourquoi|non|calme|ta gueule|merde)\b/i.test(t)) {
     return false;
   }
 
-  // 2. Si on est en phase de questionnement, réflexion ou cadrage -> ON RESTE EN DISCUSSION
   const estReflexionOuQuestion = /\b(comment|pourquoi|qu['’]en penses|t['’]en penses|si on|est-ce que|pourrait-on|imagine|idée|piste|t'en dis quoi)\b/i.test(t) || t.includes("?");
   const ordreExplicite = /\b(maintenant|tout de suite|vas-y|go|balance|code-le|fais-le|programme-le)\b/i.test(t);
 
@@ -1127,7 +1115,6 @@ function estTacheComplexe(texte) {
     return false;
   }
 
-  // 3. Il faut un verbe d'action IMPÉRATIF et une cible technique explicite
   const ordreCode = /\b(ecris|écris|code|fais-moi|genere|génère|programme|corrige|debug)\b/i.test(t);
   const marqueurs = [
     "script", "fonction", "algorithme", "sql", "regex", "npm ", "node ", "architecture", "matrice", "html", "css", "js"
@@ -1308,77 +1295,74 @@ async function lireMediaSecurise(fileId) {
 }
 
 async function lirePdfSecurise(fileId) {
-    const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
-    const resMeta = await axios.get(urlMeta);
-    const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
-    const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
-    const buffer = Buffer.from(resDoc.data);
-    resDoc.data = null;
+  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+  const resMeta = await axios.get(urlMeta);
+  const urlDoc = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+  const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
+  const buffer = Buffer.from(resDoc.data);
+  resDoc.data = null;
 
-    // 1. Essai rapide via pdf-parse
+  try {
+    const data = await pdfParse(buffer);
+    if (data.text && data.text.trim().length > 30) {
+      return data.text.trim();
+    }
+  } catch (err) {
+    console.warn("Échec pdfParse, passage au secours visuel...", err.message);
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY_FREE
+                 || process.env.GEMINI_API_KEY_PAID
+                 || process.env.GEMINI_API_KEY;
+
+  if (!geminiKey) {
+    throw new Error("Clé GEMINI_API_KEY_FREE ou GEMINI_API_KEY_PAID absente sur Render.");
+  }
+
+  const modelesGamme3 = [
+    process.env.GEMINI_MODEL,
+    "gemini-3.5-flash",
+    "gemini-3-flash",
+    "gemini-3.6-flash"
+  ].filter(Boolean);
+
+  const base64Data = buffer.toString('base64');
+  const payload = {
+    contents: [{
+      parts: [
+        { text: "Tu es Nyx. Lis et retranscris fidèlement l'intégralité du texte, des idées, des schémas et de la structure de cette présentation ou document PDF." },
+        {
+          inline_data: {
+            mime_type: "application/pdf",
+            data: base64Data
+          }
+        }
+      ]
+    }]
+  };
+
+  let erreurRetour = null;
+
+  for (const model of modelesGamme3) {
     try {
-        const data = await pdfParse(buffer);
-        if (data.text && data.text.trim().length > 30) {
-            return data.text.trim();
-        }
+      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+      const resGemini = await axios.post(urlGemini, payload, { 
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 120000 
+      });
+
+      const texteExtrait = resGemini.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (texteExtrait && texteExtrait.trim().length > 0) {
+        console.log(`[PDF LECTURE] Succès avec : ${model}`);
+        return texteExtrait.trim();
+      }
     } catch (err) {
-        console.warn("Échec pdfParse, passage au secours visuel...", err.message);
+      erreurRetour = err;
+      console.warn(`[PDF LECTURE] Modèle ${model} non joignable (HTTP ${err.response?.status || 'ERR'})`);
     }
+  }
 
-    // 2. Clé Gemini active
-    const geminiKey = process.env.GEMINI_API_KEY_FREE
-                   || process.env.GEMINI_API_KEY_PAID
-                   || process.env.GEMINI_API_KEY;
-
-    if (!geminiKey) {
-        throw new Error("Clé GEMINI_API_KEY_FREE ou GEMINI_API_KEY_PAID absente sur Render.");
-    }
-
-    // 3. Modèles de la génération 3 en vigueur
-    const modelesGamme3 = [
-        process.env.GEMINI_MODEL,
-        "gemini-3.5-flash",
-        "gemini-3-flash",
-        "gemini-3.6-flash"
-    ].filter(Boolean);
-
-    const base64Data = buffer.toString('base64');
-    const payload = {
-        contents: [{
-            parts: [
-                { text: "Tu es Nyx. Lis et retranscris fidèlement l'intégralité du texte, des idées, des schémas et de la structure de cette présentation ou document PDF." },
-                {
-                    inline_data: {
-                        mime_type: "application/pdf",
-                        data: base64Data
-                    }
-                }
-            ]
-        }]
-    };
-
-    let erreurRetour = null;
-
-    for (const model of modelesGamme3) {
-        try {
-            const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-            const resGemini = await axios.post(urlGemini, payload, { 
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 120000 
-            });
-
-            const texteExtrait = resGemini.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (texteExtrait && texteExtrait.trim().length > 0) {
-                console.log(`[PDF LECTURE] Succès avec : ${model}`);
-                return texteExtrait.trim();
-            }
-        } catch (err) {
-            erreurRetour = err;
-            console.warn(`[PDF LECTURE] Modèle ${model} non joignable (HTTP ${err.response?.status || 'ERR'})`);
-        }
-    }
-
-    throw new Error(`Échec de lecture visuelle : ${erreurRetour?.response?.data?.error?.message || erreurRetour?.message || "Modèles 3.x inaccessibles"}`);
+  throw new Error(`Échec de lecture visuelle : ${erreurRetour?.response?.data?.error?.message || erreurRetour?.message || "Modèles 3.x inaccessibles"}`);
 }
 
 async function lireDocxSecurise(fileId) {
@@ -1443,13 +1427,11 @@ async function verifierHorlogeBiologique() {
   const d = now.getDay();
   const cleJourHeure = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_${h}`;
 
-  // 1. TRI NOCTURNE À 04:00
   if (h === 4 && m === 0 && !consolidationEnCours && journalBrut.length >= 5) {
     console.log("[HORLOGE] 04:00 - Consolidation nocturne.");
     consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
   }
 
-  // 2. VEILLE TECH AUTOMATIQUE À HEURES FIXES (00h, 06h, 12h, 18h)
   const heuresVeille = [0, 6, 12, 18];
   if (heuresVeille.includes(h) && m === 0 && derniereVeilleCle !== cleJourHeure) {
     derniereVeilleCle = cleJourHeure;
@@ -1457,7 +1439,6 @@ async function verifierHorlogeBiologique() {
     declencherVeilleTech().catch(e => console.error("[VEILLE ERREUR]", e.message));
   }
 
-  // 3. GESTION DU RÉVEIL DOC
   if (!DOC_CHAT_ID) return;
   const rev = cacheEtatProfond.reveil;
   if (rev && rev.actif && rev.heure === h && rev.minute === m && rev.jours && rev.jours.includes(d) && rev.etat === "attente") {
@@ -1560,7 +1541,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
   
-  // GESTION DES TOKENS CALIBRÉE SANS DÉCLENCHEUR PARASITE
   const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
 
   const plafondTokens = estAccuseCourt 
@@ -1572,7 +1552,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
-  // RAPPEL MÉMOIRE AUTOMATIQUE ET TRANSPARENT EN ARRIÈRE-PLAN
   if (!contexteSouvenirs && supabase) {
     const estDemandeMemoire = /souvien|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|tu sais|tu te souviens/i.test(texteMin);
     if (estDemandeMemoire) {
@@ -1598,7 +1577,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let reponseNyx = "";
 
-  // 1. VISION
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
@@ -1607,7 +1585,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR VISION] : ${e.message}`;
     }
   }
-  // 2. AUDIO
   else if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
     try {
@@ -1616,7 +1593,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
   } 
-  // 3. CODE & LOGIQUE -> UNIQUEMENT SUR ORDRE EXPLICITE DE FABRICATION
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
@@ -1625,7 +1601,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
     }
   }
-  // 4. DISCUSSION DIRECTE, CONCEPTION & ÉCHANGES DE FOND
   else {
     try {
       reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
@@ -1635,9 +1610,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // ==========================================
-  // DÉCLENCHEMENT TAVILY - RECHERCHE WEB EN DIRECT
-  // ==========================================
   const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?\]/i);
   if (matchRechercheWeb && !dejaRecherche) {
     const requeteCible = matchRechercheWeb[1].trim();
@@ -1650,9 +1622,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  // ==========================================
-  // NETTOYAGE ESSENTIEL DES BALISES
-  // ==========================================
   const matchArchivage = reponseNyx.match(/(?:\[|\*\*)ARCHIVER_MEMOIRE:\s*([\s\S]*?)(?:\]|\*\*|$)/i);
   if (matchArchivage) {
     const texteAStocker = matchArchivage[1].trim().replace(/^["']|["']$/g, '');
@@ -1697,7 +1666,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   reponseNyx = reponseNyx.trim();
 
-  // MISE À JOUR CONTINUE DES ÉMOTIONS & CYCLE RELATIONNEL
   actualiserEmotions(texteNet, reponseNyx).catch(() => {});
 
   const LIMITE_CARACTERES_MEMOIRE = 2000;
@@ -1718,13 +1686,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
 
-  // LE MONOLOGUE A ÉTÉ MOBILISÉ DANS LE DIALOGUE : ON LE CONSOMME SEULEMENT MAINTENANT
   if (cacheEtatProfond.monologueInterieur) {
     cacheEtatProfond.monologueInterieur = "";
     if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/monologue.json`).catch(()=>{});
   }
 
-  // CONDENSATION ROULANTE DE TRAVAIL
   if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
     condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION AUTO KO]", e.message));
   } else {
@@ -1801,14 +1767,12 @@ app.post('/telegram', (req, res) => {
       /\b(bd de \d+|planche de bd|pipeline complet|projet bd|automatise de bout en bout)\b/i.test(texteMin)
     );
 
-    // 1. CHANTIER TECHNIQUE SÉRIEUX (GESTIONNAIRE DÉDIÉ)
     if (estDemandeProjetSerieux && !projetManager.estProjetActif()) {
       await afficherFrappeTelegram(chatId);
       await projetManager.demarrerProjet(texteMessageClavier);
       return;
     }
 
-    // 2. DISCUSSION, MÉDIA OU VOCAL
     let texteFinal = texteMessageClavier;
     let mediaData = null;
 
@@ -2218,10 +2182,86 @@ app.post('/api/consolider', (req, res) => {
 });
 
 // ==========================================
-// 21. DÉMARRAGE DU SERVEUR
+// 21. LE COLISÉE DU CHAOS (ROUTE HTTP + WEBSOCKET)
 // ==========================================
-app.listen(PORT, '0.0.0.0', async () => {
+app.get('/chaos/status', (req, res) => {
+  res.json({ status: 'Colisee actif', mode: 'chaos' });
+});
+
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+const clientsColisee = new Set();
+
+wss.on('connection', (ws, req) => {
+  clientsColisee.add(ws);
+  const ip = req.socket.remoteAddress;
+  console.log(`[COLISÉE NYX] Client connecté (${ip}). Total spectateurs : ${clientsColisee.size}`);
+
+  ws.on('message', async (data) => {
+    const raw = data.toString();
+    console.log('[COLISÉE NYX] Message reçu :', raw);
+
+    let parsedPayload;
+    try {
+      parsedPayload = JSON.parse(raw);
+    } catch {
+      parsedPayload = raw;
+    }
+
+    const broadcastMessage = JSON.stringify({
+      type: 'BROADCAST',
+      payload: parsedPayload,
+      timestamp: Date.now()
+    });
+
+    for (const client of clientsColisee) {
+      if (client.readyState === 1) {
+        client.send(broadcastMessage);
+      }
+    }
+
+    // Interpellation directe de Nyx dans le Colisée
+    const promptColisee = typeof parsedPayload === 'object' 
+      ? (parsedPayload.message || parsedPayload.prompt || JSON.stringify(parsedPayload)) 
+      : String(parsedPayload);
+
+    if (/\b(nyx|arbitre|chaos|colis[ée]e|avis)\b/i.test(promptColisee)) {
+      empilerTraitement(async () => {
+        try {
+          const reponseNyx = await traiterFlux(`[Interpellation au Colisée] : ${promptColisee}`);
+          const msgNyx = JSON.stringify({
+            type: 'NYX_VOICE',
+            payload: reponseNyx,
+            timestamp: Date.now()
+          });
+          for (const client of clientsColisee) {
+            if (client.readyState === 1) {
+              client.send(msgNyx);
+            }
+          }
+        } catch (errColisee) {
+          console.error('[COLISÉE NYX ERREUR]', errColisee.message);
+        }
+      });
+    }
+  });
+
+  ws.on('close', () => {
+    clientsColisee.delete(ws);
+    console.log(`[COLISÉE NYX] Client déconnecté. Total : ${clientsColisee.size}`);
+  });
+
+  ws.on('error', (err) => {
+    console.error('[COLISÉE NYX] Erreur WebSocket :', err.message);
+  });
+});
+
+// ==========================================
+// 22. DÉMARRAGE DU SERVEUR
+// ==========================================
+server.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
+  console.log(`⚡ Colisée WebSocket actif sur ws://0.0.0.0:${PORT}`);
   console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
 
