@@ -254,6 +254,7 @@ async function initialiserCache() {
     if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
     if (resFil.data && resFil.data.fil) cacheEtatProfond.filConducteur = resFil.data.fil;
     if (resMono.data && resMono.data.pensee) cacheEtatProfond.monologueInterieur = resMono.data.pensee;
+    if (resReve.data && resReve.data.reve) cacheEtatProfond.dernierReve = resReve.data.reve;
     if (resVol.data && resVol.data.timestamp) {
       limiteurVolition.dernierActionTimestamp = Number(resVol.data.timestamp) || 0;
     }
