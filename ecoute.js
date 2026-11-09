@@ -231,7 +231,7 @@ function obtenirHorodatageParis() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
@@ -240,7 +240,8 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/monologue.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/volition.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/volition.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
