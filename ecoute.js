@@ -71,49 +71,7 @@ async function lirePdfSecurise(fileId) {
 
     throw new Error(`Échec de lecture visuelle : ${erreurRetour?.response?.data?.error?.message || erreurRetour?.message || "Modèles 3.x inaccessibles"}`);
 }
-En basculant sur gemini-3.5-flash ou gemini-3-flash, la requête s'arrête d'interroger des endpoints dépréciés et l'ingestion du PDF peut enfin passer sans 404.
 
-je remplace ca ?
-
-Dans ton fichier ecoute.js, remplace directement l'intégralité de la fonction lirePdfSecurise (qui commence vers la ligne 1310 et se termine juste avant async function lireDocxSecurise) par ce nouveau bloc.
-
-Voici le rappel des 3 étapes rapides :
-
-Sélectionne et efface tout le bloc async function lirePdfSecurise(fileId) { ... } existant.
-
-Colle la version avec la boucle de repli sur la génération 3 (gemini-3.5-flash, gemini-3-flash, gemini-3.6-flash).
-
-Sauvegarde (Ctrl + S), puis pousse le commit sur GitHub/GitLab pour déclencher le redéploiement sur Render.
-
-Dès que Render affiche le log 🚀 NYX Core en ligne, renvoie-lui ton PDF : le script va tenter directement les endpoints actifs de la gamme 3, contourner la 404 et extraire le contenu visuel des slides.
-
-vas y ca me saoul lance le script complet ecoute .js avec les bonnes versions de gemini sans rien modifier d autre que ce qu on vien de dire
-
-Je comprends parfaitement. Quand on a le nez dans la machine, la moindre erreur de syntaxe ou d'API devient insupportable. On va trancher dans le vif.
-
-Voici le fichier ecoute.js complet. Absolument rien d'autre n'a été touché à part la fonction lirePdfSecurise qui intègre maintenant proprement la gamme Gemini 3.x, les bonnes clés Render, et aucune déclaration en double.
-
-Tu peux copier tout ce bloc et écraser intégralement le contenu de ton fichier actuel :
-
-Nyx Core Script
-
-Pousse le script, laisse Render redémarrer, et donne-lui ce foutu PDF. Si elle bloque encore là-dessus, je me mets moi-même en erreur 404.
-
-toujours pas
-
-La bonne nouvelle, c'est que l'erreur 404 est définitivement réglée : l'API Google reconnaît le modèle, la clé d'API fonctionne et la connexion passe.
-
-Le blocage actuel vient de la coupure stricte à 30 secondes : timeout of 30000ms exceeded.   
-image_990b5e.png
-
-Traiter un fichier de 1,5 Mo contenant plusieurs diapositives graphiques, encoder le tout en base64 et laisser le modèle analyser visuellement chaque page prend en moyenne entre 45 et 90 secondes. Comme le paramètre timeout: 30000 était configuré dans la requête Axios, le script a lui-même coupé la communication avant que Gemini n'ait fini de renvoyer le texte.   
-image_990b5e.png
-+ 1
-
-La correction immédiate
-Dans ecoute.js, au niveau de la fonction lirePdfSecurise, il suffit de passer le timeout à 120000 (2 minutes) et d'ajuster le prompt pour accélérer le traitement :
-
-JavaScript
 async function lirePdfSecurise(fileId) {
     const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
     const resMeta = await axios.get(urlMeta);
