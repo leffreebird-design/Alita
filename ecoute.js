@@ -167,6 +167,7 @@ let derniereVeilleCle = "";
 let cacheEtatProfond = {
   filConducteur: "",
   monologueInterieur: "",
+  dernierReve: "", // <--- Retient sa dernière vision nocturne
   etatRelationnel: "symbiose",
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
   long_terme: {
