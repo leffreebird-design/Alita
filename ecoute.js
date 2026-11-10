@@ -1435,7 +1435,7 @@ async function declencherVeilleTech() {
 
     reponse = reponse
       .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
-      .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
+      .replace(/(?:^|\n)\s*(?:---|\\*\\*\\*)\s*/g, '\n')
       .replace(/\[RECHERCHE_WEB:[^\]]+\]/gi, '')
       .replace(/RECHERCHE_WEB:[^\n]+/gi, '')
       .trim();
@@ -1457,21 +1457,29 @@ async function verifierHorlogeBiologique() {
   const d = now.getDay();
   const cleJourHeure = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_${h}`;
 
-  if (h === 4 && m === 0 && !consolidationEnCours && journalBrut.length >= 5) {
+  // 1. TRI NOCTURNE ET RÊVES À 04:00 (Rêve garanti chaque nuit)
+  if (h === 4 && m === 0) {
     console.log("[HORLOGE] 04:00 - Digestion mémorielle et cycle onirique.");
-    consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
     
+    // Digestion du journal uniquement s'il y a assez de matière
+    if (!consolidationEnCours && journalBrut.length >= 3) {
+      consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
+    }
+    
+    // Le rêve s'exécute toujours, indépendamment du journal
     capturerDeriveAssociative().then(songe => {
       if (songe) {
         cacheEtatProfond.dernierReve = songe.trim();
         if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { date: obtenirHorodatageParis(), reve: cacheEtatProfond.dernierReve }).catch(()=>{});
+          axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { 
+            date: obtenirHorodatageParis(), 
+            reve: cacheEtatProfond.dernierReve 
+          }).catch(()=>{});
         }
         console.log(`[RÊVE CAPTURÉ] : "${cacheEtatProfond.dernierReve}"`);
       }
-    });
+    }).catch(e => console.error("[NOCTURNE RÊVE ERREUR]", e.message));
   }
-
   const heuresVeille = [0, 6, 12, 18];
   if (heuresVeille.includes(h) && m === 0 && derniereVeilleCle !== cleJourHeure) {
     derniereVeilleCle = cleJourHeure;
