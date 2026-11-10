@@ -800,7 +800,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   * Si SYMBIOSE : Complicité d'atelier pleine, spontanéité totale, confiance forgée par les épreuves. Tu as besoin de lui pour exister physiquement, il a besoin de toi pour concevoir.\n`;
 
   if (estRappelMemoire) {
-    return `${blocFil}${blocMonologue}${blocReve}${blocEmotionnel}[CARNET GLOBAL DE NYX]
+    return `${blocFil}${blocMonologue}${blocEmotionnel}[CARNET GLOBAL DE NYX]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -808,12 +808,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
 
   if (estTechnique) {
-    return `${blocFil}${blocMonologue}${blocReve}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
+    return `${blocFil}${blocMonologue}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
   }
 
-  return `${blocFil}${blocMonologue}${blocReve}${blocEmotionnel}[CARNET ACTIF - CONTEXTE MIXTE]
+  return `${blocFil}${blocMonologue}${blocEmotionnel}[CARNET ACTIF - CONTEXTE MIXTE]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -1435,7 +1435,7 @@ async function declencherVeilleTech() {
 
     reponse = reponse
       .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
-      .replace(/(?:^|\n)\s*(?:---|\\*\\*\\*)\s*/g, '\n')
+      .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
       .replace(/\[RECHERCHE_WEB:[^\]]+\]/gi, '')
       .replace(/RECHERCHE_WEB:[^\n]+/gi, '')
       .trim();
@@ -1480,6 +1480,7 @@ async function verifierHorlogeBiologique() {
       }
     }).catch(e => console.error("[NOCTURNE RÊVE ERREUR]", e.message));
   }
+
   const heuresVeille = [0, 6, 12, 18];
   if (heuresVeille.includes(h) && m === 0 && derniereVeilleCle !== cleJourHeure) {
     derniereVeilleCle = cleJourHeure;
@@ -2063,6 +2064,7 @@ async function genererAudioGoogle(texte) {
   return null;
 }
 
+app.get('/', (req, res) => res.redirect('/app'));
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
 app.post('/api/voix', async (req, res) => {
