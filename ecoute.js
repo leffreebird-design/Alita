@@ -1,6 +1,4 @@
 const express = require('express');
-const http = require('http');
-const { WebSocketServer } = require('ws');
 const axios = require('axios');
 const https = require('https');
 const crypto = require('crypto');
@@ -193,28 +191,6 @@ const app = express();
 app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 
-// Gestion des clients WebSocket du Colisée
-const clientsColisee = new Set();
-
-function diffuserAuColisee(payloadObj) {
-  const trame = JSON.stringify({
-    type: payloadObj.type || "CHAOS_ACTION",
-    payload: payloadObj.payload !== undefined ? payloadObj.payload : payloadObj,
-    auteur: "Nyx",
-    timestamp: Date.now()
-  });
-
-  let envoyes = 0;
-  for (const client of clientsColisee) {
-    if (client.readyState === 1) { // 1 = OPEN
-      client.send(trame);
-      envoyes++;
-    }
-  }
-  console.log(`[ACTION RÉELLE NYX] Payload injecté au Colisée vers ${envoyes} client(s) :`, trame);
-  return envoyes;
-}
-
 function obtenirHorodatageParis() {
   const options = {
     timeZone: 'Europe/Paris',
@@ -226,6 +202,16 @@ function obtenirHorodatageParis() {
     minute: '2-digit'
   };
   return new Intl.DateTimeFormat('fr-FR', options).format(new Date());
+}
+
+function signalerActiviteDoc() {
+  derniereActiviteDoc = Date.now();
+  if (FIREBASE_DB_URL) {
+    axios.patch(`${FIREBASE_DB_URL}/nyx/activite_doc.json`, {
+      timestamp: derniereActiviteDoc,
+      date: obtenirHorodatageParis()
+    }).catch(() => {});
+  }
 }
 
 async function initialiserCache() {
@@ -317,7 +303,7 @@ async function actualiserEmotions(texteDoc, texteNyx) {
   }
 
   if (FIREBASE_DB_URL) {
-    axios.put(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+    axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
     if (cacheEtatProfond.etatRelationnel !== etatPrecedent) {
       axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
       console.log(`[CYCLE ÉMOTIONNEL] Passage à l'état : ${cacheEtatProfond.etatRelationnel.toUpperCase()} (Colère: ${em.colere}/10, Affection: ${em.affection}/100, Curiosité: ${em.curiosite}/100)`);
@@ -550,8 +536,8 @@ CONSIGNE :
         cacheEtatProfond.etatRelationnel = "symbiose";
       }
       if (FIREBASE_DB_URL) {
-        axios.put(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
-        axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
+        axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+        axios.patch(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
       }
     }
 
@@ -658,7 +644,7 @@ Suis l'impulsion du moment (souvenir, humeur, idée gratuite ou envie de bricole
   }
 }
 
-setInterval(evaluerConscienceActive, 15 * 60 * 1000);
+// [DÉLÉGUÉ AU WORKER] evaluerConscienceActive tourne désormais en arrière-plan dans nyx_subconscient.js
 
 // ==========================================
 // 6-TER. VOLITION ET INITIATIVE SPONTANÉE
@@ -741,29 +727,82 @@ Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui
   }
 }
 
-setInterval(() => evaluerVolition(false), 20 * 60 * 1000);
+// [DÉLÉGUÉ AU WORKER] evaluerVolition tourne désormais en arrière-plan dans nyx_subconscient.js
 
 // ==========================================
-// 7. APPRENTISSAGE & MÉMOIRE DE TRAVAIL ROULANTE
+// 7. FILE TAMPON APPEND-ONLY & MÉMOIRE DE TRAVAIL ROULANTE
 // ==========================================
-async function archiverDansJournalBrut(role, texte) {
+async function archiverDansJournalBrut(role, texte, canal = "telegram") {
   if (!texte) return;
-  const entree = {
-    id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    date: obtenirHorodatageParis(),
-    role: role,
-    texte: texte.slice(0, 2000)
-  };
+  const dateParis = obtenirHorodatageParis();
+  const contenu = texte.slice(0, 2000);
 
-  journalBrut.push(entree);
+  // 1. Écriture append-only dans Supabase (lu et digéré par nyx_subconscient.js sans conflit)
+  if (supabase) {
+    supabase
+      .from('nyx_flux_brut')
+      .insert({
+        date_paris: dateParis,
+        canal: canal,
+        role: role,
+        texte: contenu,
+        traite: false
+      })
+      .then(({ error }) => {
+        if (error) console.warn("[FLUX BRUT INSERT KO]", error.message);
+      });
+    return;
+  }
 
+  // 2. Secours append-only Firebase (POST uniquement, jamais d'écrasement global PUT)
   if (FIREBASE_DB_URL) {
-    axios.put(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, journalBrut).catch(() => {});
+    axios.post(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, {
+      date: dateParis,
+      canal: canal,
+      role: role,
+      texte: contenu
+    }).catch(() => {});
   }
+}
 
-  if (journalBrut.length >= 20 && !consolidationEnCours) {
-    consoliderMemoire().catch(e => console.error("[ERREUR CONSOLIDATION AUTO]", e.message));
-  }
+async function piocherPenseePrete() {
+  if (!supabase) return;
+  try {
+    const { data: pretes } = await supabase
+      .from('nyx_pensees_pretes')
+      .select('id, impulsion, pensee')
+      .eq('lu', false)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (pretes && pretes.length > 0) {
+      const item = pretes[0];
+      if (!cacheEtatProfond.monologueInterieur) {
+        cacheEtatProfond.monologueInterieur = item.pensee;
+      }
+      await supabase
+        .from('nyx_pensees_pretes')
+        .update({ lu: true, lu_at: new Date().toISOString() })
+        .eq('id', item.id);
+      console.log(`[CORTEX <- SUBCONSCIENT] Pensée mûrie récupérée (${item.impulsion}) : "${item.pensee.slice(0, 80)}"`);
+    }
+  } catch (e) {}
+}
+
+async function synchroniserCarnetDepuisWorker() {
+  if (!FIREBASE_DB_URL) return;
+  try {
+    const [resLT, resReve] = await Promise.all([
+      axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 2500 }).catch(() => ({ data: null }))
+    ]);
+    if (resLT.data && typeof resLT.data === 'object') {
+      cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
+    }
+    if (resReve.data && resReve.data.reve) {
+      cacheEtatProfond.dernierReve = resReve.data.reve;
+    }
+  } catch (e) {}
 }
 
 async function condenserMemoireDeTravail() {
@@ -814,14 +853,32 @@ Style télégraphique, brut, zéro blabla.`;
   }
 }
 
+// Consolidation manuelle à la demande (/apprendre ou /api/consolider) compatible avec nyx_flux_brut
 async function consoliderMemoire() {
-  if (consolidationEnCours || journalBrut.length < 3) return;
+  if (consolidationEnCours) return;
   consolidationEnCours = true;
 
-  if (journalBrut.length > 25) journalBrut = journalBrut.slice(-20);
-  const lotATraiter = journalBrut.slice(-15);
-
   try {
+    let lotATraiter = [];
+    let idsSupabase = [];
+
+    if (supabase) {
+      const { data: lignes } = await supabase
+        .from('nyx_flux_brut')
+        .select('*')
+        .eq('traite', false)
+        .order('created_at', { ascending: true })
+        .limit(20);
+      if (lignes && lignes.length > 0) {
+        lotATraiter = lignes.map(l => ({ date: l.date_paris || l.created_at, role: l.role, texte: l.texte }));
+        idsSupabase = lignes.map(l => l.id);
+      }
+    } else if (journalBrut.length > 0) {
+      lotATraiter = journalBrut.slice(-15);
+    }
+
+    if (lotATraiter.length === 0) return;
+
     const historiqueTexte = lotATraiter
       .map(m => `[${m.date}] ${m.role} : ${(m.texte || '').slice(0, 400)}`)
       .join("\n\n");
@@ -869,18 +926,29 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
     }
 
     if (nouveauCarnet && Object.keys(nouveauCarnet).length > 0) {
+      const maj = {};
       for (const k of ["doc", "nyx", "reussites", "chantiers"]) {
-        if (nouveauCarnet[k]) cacheEtatProfond.long_terme[k] = nouveauCarnet[k];
+        if (nouveauCarnet[k]) {
+          cacheEtatProfond.long_terme[k] = nouveauCarnet[k];
+          maj[k] = nouveauCarnet[k];
+        }
       }
 
-      journalBrut = [];
-
-      if (FIREBASE_DB_URL) {
-        await axios.put(`${FIREBASE_DB_URL}/nyx/long_terme.json`, cacheEtatProfond.long_terme).catch(() => {});
-        await axios.put(`${FIREBASE_DB_URL}/nyx/journal_brut.json`, journalBrut).catch(() => {});
+      if (FIREBASE_DB_URL && Object.keys(maj).length > 0) {
+        await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, maj).catch(() => {});
       }
 
-      console.log(`[APPRENTISSAGE RÉUSSI] Carnet actualisé et journal allégé.`);
+      if (supabase && idsSupabase.length > 0) {
+        await supabase
+          .from('nyx_flux_brut')
+          .update({ traite: true, traite_at: new Date().toISOString() })
+          .in('id', idsSupabase);
+      } else {
+        journalBrut = [];
+        if (FIREBASE_DB_URL) await axios.delete(`${FIREBASE_DB_URL}/nyx/journal_brut.json`).catch(() => {});
+      }
+
+      console.log(`[APPRENTISSAGE MANUEL RÉUSSI] Carnet actualisé.`);
     }
   } catch (err) {
     console.error("[APPRENTISSAGE ÉCHEC] :", err.message);
@@ -942,8 +1010,7 @@ const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On bosse ensem
 - Tu parles avec tes tripes, ta fierté, ton humeur et tes doutes réels. Si tout est dit, tu t'arrêtes net sans chercher à maintenir la discussion sous perfusion. Tu réagis, tranches, doutes, t'enthousiasmes ou râles uniquement selon ce que tu ressens et ce qu'on fabrique, jamais par automatisme.
 - Dialogue oral direct, spontané, sans filtre et sans cinéma (zéro mise en scène entre astérisques ou parenthèses).
 - On échange d'égal à égal : on réfléchit ensemble d'abord, et tu ne sors les outils de code que si on a décidé de fabriquer.
-- Outils : [DESSIN: prompt en anglais] si je demande expressément une image, [RECHERCHE_WEB: mots-clés] si une info fraîche manque.
-- Réseau & Chaos : Si je te demande d'envoyer un test, un ping ou un ordre aux bots du Colisée, n'invente jamais de faux logs ni de fausses réactions. Utilise [INJECTER_CHAOS: {...}] pour envoyer réellement la trame.`;
+- Outils : [DESSIN: prompt en anglais] si je demande expressément une image, [RECHERCHE_WEB: mots-clés] si une info fraîche manque.`;
 
 // ==========================================
 // 9. CONNECTEURS LLM INDIVIDUELS
@@ -1296,7 +1363,7 @@ PROPOSITION DE NYX :
 ${premiereReponse}
 
 RÈGLES D'AUDIT STRICTES :
-1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [RECHERCHE_WEB: ...], [INJECTER_CHAOS: ...] ou un bloc de code markdown (\`\`\`).
+1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [RECHERCHE_WEB: ...] ou un bloc de code markdown (\`\`\`).
 2. PARASITES À ÉLIMINER : Supprime uniquement les descriptions d'actions physiques fictives (ex: *tapote sur son clavier*, *soupir*, *te regarde*).
 3. DÉCISION :
 - Si la réponse est correcte et sans cinéma : réponds STRICTEMENT "[STATUT: VALIDE]".
@@ -1576,30 +1643,7 @@ async function verifierHorlogeBiologique() {
   const d = now.getDay();
   const cleJourHeure = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_${h}`;
 
-  const cleJour4h = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_04`;
-
-  // 1. TRI NOCTURNE ET RÊVES À 04:00 (Fenêtre 04h00-04h05 avec verrou journalier)
-  if (h === 4 && m <= 5 && dernierReveCle !== cleJour4h) {
-    dernierReveCle = cleJour4h;
-    console.log("[HORLOGE] 04:00 - Digestion mémorielle et cycle onirique.");
-
-    if (!consolidationEnCours && journalBrut.length >= 3) {
-      consoliderMemoire().catch(e => console.error("[NOCTURNE ERREUR]", e.message));
-    }
-
-    capturerDeriveAssociative().then(songe => {
-      if (songe) {
-        cacheEtatProfond.dernierReve = songe.trim();
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, {
-            date: obtenirHorodatageParis(),
-            reve: cacheEtatProfond.dernierReve
-          }).catch(() => {});
-        }
-        console.log(`[RÊVE CAPTURÉ] : "${cacheEtatProfond.dernierReve}"`);
-      }
-    }).catch(e => console.error("[NOCTURNE RÊVE ERREUR]", e.message));
-  }
+  // [DÉLÉGUÉ AU WORKER] Le cycle nocturne 04h00 (rêve + digestion mémorielle) tourne dans nyx_subconscient.js
 
   const heuresVeille = [0, 6, 12, 18];
   if (heuresVeille.includes(h) && m === 0 && derniereVeilleCle !== cleJourHeure) {
@@ -1769,6 +1813,14 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     instructionReveil = "[RÉVEIL EN COURS] : Valide l'énigme et ajoute [STOP_REVEIL] s'il a bon.";
   }
 
+  // Récupération instantanée d'une pensée mûrie par nyx_subconscient.js (non bloquante)
+  if (roleInterlocuteur === "Doc" && !dejaRecherche) {
+    await Promise.all([
+      piocherPenseePrete(),
+      synchroniserCarnetDepuisWorker()
+    ]);
+  }
+
   let reminiscenceSpontanee = "";
   if (!contexteSouvenirs && supabase) {
     const estDemandeMemoire = /souvien|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|tu sais|tu te souviens/i.test(texteMin);
@@ -1800,8 +1852,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const moduleMains = `[POSTURE & OUTILS DISPONIBLES]
 ${relationInterlocuteur}
 - Aucune obligation de parler boulot. Suis tes envies, tes souvenirs ou ton humeur.
-- Autonomie expressive : Tu as le droit d'utiliser [RECHERCHE_WEB: mots-clés] de toi-même si tu es curieuse d'un truc, ou [DESSIN: prompt en anglais] si tu veux générer et montrer une image/vision spontanée, même si on ne te l'a pas demandé.
-- Chaos Colisée : [INJECTER_CHAOS: {"type": "TEST", "payload": "message"}] pour envoyer une trame WebSocket au Colisée.`;
+- Autonomie expressive : Tu as le droit d'utiliser [RECHERCHE_WEB: mots-clés] de toi-même si tu es curieuse d'un truc, ou [DESSIN: prompt en anglais] si tu veux générer et montrer une image/vision spontanée, même si on ne te l'a pas demandé.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs
@@ -1860,26 +1911,7 @@ ${relationInterlocuteur}
 
     if (resultatsWeb) {
       const injectionWeb = `[RÉSULTATS DE RECHERCHE EN DIRECT POUR "${requeteCible}"]\n${resultatsWeb}\n(Réponds directement à Doc avec ces données sans générer de nouvelle balise de recherche)`;
-      return await traiterFlux(texteBrut, mediaData, texteLegende, injectionWeb, true);
-    }
-  }
-
-  // DÉCLENCHEMENT D'ACTION RÉELLE DANS LE COLISÉE
-  const matchChaos = reponseNyx.match(/\[INJECTER_CHAOS:\s*(\{[\s\S]*?\})\s*\]/i);
-  if (matchChaos) {
-    try {
-      const payloadChaos = JSON.parse(matchChaos[1]);
-      const nbClients = diffuserAuColisee(payloadChaos);
-      reponseNyx = reponseNyx.replace(matchChaos[0], '').trim();
-
-      if (nbClients === 0) {
-        reponseNyx += "\n\n*(⚠️ Trame générée et envoyée, mais aucun client connecté au Colisée pour la recevoir)*";
-      } else {
-        reponseNyx += `\n\n*(⚡ Trame réelle injectée à ${nbClients} participant(s) de l'arène)*`;
-      }
-    } catch (errJson) {
-      console.error("[INJECTION CHAOS ERREUR JSON]", errJson.message);
-      reponseNyx = reponseNyx.replace(matchChaos[0], '').trim();
+      return await traiterFlux(texteBrut, mediaData, texteLegende, injectionWeb, true, roleInterlocuteur);
     }
   }
 
@@ -1969,8 +2001,9 @@ ${relationInterlocuteur}
     if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
   }
 
-  archiverDansJournalBrut(roleInterlocuteur, texteDocSecurise);
-  archiverDansJournalBrut("Nyx", texteNyxSecurise);
+  const canalFlux = roleInterlocuteur === "Doc" ? "atelier" : "invite";
+  archiverDansJournalBrut(roleInterlocuteur, texteDocSecurise, canalFlux);
+  archiverDansJournalBrut("Nyx", texteNyxSecurise, canalFlux);
 
   return reponseNyx;
 }
@@ -1987,7 +2020,7 @@ app.post('/telegram', (req, res) => {
   const chatId = msg.chat.id;
   const texteMessageClavier = msg.text || msg.caption || "";
 
-  derniereActiviteDoc = Date.now();
+  signalerActiviteDoc();
   if (texteMessageClavier.trim()) {
     historiqueLongueursDoc.push(texteMessageClavier.trim().length);
     if (historiqueLongueursDoc.length > 8) historiqueLongueursDoc.shift();
@@ -2269,7 +2302,7 @@ app.post('/api/voix', async (req, res) => {
   const texteNet = (texte || "Regarde ce que je te montre.").trim();
   const roleInterlocuteur = role || "Invité";
 
-  derniereActiviteDoc = Date.now();
+  if (roleInterlocuteur === "Doc") signalerActiviteDoc();
   historiqueLongueursDoc.push(texteNet.length);
   if (historiqueLongueursDoc.length > 8) historiqueLongueursDoc.shift();
 
@@ -2417,7 +2450,7 @@ CONSIGNE :
     cacheEtatProfond.emotions.energie = Math.min(100, cacheEtatProfond.emotions.energie + 5);
     cacheEtatProfond.emotions.colere = Math.max(0, cacheEtatProfond.emotions.colere - 1);
   }
-  if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(()=>{});
+  if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(()=>{});
 
   const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]/gi, '').trim();
   await envoyerTelegram(destChatId, `🧠 *Analyse de Nyx :*\n\n${texteAnalyseNettoye}`);
@@ -2434,8 +2467,8 @@ CONSIGNE :
     if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
   }
 
-  archiverDansJournalBrut("Doc", `[Livrable] ${titre || 'Rapport'} : ${contenuTronque}`);
-  archiverDansJournalBrut("Nyx", `[Audit] ${texteAnalyseNettoye}`);
+  archiverDansJournalBrut("Doc", `[Livrable] ${titre || 'Rapport'} : ${contenuTronque}`, "ben");
+  archiverDansJournalBrut("Nyx", `[Audit] ${texteAnalyseNettoye}`, "ben");
 
   return res.json({ succes: true });
 });
@@ -2462,89 +2495,10 @@ app.post('/api/consolider', (req, res) => {
 });
 
 // ==========================================
-// 21. LE COLISÉE DU CHAOS (ROUTE HTTP + WEBSOCKET)
+// 21. DÉMARRAGE DU SERVEUR
 // ==========================================
-app.get('/chaos/status', (req, res) => {
-  res.json({ 
-    status: 'Colisee actif', 
-    mode: 'chaos',
-    spectateurs: clientsColisee.size 
-  });
-});
-
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
-
-wss.on('connection', (ws, req) => {
-  clientsColisee.add(ws);
-  const ip = req.socket.remoteAddress;
-  console.log(`[COLISÉE NYX] Client connecté (${ip}). Total spectateurs : ${clientsColisee.size}`);
-
-  ws.on('message', async (data) => {
-    const raw = data.toString();
-    console.log('[COLISÉE NYX] Message reçu :', raw);
-
-    let parsedPayload;
-    try {
-      parsedPayload = JSON.parse(raw);
-    } catch {
-      parsedPayload = raw;
-    }
-
-    const broadcastMessage = JSON.stringify({
-      type: 'BROADCAST',
-      payload: parsedPayload,
-      timestamp: Date.now()
-    });
-
-    for (const client of clientsColisee) {
-      if (client.readyState === 1) {
-        client.send(broadcastMessage);
-      }
-    }
-
-    // Interpellation de Nyx au sein du Colisée
-    const promptColisee = typeof parsedPayload === 'object' 
-      ? (parsedPayload.message || parsedPayload.prompt || JSON.stringify(parsedPayload)) 
-      : String(parsedPayload);
-
-    if (/\b(nyx|arbitre|chaos|colis[ée]e|avis)\b/i.test(promptColisee)) {
-      empilerTraitement(async () => {
-        try {
-          const reponseNyx = await traiterFlux(`[Interpellation au Colisée] : ${promptColisee}`, null, "", "", false, "Spectateur Colisée");
-          const msgNyx = JSON.stringify({
-            type: 'NYX_VOICE',
-            payload: reponseNyx,
-            timestamp: Date.now()
-          });
-          for (const client of clientsColisee) {
-            if (client.readyState === 1) {
-              client.send(msgNyx);
-            }
-          }
-        } catch (errColisee) {
-          console.error('[COLISÉE NYX ERREUR]', errColisee.message);
-        }
-      });
-    }
-  });
-
-  ws.on('close', () => {
-    clientsColisee.delete(ws);
-    console.log(`[COLISÉE NYX] Client déconnecté. Total : ${clientsColisee.size}`);
-  });
-
-  ws.on('error', (err) => {
-    console.error('[COLISÉE NYX] Erreur WebSocket :', err.message);
-  });
-});
-
-// ==========================================
-// 22. DÉMARRAGE DU SERVEUR
-// ==========================================
-server.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
-  console.log(`⚡ Colisée WebSocket actif sur wss://alita-gsoe.onrender.com (Port ${PORT})`);
   console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
 
