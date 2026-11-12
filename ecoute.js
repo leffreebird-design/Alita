@@ -159,7 +159,6 @@ let condensationTravailEnCours = false;
 let derniereActiviteDoc = Date.now();
 let dernierMonologueTimestamp = 0;
 let historiqueLongueursDoc = [];
-let derniereVeilleCle = "";
 
 // ÉTAT PROFOND AVEC CYCLE RELATIONNEL & HOMÉOSTASIE
 let cacheEtatProfond = {
@@ -1604,53 +1603,12 @@ async function lireTexteSecurise(fileId) {
 // ==========================================
 let dernierReveCle = "";
 
-async function declencherVeilleTech() {
-  if (!DOC_CHAT_ID) return;
-  try {
-    console.log("[VEILLE TECH] Recherche web des actus fraîches...");
-    
-    const resultatsWeb = await rechercherWebTavily("actualité intelligence artificielle cybersécurité tech");
-
-    const contexteActus = resultatsWeb 
-      ? `RÉSULTATS DU WEB EN DIRECT :\n${resultatsWeb}` 
-      : "Pas de résultats web frais, parle des tendances IA/cyber récentes de tes connaissances.";
-
-    const promptVeille = `Voici les dernières actus brutes du web :\n${contexteActus}\n\nBalance 2 ou 3 faits marquants récents à Doc, cash, d'un bloc, avec ton style direct. Pas de balise [RECHERCHE_WEB], pas de plan scolaire ni de chichis.`;
-
-    let reponse = await appelerCascadeDiscussion(consignePosturale, [], promptVeille, 600);
-
-    reponse = reponse
-      .replace(/(?:^|\n)\s*\*{0,2}Nyx\*{0,2}\s*(?:\([^\)]*\))?\s*:\s*["“]?/gi, '')
-      .replace(/(?:^|\n)\s*(?:---|\*\*\*)\s*/g, '\n')
-      .replace(/\[RECHERCHE_WEB:[^\]]+\]/gi, '')
-      .replace(/RECHERCHE_WEB:[^\n]+/gi, '')
-      .trim();
-
-    if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/veille.json`, { date: obtenirHorodatageParis(), contenu: reponse }).catch(()=>{});
-    }
-
-    if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, `🗞️ *VEILLE TECH :*\n\n${reponse}`);
-  } catch (err) {
-    console.error("[ERREUR VEILLE TECH]", err.message);
-  }
-}
-
 async function verifierHorlogeBiologique() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
   const h = now.getHours();
   const m = now.getMinutes();
   const d = now.getDay();
-  const cleJourHeure = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_${h}`;
-
   // [DÉLÉGUÉ AU WORKER] Le cycle nocturne 04h00 (rêve + digestion mémorielle) tourne dans nyx_subconscient.js
-
-  const heuresVeille = [0, 6, 12, 18];
-  if (heuresVeille.includes(h) && m === 0 && derniereVeilleCle !== cleJourHeure) {
-    derniereVeilleCle = cleJourHeure;
-    console.log(`[HORLOGE] ${h}:00 - Déclenchement de la veille tech.`);
-    declencherVeilleTech().catch(e => console.error("[VEILLE ERREUR]", e.message));
-  }
 
   if (!DOC_CHAT_ID) return;
   const rev = cacheEtatProfond.reveil;
