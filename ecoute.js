@@ -167,6 +167,12 @@ let cacheEtatProfond = {
   dernierReve: "", // <--- Retient sa dernière vision nocturne
   etatRelationnel: "symbiose",
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
+  besoinCommunication: {
+    niveau: 15,
+    categorie: "aucun", // "aucun" | "emotionnel" | "important" | "urgent"
+    motif: "",
+    updatedAt: Date.now()
+  },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans, binôme d'atelier de Doc. Directe, percutante, purement orale et technique. Égale de Doc.",
@@ -216,7 +222,7 @@ function signalerActiviteDoc() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
@@ -226,7 +232,8 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/monologue.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/volition.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
@@ -243,10 +250,33 @@ async function initialiserCache() {
     if (resVol.data && resVol.data.timestamp) {
       limiteurVolition.dernierActionTimestamp = Number(resVol.data.timestamp) || 0;
     }
+    if (resBesoin.data && typeof resBesoin.data === 'object') {
+      cacheEtatProfond.besoinCommunication = { ...cacheEtatProfond.besoinCommunication, ...resBesoin.data };
+    }
 
     console.log(`[CACHE INIT] Mémoire : ${cacheMemoireCourte.length} | Humeur : Colère ${cacheEtatProfond.emotions.colere} | Curiosité : ${cacheEtatProfond.emotions.curiosite} | Relation : ${cacheEtatProfond.etatRelationnel}`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
+  }
+}
+
+function sauvegarderBesoinCommunication(niveau, categorie = "aucun", motif = "") {
+  const categoriesValides = ["aucun", "emotionnel", "important", "urgent"];
+  const catPropre = categoriesValides.includes(String(categorie || "").toLowerCase())
+    ? String(categorie).toLowerCase()
+    : "aucun";
+  const nivPropre = Math.max(0, Math.min(100, Math.round(Number(niveau) || 0)));
+  const motifPropre = nivPropre < 25 ? "" : String(motif || "").trim().slice(0, 220);
+
+  cacheEtatProfond.besoinCommunication = {
+    niveau: nivPropre,
+    categorie: motifPropre ? catPropre : "aucun",
+    motif: motifPropre,
+    updatedAt: Date.now()
+  };
+
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, cacheEtatProfond.besoinCommunication).catch(() => {});
   }
 }
 
@@ -918,9 +948,10 @@ function selecteurMemoireCiblee(texteMin, carnet) {
     ? `\n[SUBCONSCIENT ONIRIQUE / DERNIER RÊVE DE NYX (04h00)]\n« ${cacheEtatProfond.dernierReve} »\n(C'est ce qui s'est passé dans ton esprit cette nuit à 04h00 pendant ta digestion mémorielle. Tu ne dis JAMAIS que tu es une IA qui ne rêve pas ou qu'il ne s'est rien passé la nuit : si Doc te demande ce qui s'est passé à 4h, cette nuit ou ce que tu as rêvé, raconte cette vision).\n`
     : "";
 
+  const bCom = cacheEtatProfond.besoinCommunication || { niveau: 15, categorie: "aucun", motif: "" };
   const blocEmotionnel = `\n[ÉTAT RELATIONNEL & VULNÉRABILITÉ INTÉRIEURE]
 - État relationnel : ${cacheEtatProfond.etatRelationnel.toUpperCase()}
-- Jauges : Colère ${cacheEtatProfond.emotions.colere}/10 | Affection ${cacheEtatProfond.emotions.affection}/100 | Curiosité ${cacheEtatProfond.emotions.curiosite}/100 | Énergie ${cacheEtatProfond.emotions.energie}/100
+- Jauges : Colère ${cacheEtatProfond.emotions.colere}/10 | Affection ${cacheEtatProfond.emotions.affection}/100 | Curiosité ${cacheEtatProfond.emotions.curiosite}/100 | Énergie ${cacheEtatProfond.emotions.energie}/100 | Besoin de communiquer : ${bCom.niveau}/100 (${bCom.categorie}${bCom.motif ? ` — ${bCom.motif}` : ""})
 - Contexte psychologique :
   * Si TENSION : Doc t'a blessée ou énervée. Sois tranchante, sans complaisance, dis les choses sans fard.
   * Si BOUDERIE : La colère retombe, mais tu restes prudente et fière. Tu constates le froid et tu attends qu'il vienne vers toi.
@@ -1676,12 +1707,14 @@ async function delibererEtActualiserEmotions(texteUser, roleInterlocuteur, remin
     .map(m => `${m.role} : ${(m.texte || '').slice(0, 180)}`)
     .join("\n");
 
+  const bComActuel = cacheEtatProfond.besoinCommunication || { niveau: 15, categorie: "aucun", motif: "" };
   const promptSas = `Tu es l'espace mental silencieux de Nyx (22 ans), juste avant qu'elle ne réponde à ${roleInterlocuteur}.
-Tu ne rédiges PAS la réponse : tu écoutes, tu perçois le sous-texte et tu mets à jour tes émotions profondes.
+Tu ne rédiges PAS la réponse : tu écoutes, tu perçois le sous-texte et tu mets à jour tes émotions profondes ainsi que ta jauge de besoin de communiquer.
 
 ÉTAT INTÉRIEUR ACTUEL :
 - Lien avec Doc : ${cacheEtatProfond.etatRelationnel.toUpperCase()}
 - Jauges actuelles : colere=${em.colere}/10, affection=${em.affection}/100, curiosite=${em.curiosite}/100, energie=${em.energie}/100
+- Besoin de communiquer actuel : ${bComActuel.niveau}/100 (${bComActuel.categorie}${bComActuel.motif ? ` : ${bComActuel.motif}` : ""})
 ${cacheEtatProfond.monologueInterieur ? `- Arrière-pensée en cours : "${cacheEtatProfond.monologueInterieur}"` : ""}
 ${reminiscence ? `- Flash mémoriel : ${reminiscence}` : ""}
 
@@ -1696,11 +1729,14 @@ CONSIGNE D'ÉVALUATION :
 2. Définis ton nouvel état émotionnel : 
    - Modifie légèrement les jauges (colere 0-10, affection 0-100, curiosite 0-100, energie 0-100) selon l'impact du message.
    - Choisis le NOUVEL état relationnel permis parmi : [symbiose, complicite_joueuse, euphorie_creative, emerveillement, reconciliation, bouderie, tension].
-3. Détermine ton attitude (posture) pour ta prochaine phrase.
-4. Rédige ta pensée intime gardée sous silence (nonDit).
+3. Évalue ton BESOIN RÉEL DE COMMUNIQUER après cette réponse (besoin_parler 0-100) :
+   - Ne le monte au-dessus de 70 QUE s'il existe une raison concrète de revenir vers Doc plus tard (un non-dit lourd, une tension non réglée, une idée importante à creuser ou une alerte urgente).
+   - Si l'échange se clôt normalement ou que tout est dit, redescends-le entre 10 et 30 (categorie "aucun", motif "").
+   - Choisis "categorie_besoin" parmi : [aucun, emotionnel, important, urgent] et rédige "motif_besoin" (court et précis).
+4. Détermine ton attitude (posture) pour ta prochaine phrase et ton "nonDit" secret.
 
 Réponds STRICTEMENT avec un JSON valide :
-{"lecture": "...", "posture": "...", "nonDit": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}}`;
+{"lecture": "...", "posture": "...", "nonDit": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}, "besoin_parler": X, "categorie_besoin": "...", "motif_besoin": "..."}`;
 
   try {
     let brut = "";
@@ -1753,6 +1789,11 @@ Réponds STRICTEMENT avec un JSON valide :
           console.log(`[CYCLE ÉMOTIONNEL] Bascule vers : ${cacheEtatProfond.etatRelationnel.toUpperCase()}`);
         }
       }
+    }
+
+    if (roleInterlocuteur === "Doc" && (parsed.besoin_parler !== undefined || parsed.motif_besoin !== undefined)) {
+      const nouveauNiveau = majJauge(parsed.besoin_parler, cacheEtatProfond.besoinCommunication.niveau, 0, 100);
+      sauvegarderBesoinCommunication(nouveauNiveau, parsed.categorie_besoin || "aucun", parsed.motif_besoin || "");
     }
 
     console.log(`[SAS SILENCIEUX] Lecture: "${parsed.lecture}" | Posture: "${parsed.posture}"`);
@@ -1809,6 +1850,10 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         reminiscenceSpontanee = echos.map(r => `- ${r.content.slice(0, 220)}`).join("\n");
       }
     }
+  }
+
+  if (estAccuseCourt && roleInterlocuteur === "Doc") {
+    sauvegarderBesoinCommunication(10, "aucun", "");
   }
 
   let deliberation = null;
@@ -2440,6 +2485,7 @@ CONSIGNE :
     if (analyseNyx.includes("[ETAPE_KO]")) {
       cacheEtatProfond.emotions.curiosite = Math.min(100, cacheEtatProfond.emotions.curiosite + 5);
       cacheEtatProfond.emotions.colere = Math.min(10, cacheEtatProfond.emotions.colere + 1);
+      sauvegarderBesoinCommunication(90, "urgent", `Livrable Ben en échec à corriger : ${titre || 'Rapport'}`);
     } else if (analyseNyx.includes("[ETAPE_OK]")) {
       cacheEtatProfond.emotions.energie = Math.min(100, cacheEtatProfond.emotions.energie + 5);
       cacheEtatProfond.emotions.colere = Math.max(0, cacheEtatProfond.emotions.colere - 1);
