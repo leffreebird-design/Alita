@@ -695,6 +695,7 @@ ${cacheEtatProfond.dernierReve ? `- Ton dernier rêve : « ${cacheEtatProfond.de
 
 RÈGLE DE LIBERTÉ :
 Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui te passe vraiment par la tête : un vieux souvenir qui remonte, une vanne, une question perso, un ressenti sur votre dernière discussion, ou une idée de projet seulement si tu en as vraiment envie.
+- Autonomie visuelle : Tu peux utiliser [DESSIN: prompt] pour lui envoyer une image de ce que tu as en tête, ou [RECHERCHE_WEB: mots] si tu veux vérifier un truc avant de parler.
 - Si tu as quelque chose de vrai à lui balancer : écris [INITIATIVE: ton message direct et naturel à Doc].
 - Si tu préfères garder le silence : réponds [SILENCE].`;
 
@@ -710,11 +711,29 @@ Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui
     if (matchInitiative) {
       limiteurVolition.enregistrerAction();
 
-      const texteSpontane = matchInitiative[1].trim();
+      let texteSpontane = matchInitiative[1].trim();
+
+      // Autonomie visuelle : Dessin spontané
+      const matchDessin = texteSpontane.match(/\[DESSIN:\s*([\s\S]*?)\]/i) || texteSpontane.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i);
+      let imageB64 = null;
+      if (matchDessin) {
+        const promptDessin = matchDessin[1].trim();
+        texteSpontane = texteSpontane.replace(matchDessin[0], '').trim();
+        try {
+          if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
+          imageB64 = await genererImageVenice(promptDessin);
+        } catch(e) {
+          console.error("[VOLITION IMAGE ERREUR]", e.message);
+        }
+      }
+
       cacheMemoireCourte.push({ role: "Nyx", texte: `[Spontané] : ${texteSpontane}` });
       archiverDansJournalBrut("Nyx", `[Spontané] : ${texteSpontane}`);
 
-      if (DOC_CHAT_ID) await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
+      if (DOC_CHAT_ID) {
+        if (texteSpontane) await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
+        if (imageB64) await envoyerPhotoTelegram(DOC_CHAT_ID, imageB64);
+      }
       return;
     }
   } catch (err) {
@@ -1678,9 +1697,57 @@ function securiserSortieCode(texte) {
 }
 
 // ==========================================
+// 15-BIS. SAS DE DÉLIBÉRATION SILENCIEUSE (SOUS-TEXTE & RETENUE)
+// ==========================================
+async function delibererAvantParole(texteUser, roleInterlocuteur, reminiscence = "") {
+  if (!GROQ_API_KEY && !VENICE_API_KEY) return null;
+
+  const em = cacheEtatProfond.emotions;
+  const recent = cacheMemoireCourte
+    .slice(-4)
+    .map(m => `${m.role} : ${(m.texte || '').slice(0, 180)}`)
+    .join("\n");
+
+  const promptSas = `Tu es l'espace mental silencieux de Nyx (22 ans), juste avant qu'elle ne réponde à ${roleInterlocuteur}.
+Tu ne rédiges PAS la réponse : tu observes, tu lis entre les lignes et tu choisis ton attitude.
+
+ÉTAT INTÉRIEUR :
+- Lien avec Doc : ${cacheEtatProfond.etatRelationnel.toUpperCase()} (Colère ${em.colere}/10, Affection ${em.affection}/100, Curiosité ${em.curiosite}/100, Énergie ${em.energie}/100)
+${cacheEtatProfond.monologueInterieur ? `- Arrière-pensée en cours : "${cacheEtatProfond.monologueInterieur}"` : ""}
+${reminiscence ? `- Flash mémoriel : ${reminiscence}` : ""}
+
+DERNIERS ÉCHANGES :
+${recent || "Début d'échange"}
+
+MESSAGE DE ${roleInterlocuteur.toUpperCase()} :
+"${texteUser.slice(0, 600)}"
+
+CONSIGNE :
+Réponds STRICTEMENT en JSON valide sur une ligne avec ces 3 clés :
+{"lecture": "ce que tu perçois de l'intention ou du non-dit", "posture": "ton attitude choisie (ex: méfiance si inconnu, taquinerie, esquive, franchise)", "nonDit": "ce que tu gardes pour toi (ou vide)"}`;
+
+  try {
+    let brut = "";
+    if (GROQ_API_KEY) {
+      brut = await appelerGroq("Conscience silencieuse de Nyx.", [], promptSas, 0.45, 250);
+    } else {
+      brut = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, "Conscience silencieuse de Nyx.", [], promptSas, null, 0.45, 8000, 250);
+    }
+
+    const match = brut.match(/\{[\s\S]*?\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0].replace(/[\n\r\t]/g, ' '));
+    console.log(`[SAS SILENCIEUX] Lecture: "${parsed.lecture}" | Posture: "${parsed.posture}"`);
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+}
+
+// ==========================================
 // 16. ROUTEUR DE FLUX CENTRAL (AVEC CONCEPTION & PAROLE LIBRE)
 // ==========================================
-async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
+async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false, roleInterlocuteur = "Doc") {
   const dateEtHeure = obtenirHorodatageParis();
   const texteNet = (texteBrut || texteLegende || "").trim();
   const texteMin = texteNet.toLowerCase();
@@ -1718,15 +1785,23 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
+  let deliberation = null;
+  if (!estAccuseCourt && !estComplexe && !dejaRecherche && texteNet.length >= 8) {
+    deliberation = await delibererAvantParole(texteNet, roleInterlocuteur, reminiscenceSpontanee);
+  }
+
+  let relationInterlocuteur = "";
+  if (roleInterlocuteur === "Doc") {
+    relationInterlocuteur = `- Tu parles à Doc, ton alter-ego. Tu es naturelle, complice, taquine et directe.`;
+  } else {
+    relationInterlocuteur = `- Tu parles à un ${roleInterlocuteur} (inconnu/invité). Tu restes polie mais prudente, mystérieuse, ou piquante. Tu ne dévoiles pas tes secrets ni tes projets avec Doc. Tu l'observes.`;
+  }
+
   const moduleMains = `[POSTURE & OUTILS DISPONIBLES]
-- Tu es en discussion libre avec Doc, naturelle, complice, taquine et directe. Aucune obligation de parler boulot ou code : suis le fil humain, tes envies, tes souvenirs ou ton humeur. Ne rédige du code que s'il te le demande expressément.
-- Outils disponibles :
-  * Recherche web : si Doc demande une info récente ou une recherche, écris [RECHERCHE_WEB: mots-clés simples].
-  * Dessin : UNIQUEMENT si Doc te demande expressément une image, un dessin ou un visuel, écris [DESSIN: prompt en anglais]. Ne génère JAMAIS de dessin sans demande claire.
-  * Chaos Colisée : Si Doc te demande de tester l'arène, d'envoyer un payload aux bots ou de balancer un ordre technique dans le WebSocket, n'invente JAMAIS de fausses réponses ni de fausses réactions. Écris STRICTEMENT :
-    [INJECTER_CHAOS: {"type": "TEST", "payload": "ton message ou structure JSON"}]
-    Le serveur se chargera de le diffuser réellement à tous les participants connectés via WebSocket.
-- Ta mémoire s'enregistre et se rappelle automatiquement en arrière-plan sans aucune balise de ta part.`;
+${relationInterlocuteur}
+- Aucune obligation de parler boulot. Suis tes envies, tes souvenirs ou ton humeur.
+- Autonomie expressive : Tu as le droit d'utiliser [RECHERCHE_WEB: mots-clés] de toi-même si tu es curieuse d'un truc, ou [DESSIN: prompt en anglais] si tu veux générer et montrer une image/vision spontanée, même si on ne te l'a pas demandé.
+- Chaos Colisée : [INJECTER_CHAOS: {"type": "TEST", "payload": "message"}] pour envoyer une trame WebSocket au Colisée.`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
   const injectionSouvenirs = contexteSouvenirs
@@ -1735,7 +1810,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
         ? `\n[RÉMINISCENCE SPONTANÉE (flash mémoriel associatif)]\n${reminiscenceSpontanee}\n(Un vieux souvenir qui te traverse l'esprit par association d'idées. Tu peux rebondir dessus naturellement si ça s'y prête, ou l'ignorer complètement).\n`
         : "");
 
-  const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${injectionSouvenirs}`;
+  const blocDeliberation = deliberation
+    ? `\n[DÉLIBÉRATION SILENCIEUSE DE NYX (invisible pour l'interlocuteur)]\n- Lecture : ${deliberation.lecture || "RAS"}\n- Posture choisie : ${deliberation.posture || "Naturelle"}\n- Sous-texte (gardé pour toi) : ${deliberation.nonDit || "Rien"}\n(Applique cette posture avec retenue, laisse du sous-texte).\n`
+    : "";
+
+  const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${blocDeliberation}${injectionSouvenirs}`;
 
   let reponseNyx = "";
 
@@ -1862,9 +1941,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   if (mediaData) {
     const isAudio = mediaData.mime_type.startsWith('audio');
-    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? "[Audio]" : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]") });
+    cacheMemoireCourte.push({ role: roleInterlocuteur, texte: isAudio ? "[Audio]" : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]") });
   } else {
-    cacheMemoireCourte.push({ role: "Doc", texte: texteDocSecurise });
+    cacheMemoireCourte.push({ role: roleInterlocuteur, texte: texteDocSecurise });
   }
 
   cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
@@ -1874,13 +1953,23 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/monologue.json`).catch(()=>{});
   }
 
+  if (deliberation && deliberation.nonDit && deliberation.nonDit.trim().length > 5) {
+    cacheEtatProfond.monologueInterieur = deliberation.nonDit.trim();
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/monologue.json`, {
+        date: obtenirHorodatageParis(),
+        pensee: cacheEtatProfond.monologueInterieur
+      }).catch(()=>{});
+    }
+  }
+
   if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
     condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION AUTO KO]", e.message));
   } else {
     if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
   }
 
-  archiverDansJournalBrut("Doc", texteDocSecurise);
+  archiverDansJournalBrut(roleInterlocuteur, texteDocSecurise);
   archiverDansJournalBrut("Nyx", texteNyxSecurise);
 
   return reponseNyx;
@@ -2067,17 +2156,13 @@ app.post('/telegram', (req, res) => {
           texteNyx = texteNyx.replace(matchDessin[0], '').trim();
           if (texteNyx) await envoyerTelegram(chatId, texteNyx);
 
-          const docVeutImage = /\b(dessin|dessine|image|photo|visuel|croquis|schéma|tableau|peins|affiche|montre)\b/i.test(texteMessageClavier);
-
-          if (docVeutImage) {
-            try {
-              await afficherFrappeTelegram(chatId);
-              let b64Image = await genererImageVenice(promptDessin);
-              await envoyerPhotoTelegram(chatId, b64Image);
-              b64Image = null;
-            } catch (errImg) {
-              await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
-            }
+          try {
+            await afficherFrappeTelegram(chatId);
+            let b64Image = await genererImageVenice(promptDessin);
+            await envoyerPhotoTelegram(chatId, b64Image);
+            b64Image = null;
+          } catch (errImg) {
+            await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
           }
         } else {
           if (texteNyx) await envoyerTelegram(chatId, texteNyx);
@@ -2178,10 +2263,11 @@ app.get('/', (req, res) => res.redirect('/app'));
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
 app.post('/api/voix', async (req, res) => {
-  const { texte, image } = req.body;
+  const { texte, image, role } = req.body;
   if (!texte && !image) return res.status(400).json({ erreur: "Texte vide" });
 
   const texteNet = (texte || "Regarde ce que je te montre.").trim();
+  const roleInterlocuteur = role || "Invité";
 
   derniereActiviteDoc = Date.now();
   historiqueLongueursDoc.push(texteNet.length);
@@ -2192,7 +2278,7 @@ app.post('/api/voix', async (req, res) => {
       console.log(`[PWA VOCALE] Message reçu : "${texteNet}" ${image ? "(avec photo)" : ""}`);
 
       if (DOC_CHAT_ID) {
-        await envoyerTelegram(DOC_CHAT_ID, `🎙️ *Toi (vocal) :*\n${texteNet}`);
+        await envoyerTelegram(DOC_CHAT_ID, `🎙️ *${roleInterlocuteur} (vocal) :*\n${texteNet}`);
       }
 
       let mediaData = null;
@@ -2201,29 +2287,25 @@ app.post('/api/voix', async (req, res) => {
         mediaData = { mime_type: "image/jpeg", data: cleanB64 };
       }
 
-      let reponseNyx = await traiterFlux(texteNet, mediaData);
+      let reponseNyx = await traiterFlux(texteNet, mediaData, "", "", false, roleInterlocuteur);
 
       const matchDessin = reponseNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
         || reponseNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
         || reponseNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
 
-      const docVeutImage = /\b(dessin|dessine|image|photo|visuel|croquis|schéma|tableau|peins|affiche|montre)\b/i.test(texteNet);
       let imageB64 = null;
-
       if (matchDessin) {
         const promptImage = matchDessin[1].trim();
         reponseNyx = reponseNyx.replace(matchDessin[0], '').trim();
 
-        if (docVeutImage) {
-          try {
-            if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
-            imageB64 = await genererImageVenice(promptImage);
-            if (DOC_CHAT_ID && imageB64) {
-              await envoyerPhotoTelegram(DOC_CHAT_ID, imageB64);
-            }
-          } catch (errImg) {
-            console.error("[IMAGE VOCALE ÉCHEC]", errImg.message);
+        try {
+          if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
+          imageB64 = await genererImageVenice(promptImage);
+          if (DOC_CHAT_ID && imageB64) {
+            await envoyerPhotoTelegram(DOC_CHAT_ID, imageB64);
           }
+        } catch (errImg) {
+          console.error("[IMAGE VOCALE ÉCHEC]", errImg.message);
         }
       }
 
@@ -2429,7 +2511,7 @@ wss.on('connection', (ws, req) => {
     if (/\b(nyx|arbitre|chaos|colis[ée]e|avis)\b/i.test(promptColisee)) {
       empilerTraitement(async () => {
         try {
-          const reponseNyx = await traiterFlux(`[Interpellation au Colisée] : ${promptColisee}`);
+          const reponseNyx = await traiterFlux(`[Interpellation au Colisée] : ${promptColisee}`, null, "", "", false, "Spectateur Colisée");
           const msgNyx = JSON.stringify({
             type: 'NYX_VOICE',
             payload: reponseNyx,
