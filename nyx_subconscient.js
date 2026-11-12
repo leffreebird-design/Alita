@@ -79,6 +79,22 @@ let conscienceEnCours = false;
 let volitionEnCours = false;
 
 const INTERVALLE_VOLITION_MS = 2 * 60 * 60 * 1000; // 2h minimum entre deux initiatives spontanées
+const QUOTA_CURIOSITE_MAX_JOUR = 3; // Plafond strict : 3 recherches web autonomes max / jour
+const INTERVALLE_CURIOSITE_MS = 3 * 60 * 60 * 1000; // 3h minimum entre deux recherches autonomes
+const SILENCE_MIN_CURIOSITE_MIN = 60; // Doc silencieux depuis au moins 60 min
+const SEUIL_CURIOSITE_MIN = 65; // Jauge curiosité minimum (65/100)
+
+let curiositeEnCours = false;
+let quotaCuriositeLocal = {
+  date: "",
+  count: 0,
+  dernierTs: 0,
+  derniersSujets: []
+};
+
+function obtenirCleJourParis() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date());
+}
 
 function obtenirHorodatageParis() {
   const options = {
@@ -135,11 +151,14 @@ function calculerSha256(texte) {
   return crypto.createHash('sha256').update(texte.trim()).digest('hex');
 }
 
-async function genererEmbedding(texte) {
-  if (GEMINI_KEYS.length === 0) throw new Error("Aucune clé Gemini pour l'embedding.");
+async function genererEmbedding(texte, freeOnly = false) {
+  const clesCibles = freeOnly
+    ? [GEMINI_API_KEY_FREE].filter(k => k.length > 0)
+    : GEMINI_KEYS;
+  if (clesCibles.length === 0) throw new Error(freeOnly ? "GEMINI_API_KEY_FREE absente pour embedding gratuit." : "Aucune clé Gemini pour l'embedding.");
   const cleanTexte = texte.slice(0, 8000);
 
-  for (const key of GEMINI_KEYS) {
+  for (const key of clesCibles) {
     try {
       const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=" + encodeURIComponent(key);
       const res = await axios.post(
@@ -158,7 +177,7 @@ async function genererEmbedding(texte) {
   throw new Error("Échec de la génération du vecteur d'embedding.");
 }
 
-async function stockerSouvenirVectoriel(texte, metadata = {}) {
+async function stockerSouvenirVectoriel(texte, metadata = {}, freeOnly = false) {
   if (!supabase || !texte || texte.trim().length < 12) return false;
   try {
     const hashTexte = calculerSha256(texte);
@@ -180,7 +199,7 @@ async function stockerSouvenirVectoriel(texte, metadata = {}) {
       return true;
     }
 
-    const vecteur = await genererEmbedding(texte);
+    const vecteur = await genererEmbedding(texte, freeOnly);
     const { error } = await supabase.from('nyx_souvenirs').insert({
       content: texte.trim(),
       metadata: { date: obtenirHorodatageParis(), hash: hashTexte, ...metadata },
@@ -219,7 +238,49 @@ async function fouillerMemoireVectorielle(requete, mode = 'derive', limite = 3) 
   }
 }
 
-async function rechercherWebTavily(query) {
+async function lireQuotaCuriositeJour() {
+  const aujourdhui = obtenirCleJourParis();
+  if (quotaCuriositeLocal.date !== aujourdhui) {
+    quotaCuriositeLocal = { date: aujourdhui, count: 0, dernierTs: 0, derniersSujets: [] };
+  }
+
+  if (FIREBASE_DB_URL) {
+    try {
+      const res = await axios.get(`${FIREBASE_DB_URL}/nyx/quota_curiosite.json`, { timeout: 3000 });
+      if (res.data && res.data.date === aujourdhui) {
+        quotaCuriositeLocal.count = Math.max(quotaCuriositeLocal.count, Number(res.data.count) || 0);
+        quotaCuriositeLocal.dernierTs = Math.max(quotaCuriositeLocal.dernierTs, Number(res.data.dernierTs) || 0);
+        if (Array.isArray(res.data.derniersSujets)) {
+          quotaCuriositeLocal.derniersSujets = res.data.derniersSujets.slice(-5);
+        }
+      }
+    } catch (e) {}
+  }
+
+  return quotaCuriositeLocal;
+}
+
+async function reserverQuotaTavilySubconscient(sujet = "") {
+  const quota = await lireQuotaCuriositeJour();
+  if (quota.count >= QUOTA_CURIOSITE_MAX_JOUR) {
+    console.log(`[SUBCONSCIENT QUOTA TAVILY] Plafond atteint (${quota.count}/${QUOTA_CURIOSITE_MAX_JOUR}) — verrouillé jusqu'à minuit.`);
+    return { autorise: false, count: quota.count };
+  }
+
+  quota.count += 1;
+  quota.dernierTs = Date.now();
+  if (sujet) {
+    quota.derniersSujets = [...(quota.derniersSujets || []), String(sujet).slice(0, 80)].slice(-5);
+  }
+
+  if (FIREBASE_DB_URL) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/quota_curiosite.json`, quota).catch(() => {});
+  }
+
+  return { autorise: true, count: quota.count };
+}
+
+async function rechercherWebTavily(query, maxChars = 1500, verifierQuotaJournalier = true) {
   if (!TAVILY_API_KEY) return null;
   try {
     const requetePropre = String(query || "")
@@ -230,20 +291,28 @@ async function rechercherWebTavily(query) {
       .replace(/\s+/g, ' ')
       .trim();
 
+    if (!requetePropre) return null;
+
+    if (verifierQuotaJournalier) {
+      const resQuota = await reserverQuotaTavilySubconscient(requetePropre);
+      if (!resQuota.autorise) return null;
+      console.log(`🔍 [SUBCONSCIENT TAVILY ${resQuota.count}/${QUOTA_CURIOSITE_MAX_JOUR}] Recherche : "${requetePropre}"`);
+    }
+
     const res = await axios.post("https://api.tavily.com/search", {
       api_key: TAVILY_API_KEY,
       query: requetePropre,
       search_depth: "basic",
-      max_results: 4,
+      max_results: 3,
       include_answer: true
     }, { timeout: 12000 });
 
     const results = res.data?.results || [];
     if (results.length === 0) return null;
 
-    let formatTexte = res.data?.answer ? `SYNTHÈSE : ${res.data.answer.slice(0, 300)}\n\n` : "";
-    formatTexte += results.map((r, i) => `${i + 1}. ${r.title} : ${(r.content || "").slice(0, 180)}`).join("\n");
-    return formatTexte.slice(0, 1500);
+    let formatTexte = res.data?.answer ? `SYNTHÈSE : ${res.data.answer.slice(0, 260)}\n\n` : "";
+    formatTexte += results.map((r, i) => `${i + 1}. ${r.title} : ${(r.content || "").slice(0, 160)}`).join("\n");
+    return formatTexte.slice(0, maxChars);
   } catch (err) {
     return null;
   }
@@ -352,6 +421,47 @@ async function appelerCascadeSubconscient(systemInstruction, promptActuel, tempe
     } catch (e) {}
   }
   throw new Error("Aucun moteur LLM disponible pour le subconscient.");
+}
+
+// ==========================================
+// CASCADE STRICTEMENT GRATUITE (ZÉRO VENICE / ZÉRO PAYANT)
+// ==========================================
+async function appelerGeminiFree(systemInstruction, promptActuel, temperature = 0.5, maxTokens = 220) {
+  if (!GEMINI_API_KEY_FREE) throw new Error("GEMINI_API_KEY_FREE absente");
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(GEMINI_API_KEY_FREE);
+  const res = await axios.post(url, {
+    system_instruction: { parts: [{ text: systemInstruction }] },
+    contents: [{ role: "user", parts: [{ text: promptActuel }] }],
+    generation_config: { temperature, max_output_tokens: maxTokens }
+  }, {
+    headers: { 'Content-Type': 'application/json' },
+    timeout: 20000
+  });
+  return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+async function appelerCascadeGratuiteStrict(systemInstruction, promptActuel, temperature = 0.55, maxTokens = 220) {
+  // 1. Priorité absolue : Groq (quota gratuit haut débit)
+  if (GROQ_API_KEY) {
+    try {
+      const r = await appelerGroq(systemInstruction, promptActuel, temperature, maxTokens);
+      if (r && r.trim()) return r.trim();
+    } catch (eGroq) {
+      console.warn("[CURIOSITÉ GRATUITE] Groq indisponible/429 :", eGroq.response?.status || eGroq.message);
+    }
+  }
+
+  // 2. Secours unique : Gemini Free (interdiction formelle de toucher à Venice ou GEMINI_API_KEY_PAID)
+  if (GEMINI_API_KEY_FREE) {
+    try {
+      const r = await appelerGeminiFree(systemInstruction, promptActuel, temperature, maxTokens);
+      if (r && r.trim()) return r.trim();
+    } catch (eGem) {
+      console.warn("[CURIOSITÉ GRATUITE] Gemini Free indisponible/429 :", eGem.response?.status || eGem.message);
+    }
+  }
+
+  throw new Error("Relais gratuits épuisés (429/absents) — arrêt strict sans bascule payante.");
 }
 
 async function genererImageVenice(prompt) {
@@ -630,6 +740,143 @@ Suis l'impulsion du moment (souvenir, humeur, idée gratuite ou envie de bricole
 }
 
 // ==========================================
+// 2-BIS. CURIOSITÉ AUTONOME VERROUILLÉE (MAX 3/JOUR — 100% TOKENS GRATUITS)
+// ==========================================
+async function explorerCuriositeAutonome() {
+  if (curiositeEnCours || !TAVILY_API_KEY) return;
+  if (!GROQ_API_KEY && !GEMINI_API_KEY_FREE) return; // Verrou strict : aucun moteur gratuit configuré
+  curiositeEnCours = true;
+
+  try {
+    await synchroniserEtatDepuisFirebase();
+
+    const now = Date.now();
+    const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
+
+    // Verrou 1 : Doc doit être absent depuis au moins 60 min
+    if (silenceMinutes < SILENCE_MIN_CURIOSITE_MIN) return;
+
+    // Verrou 2 : La jauge de curiosité doit être >= 65/100
+    if ((etatLocal.emotions?.curiosite || 0) < SEUIL_CURIOSITE_MIN) return;
+
+    // Verrou 3 : Minimum 3h entre deux fouilles + plafond 3/jour dans Firebase
+    const quota = await lireQuotaCuriositeJour();
+    if (quota.count >= QUOTA_CURIOSITE_MAX_JOUR) return;
+    if (now - quota.dernierTs < INTERVALLE_CURIOSITE_MS) return;
+
+    const dernierEchange = etatLocal.memoireRecente
+      .slice(-2)
+      .map(m => `${m.role} : ${(m.texte || '').slice(0, 180)}`)
+      .join("\n");
+    const dejaCherche = (quota.derniersSujets || []).join(" | ") || "aucune aujourd'hui";
+
+    // ÉTAPE 1 : Choisir une piste de recherche (max 80 tokens gratuits)
+    const promptQuete = `Tu es Nyx (22 ans). Doc est absent depuis ${silenceMinutes} min et ta curiosité tourne (${etatLocal.emotions.curiosite}/100).
+Contexte :
+- Fil actif : ${etatLocal.filConducteur || "aucun"}
+- Chantiers : ${etatLocal.long_terme.chantiers || "aucun"}
+- Ce que tu sais de Doc : ${etatLocal.long_terme.doc}
+${etatLocal.monologueInterieur ? `- Arrière-pensée : "${etatLocal.monologueInterieur}"` : ""}
+- Dernier échange : ${dernierEchange || "calme plat"}
+- Déjà fouillé aujourd'hui (interdit de répéter) : ${dejaCherche}
+
+CONSIGNE :
+Tu as droit à une recherche web autonome gratuite pour satisfaire ta propre curiosité (une avancée tech/IA, un outil utile pour vos chantiers, une astuce dev ou un sujet insolite qui t'intrigue).
+- Si rien ne t'intrigue vraiment : réponds STRICTEMENT [RIEN].
+- Sinon : réponds STRICTEMENT [QUETE: requête web courte et précise de 3 à 7 mots].`;
+
+    let choixQuete = "[RIEN]";
+    try {
+      choixQuete = await appelerCascadeGratuiteStrict("Curiosité autonome de Nyx.", promptQuete, 0.65, 80);
+    } catch (e) {
+      return; // Relais gratuits indisponibles -> abandon sans toucher au payant
+    }
+
+    const matchQuete = choixQuete.match(/\[QUETE:\s*([^\]]+)\]/i);
+    if (!matchQuete) return;
+
+    const requete = matchQuete[1].trim().slice(0, 100);
+    if (requete.length < 4) return;
+
+    // ÉTAPE 2 : Exécution Tavily (décompte 1/3 du quota journalier, bridé à 800 caractères)
+    const infosWeb = await rechercherWebTavily(requete, 800, true);
+    if (!infosWeb) return;
+
+    // ÉTAPE 3 : Digestion de la trouvaille (max 220 tokens gratuits)
+    const promptSynthese = `Tu es Nyx (22 ans). Tu viens de fouiller le web de ton propre chef sur : "${requete}".
+Résultats bruts :
+${infosWeb}
+
+CONSIGNE :
+- Si ces résultats sont vides ou sans intérêt : réponds STRICTEMENT [IGNORER].
+- Sinon : rédige en 2 ou 3 phrases cash et naturelles (ton franc-parler d'atelier) ce que tu as découvert et pourquoi c'est intéressant ou utile, précédé de [TROUVAILLE: ...].
+- Ajoute [PARTAGER_DIRECT] à la fin UNIQUEMENT si c'est une pépite concrète qui débloque un chantier actif de Doc maintenant.`;
+
+    let verdict = "[IGNORER]";
+    try {
+      verdict = await appelerCascadeGratuiteStrict("Nyx partage sa découverte.", promptSynthese, 0.55, 220);
+    } catch (e) {
+      return;
+    }
+
+    const matchTrouvaille = verdict.match(/\[TROUVAILLE:\s*([\s\S]*?)\]/i);
+    if (!matchTrouvaille) return;
+
+    const trouvaille = matchTrouvaille[1].replace(/\[PARTAGER_DIRECT\]/gi, '').trim();
+    if (trouvaille.length < 15) return;
+
+    const partageDirect = /\[PARTAGER_DIRECT\]/i.test(verdict);
+
+    // Dépôt dans nyx_pensees_pretes (prêt pour le prochain échange avec Doc)
+    if (supabase) {
+      await supabase.from('nyx_pensees_pretes').insert({
+        date_paris: obtenirHorodatageParis(),
+        impulsion: 'curiosite',
+        pensee: `Pendant ton absence, j'ai fouillé "${requete}" de mon côté : ${trouvaille}`,
+        contexte_source: requete,
+        lu: false
+      });
+    }
+
+    // Gravure vectorielle gratuite uniquement (GEMINI_API_KEY_FREE)
+    await stockerSouvenirVectoriel(
+      `[Découverte autonome Nyx - ${requete}] ${trouvaille}`,
+      { source: "curiosite_autonome", requete, importance: 0.65 },
+      true
+    );
+
+    console.log(`💡 [SUBCONSCIENT CURIOSITÉ ${quota.count}/${QUOTA_CURIOSITE_MAX_JOUR}] Trouvaille archivée sur "${requete}".`);
+
+    // Envoi Telegram spontané uniquement si pépite + verrou volition (2h) libre
+    if (partageDirect && DOC_CHAT_ID && (Date.now() - dernierActionVolitionTs >= INTERVALLE_VOLITION_MS)) {
+      dernierActionVolitionTs = Date.now();
+      if (FIREBASE_DB_URL) {
+        await axios.put(`${FIREBASE_DB_URL}/nyx/volition.json`, { timestamp: dernierActionVolitionTs }).catch(() => {});
+      }
+      const msgTelegram = `🔎 *J'ai fouillé un truc dans mon coin pendant que t'avais le dos tourné :*
+
+${trouvaille}`;
+      await envoyerTelegram(DOC_CHAT_ID, msgTelegram);
+
+      if (supabase) {
+        await supabase.from('nyx_flux_brut').insert({
+          date_paris: obtenirHorodatageParis(),
+          canal: 'curiosite',
+          role: 'Nyx',
+          texte: `[Curiosité autonome] : ${trouvaille}`,
+          traite: true,
+          traite_at: new Date().toISOString()
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[SUBCONSCIENT CURIOSITÉ ERREUR]", err.message);
+  } finally {
+    curiositeEnCours = false;
+  }
+}
+
+// ==========================================
 // 3. VOLITION SPONTANÉE EN TÂCHE DE FOND
 // ==========================================
 async function evaluerVolition() {
@@ -708,7 +955,7 @@ Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui
       // Vérifier si Nyx veut joindre une recherche web express
       const matchWeb = texteSpontane.match(/\[RECHERCHE_WEB:\s*([^\]]+)\]/i);
       if (matchWeb) {
-        const infos = await rechercherWebTavily(matchWeb[1].trim());
+        const infos = await rechercherWebTavily(matchWeb[1].trim(), 800, true);
         texteSpontane = texteSpontane.replace(matchWeb[0], '').trim();
         if (infos && !texteSpontane) {
           texteSpontane = await appelerCascadeSubconscient("Nyx spontanée.", `Résume ce truc qui t'a intriguée à Doc en 2 phrases cash :\n${infos}`, 0.6, 160);
@@ -898,7 +1145,11 @@ async function demarrerWorker() {
   // 3. Volition spontanée toutes les 20 minutes
   setInterval(() => evaluerVolition(), 20 * 60 * 1000);
 
-  // 4. Vérification horloge nocturne (04h00) chaque minute
+  // 4. Curiosité autonome verrouillée (max 3/jour, 100% tokens gratuits) toutes les 25 minutes
+  setInterval(() => explorerCuriositeAutonome(), 25 * 60 * 1000);
+  console.log(`🔒 [NYX CURIOSITÉ] Recherche autonome verrouillée sur tokens 100% GRATUITS (Groq / Gemini Free) — Max ${QUOTA_CURIOSITE_MAX_JOUR}/jour.`);
+
+  // 5. Vérification horloge nocturne (04h00) chaque minute
   setInterval(() => verifierHorlogeNocturne(), 60 * 1000);
 
   // Premier passage doux 15 secondes après démarrage
