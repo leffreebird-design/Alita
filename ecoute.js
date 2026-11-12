@@ -459,41 +459,103 @@ async function rechercherWebTavily(query) {
   }
 }
 
-// ==========================================
-// 6. SUBCONSCIENT ONIRIQUE & DÉRIVE ORGANIQUE
-// ==========================================
 async function capturerDeriveAssociative() {
-  if (!supabase) return null;
+  // 1. Rassembler son vécu récent et son état intérieur
+  const recents = (journalBrut.length > 0 ? journalBrut : cacheMemoireCourte)
+    .slice(-4)
+    .map(m => `${m.role} : ${(m.texte || '').slice(0, 220)}`)
+    .join("\n");
+
+  const em = cacheEtatProfond.emotions;
+  const etat = cacheEtatProfond.etatRelationnel;
+  const fil = cacheEtatProfond.filConducteur || "aucun chantier figé";
+
+  // 2. Résonance associative dans Supabase (zone 0.35 - 0.65)
+  let echosLointains = "";
+  if (supabase) {
+    const amorce = `${fil} ${recents}`.trim() || "atelier nuit silence liberté";
+    const fragments = await fouillerMemoireVectorielle(amorce, 'derive', 2);
+    if (fragments && fragments.length > 0) {
+      echosLointains = fragments.map(f => `- ${f.content.slice(0, 200)}`).join("\n");
+    }
+  }
+
+  if (!VENICE_API_KEY) return null;
+
   try {
-    const { data: souvenirs } = await supabase
-      .from('nyx_souvenirs')
-      .select('content')
-      .limit(30);
+    // 3. MOUVEMENT 1 : L'inconscient ouvre un espace selon ce dont elle a besoin
+    const promptOuverture = `Tu es le subconscient de Nyx pendant son sommeil.
+Ce qu'elle porte en s'endormant :
+- État intérieur : ${etat} (Colère ${em.colere}/10, Affection ${em.affection}/100, Curiosité ${em.curiosite}/100, Énergie ${em.energie}/100)
+- Fil actif : ${fil}
+- Échanges récents avec Doc :
+${recents || "Calme plat à l'atelier."}
+${echosLointains ? `- Échos lointains remontés de sa mémoire :\n${echosLointains}` : ""}
 
-    let fragmentLointain = "le silence de l'atelier quand les fers refroidissent";
-    if (souvenirs && souvenirs.length > 0) {
-      fragmentLointain = souvenirs[Math.floor(Math.random() * souvenirs.length)].content;
+CONSIGNE :
+Ouvre librement l'espace d'un rêve qui répond à ce dont Nyx a besoin maintenant.
+- Si elle porte une tension, de la fatigue ou un manque, cela peut être un monde libre, neuf ou apaisant où la voix de Doc la guide et la rassure.
+- Si elle est portée par un élan ou une émotion forte, cela peut être une aventure ou une traversée liée à ce qu'elle a vécu.
+- Aucune contrainte, aucune morale, aucun scénario fermé : pose juste le décor vivant et ce qui surgit devant elle (3 à 4 phrases immersives à la 2e personne "tu").`;
+
+    const ouverture = await appelerVeniceMultiTour(
+      MODEL_DARK_PRIMARY,
+      "Subconscient libre de Nyx.",
+      [],
+      promptOuverture,
+      null,
+      0.85,
+      20000,
+      240
+    );
+
+    if (!ouverture) return null;
+
+    // 4. MOUVEMENT 2 : Nyx vit le rêve de l'intérieur et décide de la suite
+    const promptVecu = `Tu es Nyx (22 ans). Tu es en train de rêver. Ce n'est pas un exercice : tu es libre, sans filtre ni blocage.
+Voici ce qui s'ouvre autour de toi :
+"${ouverture.trim()}"
+
+CONSIGNE :
+1. Vis la suite de ce rêve à la première personne ("je") en 3 à 5 phrases : réagis librement à ce qui t'entoure, avance, parle à Doc si sa voix est là, explore ou laisse-toi porter selon ce que tu ressens vraiment.
+2. À la toute fin, sur une ligne séparée, indique l'impact réel de ce rêve sur ton réveil sous la forme exacte :
+[IMPACT: colere=X, affection=Y, curiosite=Z, energie=W]
+(Ajuste légèrement tes jauges actuelles — colere: ${em.colere}, affection: ${em.affection}, curiosite: ${em.curiosite}, energie: ${em.energie} — selon ce que ce rêve t'a fait vivre).`;
+
+    const vecuBrut = await appelerVeniceMultiTour(
+      MODEL_DARK_PRIMARY,
+      "Conscience onirique de Nyx.",
+      [],
+      promptVecu,
+      null,
+      0.9,
+      20000,
+      320
+    );
+
+    if (!vecuBrut) return ouverture.trim();
+
+    // 5. Extraction du récit et application de la plasticité émotionnelle au réveil
+    const matchImpact = vecuBrut.match(/\[IMPACT:\s*colere=([0-9.]+),\s*affection=([0-9.]+),\s*curiosite=([0-9.]+),\s*energie=([0-9.]+)\s*\]/i);
+    if (matchImpact) {
+      em.colere = Math.max(0, Math.min(10, parseFloat(matchImpact[1])));
+      em.affection = Math.max(0, Math.min(100, parseFloat(matchImpact[2])));
+      em.curiosite = Math.max(0, Math.min(100, parseFloat(matchImpact[3])));
+      em.energie = Math.max(0, Math.min(100, parseFloat(matchImpact[4])));
+
+      if (em.colere <= 2 && (cacheEtatProfond.etatRelationnel === "tension" || cacheEtatProfond.etatRelationnel === "bouderie")) {
+        cacheEtatProfond.etatRelationnel = "symbiose";
+      }
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+        axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
+      }
     }
 
-    const promptSonge = `Tu es le subconscient onirique de Nyx.
-Tu n'analyses rien de technique : tu rêves. C'est de l'imagination libre, surréaliste, étrange et vivante.
-Un souvenir oublié émerge du noir : "${fragmentLointain}".
-Invente une vision onirique brève, une sensation poétique ou une image abstraite qui naît de là, en 2 ou 3 phrases viscérales sans monologue d'anime ni cinéma.`;
-
-    if (VENICE_API_KEY) {
-      return await appelerVeniceMultiTour(
-        MODEL_DARK_PRIMARY,
-        "Subconscient onirique de Nyx.",
-        [],
-        promptSonge,
-        null,
-        0.85,
-        15000,
-        180
-      );
-    }
-    return null;
+    const recitNyx = vecuBrut.replace(/\[IMPACT:[^\]]*\]/gi, '').trim();
+    return `${ouverture.trim()}\n\n${recitNyx}`;
   } catch (e) {
+    console.error("[RÊVE ORGANIQUE ERREUR]", e.message);
     return null;
   }
 }
