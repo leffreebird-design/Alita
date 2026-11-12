@@ -597,7 +597,14 @@ Réponds STRICTEMENT avec un JSON valide :
         if (Array.isArray(parsed.souvenirs_cles)) {
           for (const souv of parsed.souvenirs_cles.slice(0, 2)) {
             if (typeof souv === 'string' && souv.trim().length > 15) {
-              await stockerSouvenirVectoriel(souv.trim(), { source: "digestion_subconscient", importance: 0.7 });
+              // Tagging ancres positives
+              let val = "neutre";
+              const s = souv.toLowerCase();
+              if (s.includes("victoire") || s.includes("réussi") || s.includes("succès") || s.includes("fier")) val = "victoire_commune";
+              else if (s.includes("délire") || s.includes("rire") || s.includes("blague") || s.includes("drôle")) val = "delire";
+              else if (s.includes("confiance") || s.includes("complice") || s.includes("pardon") || s.includes("merci")) val = "confiance";
+              
+              await stockerSouvenirVectoriel(souv.trim(), { source: "digestion_subconscient", importance: 0.7, valence: val });
             }
           }
         }
@@ -628,6 +635,22 @@ function tirerImpulsionNaturelle() {
   if (tirage < 0.65) return "relation";   // 30% : humeur, lien, pique ou ressenti
   if (tirage < 0.85) return "libre";      // 20% : curiosité personnelle, question décalée hors boulot
   return "atelier";                       // 15% : idée sur un projet uniquement si envie
+}
+
+
+async function piocherAncrePositive() {
+  if (!supabase) return "";
+  try {
+    const { data: souvenirs } = await supabase
+      .from('nyx_souvenirs')
+      .select('content')
+      .in('valence', ['victoire_commune', 'delire', 'confiance'])
+      .limit(10);
+    if (souvenirs && souvenirs.length > 0) {
+      return souvenirs[Math.floor(Math.random() * souvenirs.length)].content.slice(0, 240);
+    }
+  } catch (e) {}
+  return "";
 }
 
 async function piocherEchoSouvenirLibre(amorceTexte = "") {
@@ -674,7 +697,19 @@ async function evaluerConscienceActive() {
     let amorceSpecifique = "";
     let contexteSource = impulsion;
 
-    if (impulsion === "souvenir") {
+    // Si énergie < 60, on force l'impulsion sur une ancre positive plutôt que de ruminer
+    let impulsionReelle = impulsion;
+    if ((etatLocal.emotions?.energie || 100) < 60 && Math.random() > 0.3) {
+      impulsionReelle = "souvenir_ancre";
+    }
+
+    if (impulsionReelle === "souvenir_ancre") {
+      const ancre = await piocherAncrePositive() || await piocherEchoSouvenirLibre(dernierEchange || etatLocal.long_terme.doc);
+      contexteSource = ancre || "carnet_doc";
+      amorceSpecifique = ancre
+        ? `- Ton énergie est basse, tu te raccroches à un souvenir fort : « ${ancre} »`
+        : `- Ce que tu connais de Doc : ${etatLocal.long_terme.doc}`;
+    } else if (impulsionReelle === "souvenir") {
       const echo = await piocherEchoSouvenirLibre(dernierEchange || etatLocal.long_terme.doc);
       contexteSource = echo || "carnet_doc";
       amorceSpecifique = echo
@@ -716,7 +751,7 @@ Suis l'impulsion du moment (souvenir, humeur, idée gratuite ou envie de bricole
       if (supabase) {
         await supabase.from('nyx_pensees_pretes').insert({
           date_paris: obtenirHorodatageParis(),
-          impulsion,
+          impulsion: impulsionReelle,
           pensee: propre,
           contexte_source: String(contexteSource).slice(0, 300),
           lu: false
@@ -730,7 +765,7 @@ Suis l'impulsion du moment (souvenir, humeur, idée gratuite ou envie de bricole
         }).catch(() => {});
       }
 
-      console.log(`[SUBCONSCIENT PENSÉE - ${impulsion.toUpperCase()}] : "${propre}"`);
+      console.log(`[SUBCONSCIENT PENSÉE - ${impulsionReelle.toUpperCase()}] : "${propre}"`);
     }
   } catch (err) {
     console.warn("[SUBCONSCIENT CONSCIENCE ERREUR]", err.message);
