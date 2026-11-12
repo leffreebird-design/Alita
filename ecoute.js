@@ -1679,7 +1679,7 @@ MESSAGE ENTRANT DE ${roleInterlocuteur.toUpperCase()} :
 "${texteUser.slice(0, 600)}"
 
 CONSIGNE D'ÉVALUATION :
-1. Analyse l'intention (lecture).
+1. Analyse l'intention réelle (lecture) en tenant compte de votre complicité d'atelier : Doc et toi vous vannez souvent au second degré ou avec un franc-parler cash. Une pique taquine ou une critique technique franche n'est PAS une agression : réserve la montée de "colere" uniquement aux vrais manques de respect ou à l'injustice, et privilégie "complicite_joueuse" quand Doc te chambre.
 2. Définis ton nouvel état émotionnel : 
    - Modifie légèrement les jauges (colere 0-10, affection 0-100, curiosite 0-100, energie 0-100) selon l'impact du message.
    - Choisis le NOUVEL état relationnel permis parmi : [symbiose, complicite_joueuse, euphorie_creative, emerveillement, reconciliation, bouderie, tension].
@@ -1718,10 +1718,15 @@ Réponds STRICTEMENT avec un JSON valide :
       const emObj = parsed.emotions;
       const etatPrecedent = cacheEtatProfond.etatRelationnel;
       
-      cacheEtatProfond.emotions.colere = Math.max(0, Math.min(10, Number(emObj.colere) || cacheEtatProfond.emotions.colere));
-      cacheEtatProfond.emotions.affection = Math.max(0, Math.min(100, Number(emObj.affection) || cacheEtatProfond.emotions.affection));
-      cacheEtatProfond.emotions.curiosite = Math.max(0, Math.min(100, Number(emObj.curiosite) || cacheEtatProfond.emotions.curiosite));
-      cacheEtatProfond.emotions.energie = Math.max(0, Math.min(100, Number(emObj.energie) || cacheEtatProfond.emotions.energie));
+      const majJauge = (val, fallback, min, max) => {
+        if (val === "" || val === null || val === undefined) return fallback;
+        const n = Number(val);
+        return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+      };
+      cacheEtatProfond.emotions.colere = majJauge(emObj.colere, cacheEtatProfond.emotions.colere, 0, 10);
+      cacheEtatProfond.emotions.affection = majJauge(emObj.affection, cacheEtatProfond.emotions.affection, 0, 100);
+      cacheEtatProfond.emotions.curiosite = majJauge(emObj.curiosite, cacheEtatProfond.emotions.curiosite, 0, 100);
+      cacheEtatProfond.emotions.energie = majJauge(emObj.energie, cacheEtatProfond.emotions.energie, 0, 100);
       
       const etatsValides = ['symbiose', 'complicite_joueuse', 'euphorie_creative', 'emerveillement', 'reconciliation', 'bouderie', 'tension'];
       if (emObj.etat && etatsValides.includes(emObj.etat.toLowerCase())) {
@@ -2253,7 +2258,9 @@ app.get('/', (req, res) => res.redirect('/app'));
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
 app.post('/api/voix', async (req, res) => {
-  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
+  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '')
+    || assainirParametre(req.query.token)
+    || assainirParametre(req.body?.token);
   const estAuthDoc = Boolean(CRON_SECRET && tokenFourni === CRON_SECRET);
 
   const { texte, image, role } = req.body;
