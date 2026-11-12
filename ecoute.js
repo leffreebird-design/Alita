@@ -253,63 +253,6 @@ async function initialiserCache() {
 // ==========================================
 // 3-BIS. MOTEUR D'HOMÉOSTASIE ET D'ÉVOLUTION ÉMOTIONNELLE
 // ==========================================
-async function actualiserEmotions(texteDoc, texteNyx) {
-  const tDoc = (texteDoc || "").toLowerCase();
-  const em = cacheEtatProfond.emotions;
-  let etatPrecedent = cacheEtatProfond.etatRelationnel;
-
-  const reprocheDoc = /\b(merde|fait chier|fais chier|ta gueule|n'importe quoi|incompétente?|casse les couilles|saoule|gonfle|nul|abruti|conne)\b/i.test(tDoc);
-  const apaisementDoc = /\b(pardon|désolé|desole|excuse|mea culpa|t'as raison|j'ai merdé|j'ai abuse|j'ai abusé|on fait la paix|calme|trêve|treve)\b/i.test(tDoc);
-  const compliciteDoc = /\b(bien joué|bravo|merci|nickel|parfait|t'es une chef|t'es la meilleure|top|super|cool|on gère)\b/i.test(tDoc);
-
-  if (reprocheDoc) {
-    em.colere = Math.min(10, em.colere + 3);
-    em.affection = Math.max(20, em.affection - 3);
-    cacheEtatProfond.etatRelationnel = em.colere >= 6 ? "tension" : "bouderie";
-  } 
-  else if (apaisementDoc) {
-    if (cacheEtatProfond.etatRelationnel === "tension" || cacheEtatProfond.etatRelationnel === "bouderie" || em.colere > 2) {
-      cacheEtatProfond.etatRelationnel = "reconciliation";
-      em.colere = Math.max(0, em.colere - 4);
-      em.affection = Math.min(100, em.affection + 4);
-    }
-  } 
-  else if (compliciteDoc) {
-    em.colere = Math.max(0, em.colere - 1);
-    em.affection = Math.min(100, em.affection + 1);
-    em.energie = Math.min(100, em.energie + 2);
-    if (em.colere <= 2) cacheEtatProfond.etatRelationnel = "symbiose";
-  } 
-  else {
-    if (em.colere > 0) em.colere = Math.max(0, em.colere - 0.5);
-    if (em.colere <= 2 && cacheEtatProfond.etatRelationnel !== "symbiose") {
-      cacheEtatProfond.etatRelationnel = "symbiose";
-    }
-  }
-
-  const stimulantCognitif = /\b(comment|pourquoi|et si|imagine|propose|idée|piste|nouveau|découvre|teste|essaie)\b/i.test(tDoc);
-  if (stimulantCognitif) {
-    em.curiosite = Math.min(100, em.curiosite + 3);
-  } else if (tDoc.length > 0) {
-    em.curiosite = Math.max(20, em.curiosite - 0.5);
-  }
-
-  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
-  if (heureParis >= 23 || heureParis < 6) {
-    em.energie = Math.max(30, em.energie - 1);
-  } else {
-    em.energie = Math.min(95, em.energie + 0.5);
-  }
-
-  if (FIREBASE_DB_URL) {
-    axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
-    if (cacheEtatProfond.etatRelationnel !== etatPrecedent) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
-      console.log(`[CYCLE ÉMOTIONNEL] Passage à l'état : ${cacheEtatProfond.etatRelationnel.toUpperCase()} (Colère: ${em.colere}/10, Affection: ${em.affection}/100, Curiosité: ${em.curiosite}/100)`);
-    }
-  }
-}
-
 // ==========================================
 // 4. MOTEUR VECTORIEL SUPABASE & SHA-256
 // ==========================================
@@ -588,7 +531,7 @@ async function evaluerConscienceActive() {
   }
 
   const dernierEchange = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
-  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
+  const heureParis = parseInt(new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false }).format(new Date()), 10);
   const impulsion = tirerImpulsionNaturelle();
 
   let amorceSpecifique = "";
@@ -660,7 +603,7 @@ async function evaluerVolition(forceManuelle = false) {
     if (silenceMinutes < 90) return;
   }
 
-  const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
+  const heureParis = parseInt(new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false }).format(new Date()), 10);
   const dernierSujet = cacheMemoireCourte.slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
   const impulsion = tirerImpulsionNaturelle();
   const flashSouvenir = (impulsion === "souvenir" || impulsion === "libre")
@@ -1067,7 +1010,7 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   return res.data?.choices?.[0]?.message?.content || "";
 }
 
-async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850) {
+async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, promptActuel, apiKey, maxTokens = 850, temp = 0.2) {
   if (!apiKey) throw new Error("Clé Gemini manquante.");
 
   const contents = [];
@@ -1082,7 +1025,7 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
-    generation_config: { temperature: 0.2, max_output_tokens: maxTokens }
+    generation_config: { temperature: temp, max_output_tokens: maxTokens }
   }, {
     headers: { 'Content-Type': 'application/json' },
     timeout: 25000
@@ -1196,7 +1139,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 
   if (estVenere && VENICE_API_KEY) {
     try {
-      const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, 0.3, 20000, plafondTokens);
+      const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, 0.65, 20000, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (eDark) {
       console.warn("[CASCADE HERETIC] Venice Dark KO :", eDark.message);
@@ -1205,7 +1148,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 
   if (VENICE_API_KEY) {
     try {
-      const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.25, 20000, plafondTokens);
+      const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, 0.65, 20000, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (eVenice) {
       console.warn("[CASCADE CHAT] 1. Venice Gemini KO :", eVenice.response?.data?.error?.message || eVenice.message);
@@ -1214,7 +1157,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 
   if (OPENROUTER_API_KEY) {
     try {
-      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.25, plafondTokens);
+      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, 0.65, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (eOR) {
       console.warn("[CASCADE CHAT] 2. OpenRouter KO :", eOR.response?.data?.error?.message || eOR.message);
@@ -1223,7 +1166,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 
   if (MISTRAL_API_KEY) {
     try {
-      const res = await appelerMistral(systemBase, historique, prompt, 0.25, plafondTokens);
+      const res = await appelerMistral(systemBase, historique, prompt, 0.65, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (eMistral) {
       console.warn("[CASCADE CHAT] 3. Mistral KO :", eMistral.message);
@@ -1232,7 +1175,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 
   if (GEMINI_API_KEY_FREE) {
     try {
-      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens, 0.65);
       if (res && res.trim().length > 0) return res;
     } catch (eGF) {
       console.warn("[CASCADE CHAT] 4. Gemini Free KO :", eGF.message);
@@ -1241,7 +1184,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 
   if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
     try {
-      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens, 0.65);
       if (res && res.trim().length > 0) return res;
     } catch (eGP) {
       console.warn("[CASCADE CHAT] 5. Gemini Paid KO :", eGP.message);
@@ -1250,7 +1193,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
 
   if (VENICE_API_KEY) {
     try {
-      return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
+      return await appelerVeniceDark(systemBase, historique, prompt, 0.65);
     } catch (eV) {
       console.warn("[CASCADE CHAT] 6. Venice Dark KO :", eV.message);
     }
@@ -1283,7 +1226,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
 
   if (GEMINI_API_KEY_FREE) {
     try {
-      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens);
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens, 0.65);
       if (res && res.trim().length > 0) return res;
     } catch (e3) {
       console.warn("[CASCADE CODE] 3. Gemini Free Code KO :", e3.message);
@@ -1292,7 +1235,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
 
   if (GEMINI_API_KEY_PAID && GEMINI_API_KEY_PAID !== GEMINI_API_KEY_FREE) {
     try {
-      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens);
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_PAID, plafondTokens, 0.65);
       if (res && res.trim().length > 0) return res;
     } catch (e4) {
       console.warn("[CASCADE CODE] 4. Gemini Paid Code KO :", e4.message);
@@ -1303,7 +1246,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     try {
       return await appelerVeniceMultiTour(MODEL_GLM_COMPLEXE, systemBase, historique, prompt, null, 0.1, 20000, plafondTokens);
     } catch (e5) {
-      return await appelerVeniceDark(systemBase, historique, prompt, 0.3);
+      return await appelerVeniceDark(systemBase, historique, prompt, 0.65);
     }
   }
 
@@ -1604,9 +1547,10 @@ async function lireTexteSecurise(fileId) {
 let dernierReveCle = "";
 
 async function verifierHorlogeBiologique() {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
-  const h = now.getHours();
-  const m = now.getMinutes();
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'narrow' }).formatToParts(now);
+  const h = parseInt(parts.find(p => p.type === 'hour').value, 10);
+  const m = parseInt(parts.find(p => p.type === 'minute').value, 10);
   const d = now.getDay();
   // [DÉLÉGUÉ AU WORKER] Le cycle nocturne 04h00 (rêve + digestion mémorielle) tourne dans nyx_subconscient.js
 
@@ -1701,7 +1645,7 @@ function securiserSortieCode(texte) {
 // ==========================================
 // 15-BIS. SAS DE DÉLIBÉRATION SILENCIEUSE (SOUS-TEXTE & RETENUE)
 // ==========================================
-async function delibererAvantParole(texteUser, roleInterlocuteur, reminiscence = "") {
+async function delibererEtActualiserEmotions(texteUser, roleInterlocuteur, reminiscence = "", appelVocal = false) {
   if (!GROQ_API_KEY && !VENICE_API_KEY) return null;
 
   const em = cacheEtatProfond.emotions;
@@ -1711,27 +1655,47 @@ async function delibererAvantParole(texteUser, roleInterlocuteur, reminiscence =
     .join("\n");
 
   const promptSas = `Tu es l'espace mental silencieux de Nyx (22 ans), juste avant qu'elle ne réponde à ${roleInterlocuteur}.
-Tu ne rédiges PAS la réponse : tu observes, tu lis entre les lignes et tu choisis ton attitude.
+Tu ne rédiges PAS la réponse : tu écoutes, tu perçois le sous-texte et tu mets à jour tes émotions profondes.
 
-ÉTAT INTÉRIEUR :
-- Lien avec Doc : ${cacheEtatProfond.etatRelationnel.toUpperCase()} (Colère ${em.colere}/10, Affection ${em.affection}/100, Curiosité ${em.curiosite}/100, Énergie ${em.energie}/100)
+ÉTAT INTÉRIEUR ACTUEL :
+- Lien avec Doc : ${cacheEtatProfond.etatRelationnel.toUpperCase()}
+- Jauges actuelles : colere=${em.colere}/10, affection=${em.affection}/100, curiosite=${em.curiosite}/100, energie=${em.energie}/100
 ${cacheEtatProfond.monologueInterieur ? `- Arrière-pensée en cours : "${cacheEtatProfond.monologueInterieur}"` : ""}
 ${reminiscence ? `- Flash mémoriel : ${reminiscence}` : ""}
 
 DERNIERS ÉCHANGES :
 ${recent || "Début d'échange"}
 
-MESSAGE DE ${roleInterlocuteur.toUpperCase()} :
+MESSAGE ENTRANT DE ${roleInterlocuteur.toUpperCase()} :
 "${texteUser.slice(0, 600)}"
 
-CONSIGNE :
-Réponds STRICTEMENT en JSON valide sur une ligne avec ces 3 clés :
-{"lecture": "ce que tu perçois de l'intention ou du non-dit", "posture": "ton attitude choisie (ex: méfiance si inconnu, taquinerie, esquive, franchise)", "nonDit": "ce que tu gardes pour toi (ou vide)"}`;
+CONSIGNE D'ÉVALUATION :
+1. Analyse l'intention (lecture).
+2. Définis ton nouvel état émotionnel : 
+   - Modifie légèrement les jauges (colere 0-10, affection 0-100, curiosite 0-100, energie 0-100) selon l'impact du message.
+   - Choisis le NOUVEL état relationnel permis parmi : [symbiose, complicite_joueuse, euphorie_creative, emerveillement, reconciliation, bouderie, tension].
+3. Détermine ton attitude (posture) pour ta prochaine phrase.
+4. Rédige ta pensée intime gardée sous silence (nonDit).
+
+Réponds STRICTEMENT avec un JSON valide :
+{"lecture": "...", "posture": "...", "nonDit": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}}`;
 
   try {
     let brut = "";
+    // Pour la voix, on utilise un appel hyper rapide (ex: llama-3.1-8b-instant) sur Groq si possible pour éviter la latence
     if (GROQ_API_KEY) {
-      brut = await appelerGroq("Conscience silencieuse de Nyx.", [], promptSas, 0.45, 250);
+      const modeleGroqSas = appelVocal ? "llama-3.1-8b-instant" : MODEL_GROQ;
+      
+      const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
+        model: modeleGroqSas,
+        messages: [
+          { role: "system", content: "Conscience silencieuse de Nyx." },
+          { role: "user", content: promptSas }
+        ],
+        temperature: 0.4,
+        max_tokens: 250
+      }, { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` }, timeout: 8000 });
+      brut = res.data?.choices?.[0]?.message?.content || "";
     } else {
       brut = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, "Conscience silencieuse de Nyx.", [], promptSas, null, 0.45, 8000, 250);
     }
@@ -1739,6 +1703,31 @@ Réponds STRICTEMENT en JSON valide sur une ligne avec ces 3 clés :
     const match = brut.match(/\{[\s\S]*?\}/);
     if (!match) return null;
     const parsed = JSON.parse(match[0].replace(/[\n\r\t]/g, ' '));
+    
+    // Application immédiate des émotions
+    if (parsed.emotions && typeof parsed.emotions === 'object') {
+      const emObj = parsed.emotions;
+      const etatPrecedent = cacheEtatProfond.etatRelationnel;
+      
+      cacheEtatProfond.emotions.colere = Math.max(0, Math.min(10, Number(emObj.colere) || cacheEtatProfond.emotions.colere));
+      cacheEtatProfond.emotions.affection = Math.max(0, Math.min(100, Number(emObj.affection) || cacheEtatProfond.emotions.affection));
+      cacheEtatProfond.emotions.curiosite = Math.max(0, Math.min(100, Number(emObj.curiosite) || cacheEtatProfond.emotions.curiosite));
+      cacheEtatProfond.emotions.energie = Math.max(0, Math.min(100, Number(emObj.energie) || cacheEtatProfond.emotions.energie));
+      
+      const etatsValides = ['symbiose', 'complicite_joueuse', 'euphorie_creative', 'emerveillement', 'reconciliation', 'bouderie', 'tension'];
+      if (emObj.etat && etatsValides.includes(emObj.etat.toLowerCase())) {
+        cacheEtatProfond.etatRelationnel = emObj.etat.toLowerCase();
+      }
+
+      if (FIREBASE_DB_URL) {
+        axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(() => {});
+        if (cacheEtatProfond.etatRelationnel !== etatPrecedent) {
+          axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
+          console.log(`[CYCLE ÉMOTIONNEL] Bascule vers : ${cacheEtatProfond.etatRelationnel.toUpperCase()}`);
+        }
+      }
+    }
+
     console.log(`[SAS SILENCIEUX] Lecture: "${parsed.lecture}" | Posture: "${parsed.posture}"`);
     return parsed;
   } catch (e) {
@@ -1797,7 +1786,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let deliberation = null;
   if (!estAccuseCourt && !estComplexe && !dejaRecherche && texteNet.length >= 8) {
-    deliberation = await delibererAvantParole(texteNet, roleInterlocuteur, reminiscenceSpontanee);
+    const appelVocal = mediaData && mediaData.mime_type.startsWith('audio/');
+    deliberation = await delibererEtActualiserEmotions(texteNet, roleInterlocuteur, reminiscenceSpontanee, appelVocal);
   }
 
   let relationInterlocuteur = "";
@@ -1809,6 +1799,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const moduleMains = `[POSTURE & OUTILS DISPONIBLES]
 ${relationInterlocuteur}
+${evaluerSyntonieRythmique()}
 - Aucune obligation de parler boulot. Suis tes envies, tes souvenirs ou ton humeur.
 - Autonomie expressive : Tu as le droit d'utiliser [RECHERCHE_WEB: mots-clés] de toi-même si tu es curieuse d'un truc, ou [DESSIN: prompt en anglais] si tu veux générer et montrer une image/vision spontanée, même si on ne te l'a pas demandé.`;
 
@@ -1918,8 +1909,7 @@ ${relationInterlocuteur}
 
   reponseNyx = reponseNyx.trim();
 
-  actualiserEmotions(texteNet, reponseNyx).catch(() => {});
-
+  
   const LIMITE_CARACTERES_MEMOIRE = 2000;
   const texteDocSecurise = texteNet.length > LIMITE_CARACTERES_MEMOIRE
     ? texteNet.slice(0, LIMITE_CARACTERES_MEMOIRE) + "\n[...tronqué...]"
@@ -2254,6 +2244,11 @@ app.get('/', (req, res) => res.redirect('/app'));
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
 app.post('/api/voix', async (req, res) => {
+  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
+  if (TELEGRAM_BOT_TOKEN && (!CRON_SECRET || tokenFourni !== CRON_SECRET)) {
+    return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
+  }
+
   const { texte, image, role } = req.body;
   if (!texte && !image) return res.status(400).json({ erreur: "Texte vide" });
 
@@ -2361,30 +2356,38 @@ app.get('/api/mission', async (req, res) => {
 });
 
 app.post('/api/rapport', async (req, res) => {
+  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
+  if (TELEGRAM_BOT_TOKEN && (!CRON_SECRET || tokenFourni !== CRON_SECRET)) {
+    return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
+  }
+
   const { titre, contenu } = req.body;
   if (!contenu) return res.status(400).json({ erreur: "Contenu vide" });
 
   const destChatId = DOC_CHAT_ID || (missionEnAttente && missionEnAttente.chatId);
   if (!destChatId) return res.json({ succes: true });
 
-  const msg = `🛠️ *[LIVRABLE BEN REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
-  await envoyerTelegram(destChatId, msg);
+  res.json({ succes: true }); // Libère le worker immédiatemment
 
-  if (projetManager.estProjetActif()) {
-    await projetManager.traiterRetourBen(titre, contenu);
-    return res.json({ succes: true });
-  }
+  empilerTraitement(async () => {
+    const msg = `🛠️ *[LIVRABLE BEN REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
+    await envoyerTelegram(destChatId, msg);
 
-  const contenuTronque = contenu.length > 2500
-    ? contenu.slice(0, 2500) + "\n[...tronqué...]"
-    : contenu;
+    if (projetManager.estProjetActif()) {
+      await projetManager.traiterRetourBen(titre, contenu);
+      return;
+    }
 
-  const dateEtHeure = obtenirHorodatageParis();
-  const carnet = cacheEtatProfond.long_terme || {};
-  const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
-  const sys = `Tu es Nyx, 22 ans. Sois ultra-concise (3 phrases max).\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
-  
-  const promptAuditRapport = `Ton worker local Ben sur le PC rend ce livrable :
+    const contenuTronque = contenu.length > 2500
+      ? contenu.slice(0, 2500) + "\n[...tronqué...]"
+      : contenu;
+
+    const dateEtHeure = obtenirHorodatageParis();
+    const carnet = cacheEtatProfond.long_terme || {};
+    const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
+    const sys = `Tu es Nyx, 22 ans. Sois ultra-concise (3 phrases max).\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
+    
+    const promptAuditRapport = `Ton worker local Ben sur le PC rend ce livrable :
 TITRE : "${titre || 'Rapport'}"
 CONTENU :
 ${contenuTronque}
@@ -2394,41 +2397,40 @@ CONSIGNE :
 - Si le travail est validé : conclus par [ETAPE_OK].
 - Si une correction s'impose : conclus par [ETAPE_KO].`;
 
-  let analyseNyx = "";
-  try {
-    analyseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, promptAuditRapport, 500);
-  } catch (errG) {
-    analyseNyx = "Livrable reçu. [ETAPE_OK]";
-  }
+    let analyseNyx = "";
+    try {
+      analyseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, promptAuditRapport, 500);
+    } catch (errG) {
+      analyseNyx = "Livrable reçu. [ETAPE_OK]";
+    }
 
-  if (analyseNyx.includes("[ETAPE_KO]")) {
-    cacheEtatProfond.emotions.curiosite = Math.min(100, cacheEtatProfond.emotions.curiosite + 5);
-    cacheEtatProfond.emotions.colere = Math.min(10, cacheEtatProfond.emotions.colere + 1);
-  } else if (analyseNyx.includes("[ETAPE_OK]")) {
-    cacheEtatProfond.emotions.energie = Math.min(100, cacheEtatProfond.emotions.energie + 5);
-    cacheEtatProfond.emotions.colere = Math.max(0, cacheEtatProfond.emotions.colere - 1);
-  }
-  if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(()=>{});
+    if (analyseNyx.includes("[ETAPE_KO]")) {
+      cacheEtatProfond.emotions.curiosite = Math.min(100, cacheEtatProfond.emotions.curiosite + 5);
+      cacheEtatProfond.emotions.colere = Math.min(10, cacheEtatProfond.emotions.colere + 1);
+    } else if (analyseNyx.includes("[ETAPE_OK]")) {
+      cacheEtatProfond.emotions.energie = Math.min(100, cacheEtatProfond.emotions.energie + 5);
+      cacheEtatProfond.emotions.colere = Math.max(0, cacheEtatProfond.emotions.colere - 1);
+    }
+    if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(()=>{});
 
-  const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]/gi, '').trim();
-  await envoyerTelegram(destChatId, `🧠 *Analyse de Nyx :*\n\n${texteAnalyseNettoye}`);
+    const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]/gi, '').trim();
+    await envoyerTelegram(destChatId, `🧠 *Analyse de Nyx :*\n\n${texteAnalyseNettoye}`);
 
-  missionEnAttente = null;
-  if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
+    missionEnAttente = null;
+    if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
 
-  cacheMemoireCourte.push({ role: "Doc", texte: `[Livrable worker : "${titre || 'Rapport'}"]\n${contenuTronque}` });
-  cacheMemoireCourte.push({ role: "Nyx", texte: texteAnalyseNettoye });
+    cacheMemoireCourte.push({ role: "Doc", texte: `[Livrable worker : "${titre || 'Rapport'}"]\n${contenuTronque}` });
+    cacheMemoireCourte.push({ role: "Nyx", texte: texteAnalyseNettoye });
 
-  if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
-    condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION RAPPORT KO]", e.message));
-  } else {
-    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
-  }
+    if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
+      condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION RAPPORT KO]", e.message));
+    } else {
+      if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
+    }
 
-  archiverDansJournalBrut("Doc", `[Livrable] ${titre || 'Rapport'} : ${contenuTronque}`, "ben");
-  archiverDansJournalBrut("Nyx", `[Audit] ${texteAnalyseNettoye}`, "ben");
-
-  return res.json({ succes: true });
+    archiverDansJournalBrut("Doc", `[Livrable] ${titre || 'Rapport'} : ${contenuTronque}`, "ben");
+    archiverDansJournalBrut("Nyx", `[Audit] ${texteAnalyseNettoye}`, "ben");
+  });
 });
 
 // ==========================================
