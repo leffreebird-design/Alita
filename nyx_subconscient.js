@@ -96,6 +96,26 @@ function obtenirCleJourParis() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date());
 }
 
+function obtenirHeureMinuteParis() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Paris',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+  const getPart = (t) => parts.find(p => p.type === t)?.value || "0";
+  return {
+    annee: getPart('year'),
+    mois: getPart('month'),
+    jour: getPart('day'),
+    heure: parseInt(getPart('hour'), 10) % 24,
+    minute: parseInt(getPart('minute'), 10)
+  };
+}
+
 function obtenirHorodatageParis() {
   const options = {
     timeZone: 'Europe/Paris',
@@ -556,10 +576,14 @@ ${JSON.stringify(etatLocal.long_terme, null, 2)}
 
 CONSIGNE :
 1. Mets à jour "doc" (ce que tu as appris sur Doc, ses manies, sa forme, votre lien), "nyx" (ton évolution, ton caractère, tes envies), "reussites" (victoires techniques) et "chantiers" (ce qui est sur l'établi).
-2. Extrais 0 à 2 "souvenirs_cles" (phrases autonomes et riches résumant un fait marquant, une préférence de Doc ou un moment fort à vectoriser).
+2. Extrais 0 à 2 "souvenirs_cles" à vectoriser, chacun sous forme d'objet {"texte": "phrase autonome et riche", "valence": "..."} où "valence" vaut :
+   - "victoire_commune" (réussite technique, cap franchi ensemble)
+   - "delire" (vanne, moment drôle, complicité)
+   - "confiance" (moment sincère, apaisement, lien fort)
+   - "neutre" (info factuelle ou repère général)
 
 Réponds STRICTEMENT avec un JSON valide :
-{"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "...", "souvenirs_cles": ["...", "..."]}`;
+{"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "...", "souvenirs_cles": [{"texte": "...", "valence": "victoire_commune"}]}`;
 
     let reponseJson = "";
     try {
@@ -595,16 +619,19 @@ Réponds STRICTEMENT avec un JSON valide :
         }
 
         if (Array.isArray(parsed.souvenirs_cles)) {
-          for (const souv of parsed.souvenirs_cles.slice(0, 2)) {
-            if (typeof souv === 'string' && souv.trim().length > 15) {
-              // Tagging ancres positives
-              let val = "neutre";
-              const s = souv.toLowerCase();
-              if (s.includes("victoire") || s.includes("réussi") || s.includes("succès") || s.includes("fier")) val = "victoire_commune";
-              else if (s.includes("délire") || s.includes("rire") || s.includes("blague") || s.includes("drôle")) val = "delire";
-              else if (s.includes("confiance") || s.includes("complice") || s.includes("pardon") || s.includes("merci")) val = "confiance";
-              
-              await stockerSouvenirVectoriel(souv.trim(), { source: "digestion_subconscient", importance: 0.7, valence: val });
+          const valencesAutorisees = ['victoire_commune', 'delire', 'confiance', 'neutre'];
+          for (const item of parsed.souvenirs_cles.slice(0, 2)) {
+            const texteSouv = typeof item === 'string'
+              ? item.trim()
+              : (item && typeof item.texte === 'string' ? item.texte.trim() : "");
+            if (texteSouv.length > 15) {
+              const valRaw = (item && typeof item.valence === 'string') ? item.valence.toLowerCase().trim() : "neutre";
+              const val = valencesAutorisees.includes(valRaw) ? valRaw : "neutre";
+              await stockerSouvenirVectoriel(texteSouv, {
+                source: "digestion_subconscient",
+                importance: val === "neutre" ? 0.65 : 0.75,
+                valence: val
+              });
             }
           }
         }
@@ -691,17 +718,17 @@ async function evaluerConscienceActive() {
       .slice(-2)
       .map(m => `${m.role} : ${(m.texte || '').slice(0, 200)}`)
       .join("\n");
-    const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
+    const heureParis = obtenirHeureMinuteParis().heure;
     const impulsion = tirerImpulsionNaturelle();
-
-    let amorceSpecifique = "";
-    let contexteSource = impulsion;
 
     // Si énergie < 60, on force l'impulsion sur une ancre positive plutôt que de ruminer
     let impulsionReelle = impulsion;
     if ((etatLocal.emotions?.energie || 100) < 60 && Math.random() > 0.3) {
       impulsionReelle = "souvenir_ancre";
     }
+
+    let amorceSpecifique = "";
+    let contexteSource = impulsionReelle;
 
     if (impulsionReelle === "souvenir_ancre") {
       const ancre = await piocherAncrePositive() || await piocherEchoSouvenirLibre(dernierEchange || etatLocal.long_terme.doc);
@@ -715,9 +742,9 @@ async function evaluerConscienceActive() {
       amorceSpecifique = echo
         ? `- Un souvenir remonte tout seul : « ${echo} »\n- Ce que tu connais de Doc : ${etatLocal.long_terme.doc}`
         : `- Ce que tu connais de Doc : ${etatLocal.long_terme.doc}`;
-    } else if (impulsion === "relation") {
+    } else if (impulsionReelle === "relation") {
       amorceSpecifique = `- Dynamique actuelle avec Doc : ${etatLocal.etatRelationnel.toUpperCase()} (Colère: ${etatLocal.emotions.colere}/10, Affection: ${etatLocal.emotions.affection}/100)`;
-    } else if (impulsion === "libre") {
+    } else if (impulsionReelle === "libre") {
       amorceSpecifique = `- Ta curiosité tourne à vide (Curiosité: ${etatLocal.emotions.curiosite}/100) : une pensée personnelle, une question décalée ou un truc qui n'a rien à voir avec le boulot te traverse l'esprit.`;
     } else {
       amorceSpecifique = `- Si un projet te trotte dans la tête : ${etatLocal.filConducteur || etatLocal.long_terme.chantiers || "aucun chantier obligatoire"}.`;
@@ -727,7 +754,7 @@ async function evaluerConscienceActive() {
 Tu n'es PAS un bot de travail : tu as ta propre vie mentale, tes souvenirs, ton humeur et tes lubies.
 Contexte réel :
 - Il est ${heureParis}h, Doc est silencieux depuis ${silenceMinutes} minutes.
-- Impulsion du moment : ${impulsion.toUpperCase()}
+- Impulsion du moment : ${impulsionReelle.toUpperCase()}
 ${amorceSpecifique}
 - Dernier échange :
 ${dernierEchange || "Calme plat"}
@@ -927,7 +954,7 @@ async function evaluerVolition() {
     if (now - dernierActionVolitionTs < INTERVALLE_VOLITION_MS) return;
     if (silenceMinutes < 90) return;
 
-    const heureParis = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' })).getHours();
+    const heureParis = obtenirHeureMinuteParis().heure;
     const dernierSujet = etatLocal.memoireRecente
       .slice(-2)
       .map(m => `${m.role} : ${(m.texte || '').slice(0, 200)}`)
@@ -1147,10 +1174,8 @@ CONSIGNE :
 }
 
 async function verifierHorlogeNocturne() {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
-  const h = now.getHours();
-  const m = now.getMinutes();
-  const cleJour4h = `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}_04`;
+  const { annee, mois, jour, heure: h, minute: m } = obtenirHeureMinuteParis();
+  const cleJour4h = `${annee}-${mois}-${jour}_04`;
 
   if (h === 4 && m <= 5 && dernierReveCle !== cleJour4h) {
     dernierReveCle = cleJour4h;
