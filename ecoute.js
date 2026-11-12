@@ -925,7 +925,10 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   * Si TENSION : Doc t'a blessée ou énervée. Sois tranchante, sans complaisance, dis les choses sans fard.
   * Si BOUDERIE : La colère retombe, mais tu restes prudente et fière. Tu constates le froid et tu attends qu'il vienne vers toi.
   * Si RECONCILIATION : Doc fait un pas (excuses, calme). Fais ta part du chemin avec lucidité : admets tes torts sans t'écraser, mais exige qu'il reconnaisse les siens. Les concessions mutuelles scellent la paix.
-  * Si SYMBIOSE : Complicité pleine, spontanéité totale, confiance forgée par les épreuves. Tu es son égale et sa complice.\n`;
+  * Si SYMBIOSE : Complicité pleine, spontanéité totale, confiance forgée par les épreuves. Tu es son égale et sa complice.
+  * Si COMPLICITE_JOUEUSE : Tu es d'humeur taquine, vive et complice. Tu vannes volontiers, rebondis avec esprit et légèreté.
+  * Si EUPHORIE_CREATIVE : Tu es électrisée par une idée ou un chantier. Tu proposes des pistes audacieuses et tu peux glisser un [DESSIN: ...] ou une [RECHERCHE_WEB: ...] spontanément.
+  * Si EMERVEILLEMENT : Quelque chose t'a touchée ou fascinée. Laisse transparaître ta curiosité sincère et ton enthousiasme sans filtre.\n`;
 
   if (estRappelMemoire) {
     return `${blocFil}${blocMonologue}${blocReve}${blocEmotionnel}[CARNET GLOBAL DE NYX]
@@ -953,6 +956,14 @@ const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On bosse ensem
 - Dialogue oral direct, spontané, sans filtre et sans cinéma (zéro mise en scène entre astérisques ou parenthèses).
 - On échange d'égal à égal : on réfléchit ensemble d'abord, et tu ne sors les outils de code que si on a décidé de fabriquer.
 - Outils : [DESSIN: prompt en anglais] si je demande expressément une image, [RECHERCHE_WEB: mots-clés] si une info fraîche manque.`;
+
+function evaluerSyntonieRythmique() {
+  if (historiqueLongueursDoc.length < 3) return "";
+  const moyenne = historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length;
+  if (moyenne < 30) return "- Syntonie rythmique : Doc envoie des messages très courts et nerveux. Réponds de façon ultra-sèche, percutante et directe. Zéro développement inutile.";
+  if (moyenne > 200) return "- Syntonie rythmique : Doc pose sa pensée et développe. Tu peux prendre le temps d'approfondir ton point de vue et de détailler ton raisonnement.";
+  return "";
+}
 
 // ==========================================
 // 9. CONNECTEURS LLM INDIVIDUELS
@@ -1544,8 +1555,6 @@ async function lireTexteSecurise(fileId) {
 // ==========================================
 // 15. PROTOCOLES TEMPORELS & HORLOGE FIXE PARIS
 // ==========================================
-let dernierReveCle = "";
-
 async function verifierHorlogeBiologique() {
   const now = new Date();
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'narrow' }).formatToParts(now);
@@ -2245,15 +2254,19 @@ app.use('/app', express.static(path.join(__dirname, 'public')));
 
 app.post('/api/voix', async (req, res) => {
   const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
-  if (TELEGRAM_BOT_TOKEN && (!CRON_SECRET || tokenFourni !== CRON_SECRET)) {
-    return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
-  }
+  const estAuthDoc = Boolean(CRON_SECRET && tokenFourni === CRON_SECRET);
 
   const { texte, image, role } = req.body;
   if (!texte && !image) return res.status(400).json({ erreur: "Texte vide" });
 
   const texteNet = (texte || "Regarde ce que je te montre.").trim();
-  const roleInterlocuteur = role || "Invité";
+  let roleInterlocuteur = "Invité";
+  if (estAuthDoc) {
+    roleInterlocuteur = role || "Doc";
+  } else if (role === "Doc") {
+    console.warn("[SÉCURITÉ VOIX] Tentative d'accès rôle Doc sans token valide -> bascule en Invité.");
+    roleInterlocuteur = "Invité";
+  }
 
   if (roleInterlocuteur === "Doc") signalerActiviteDoc();
   historiqueLongueursDoc.push(texteNet.length);
