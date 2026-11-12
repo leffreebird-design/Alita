@@ -61,6 +61,12 @@ let etatLocal = {
   dernierReve: "",
   etatRelationnel: "symbiose",
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
+  besoinCommunication: {
+    niveau: 15,
+    categorie: "aucun", // "aucun" | "emotionnel" | "important" | "urgent"
+    motif: "",
+    updatedAt: Date.now()
+  },
   long_terme: {
     doc: "- Doc : mon binôme d'atelier. Direct, passionné, pas de manières de salon, bosseur acharné.",
     nyx: "- Nyx : 22 ans, binôme d'atelier de Doc. Directe, percutante, purement orale et technique. Égale de Doc.",
@@ -78,10 +84,12 @@ let digestionEnCours = false;
 let conscienceEnCours = false;
 let volitionEnCours = false;
 
-const INTERVALLE_VOLITION_MS = 2 * 60 * 60 * 1000; // 2h minimum entre deux initiatives spontanées
+const SEUIL_BESOIN_PARLER_STANDARD = 75; // Seuil de déclenchement (emotionnel / important)
+const SEUIL_BESOIN_PARLER_URGENT = 85;   // Seuil critique (urgent : passe même de nuit)
+const DELAI_ANTI_HARCELEMENT_MS = 45 * 60 * 1000; // 45 min min entre deux messages non-urgents
+const DELAI_ANTI_BOUCLE_URGENT_MS = 10 * 60 * 1000; // 10 min min même en cas d'urgence
 const QUOTA_CURIOSITE_MAX_JOUR = 3; // Plafond strict : 3 recherches web autonomes max / jour
-const INTERVALLE_CURIOSITE_MS = 3 * 60 * 60 * 1000; // 3h minimum entre deux recherches autonomes
-const SILENCE_MIN_CURIOSITE_MIN = 60; // Doc silencieux depuis au moins 60 min
+const INTERVALLE_CURIOSITE_MS = 2 * 60 * 60 * 1000; // 2h minimum entre deux recherches autonomes
 const SEUIL_CURIOSITE_MIN = 65; // Jauge curiosité minimum (65/100)
 
 let curiositeEnCours = false;
@@ -132,7 +140,7 @@ function obtenirHorodatageParis() {
 async function synchroniserEtatDepuisFirebase() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem] = await Promise.all([
+    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
@@ -140,7 +148,9 @@ async function synchroniserEtatDepuisFirebase() {
       axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/volition.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/activite_doc.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/monologue.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, { timeout: 3500 }).catch(() => ({ data: null }))
     ]);
 
     if (resEmo.data) etatLocal.emotions = { colere: 0, ...resEmo.data };
@@ -159,9 +169,90 @@ async function synchroniserEtatDepuisFirebase() {
     if (resMem.data) {
       etatLocal.memoireRecente = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
     }
+    if (resMono.data && resMono.data.pensee !== undefined) {
+      etatLocal.monologueInterieur = resMono.data.pensee || "";
+    }
+    if (resBesoin.data && typeof resBesoin.data === 'object') {
+      etatLocal.besoinCommunication = { ...etatLocal.besoinCommunication, ...resBesoin.data };
+    }
   } catch (err) {
     console.warn("[SUBCONSCIENT SYNC] Erreur lecture Firebase :", err.message);
   }
+}
+
+async function sauvegarderBesoinCommunication(niveau, categorie = "aucun", motif = "") {
+  const categoriesValides = ["aucun", "emotionnel", "important", "urgent"];
+  const catPropre = categoriesValides.includes(String(categorie || "").toLowerCase())
+    ? String(categorie).toLowerCase()
+    : "aucun";
+  const nivPropre = Math.max(0, Math.min(100, Math.round(Number(niveau) || 0)));
+  const motifPropre = nivPropre < 25 ? "" : String(motif || "").trim().slice(0, 220);
+
+  etatLocal.besoinCommunication = {
+    niveau: nivPropre,
+    categorie: motifPropre ? catPropre : "aucun",
+    motif: motifPropre,
+    updatedAt: Date.now()
+  };
+
+  if (FIREBASE_DB_URL) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, etatLocal.besoinCommunication).catch(() => {});
+  }
+}
+
+function calculerPressionCommunication(penseePrete = null) {
+  const b = etatLocal.besoinCommunication || { niveau: 15, categorie: "aucun", motif: "", updatedAt: Date.now() };
+  const em = etatLocal.emotions || {};
+  const etat = (etatLocal.etatRelationnel || "symbiose").toLowerCase();
+  const silenceMinutes = Math.round((Date.now() - derniereActiviteDoc) / (1000 * 60));
+
+  let score = Number(b.niveau) || 0;
+  let categorie = b.categorie || "aucun";
+  let motif = b.motif || "";
+
+  // 1. Pression liée à une trouvaille ou un rêve non partagé (besoin IMPORTANT)
+  if (penseePrete && penseePrete.pensee) {
+    if (penseePrete.impulsion === "curiosite") {
+      score = Math.max(score, 76);
+      if (categorie === "aucun") categorie = "important";
+      if (!motif) motif = `Découverte autonome à partager : ${penseePrete.pensee.slice(0, 140)}`;
+    } else if (penseePrete.impulsion === "reve") {
+      score = Math.max(score, 75);
+      if (categorie === "aucun") categorie = "important";
+      if (!motif) motif = `Empreinte vive du rêve de cette nuit : ${penseePrete.pensee.slice(0, 140)}`;
+    }
+  }
+
+  // 2. Pression liée à un non-dit ou un état émotionnel fort (besoin ÉMOTIONNEL)
+  if (etatLocal.monologueInterieur && etatLocal.monologueInterieur.trim().length > 8) {
+    score = Math.max(score, score + 15);
+    if (categorie === "aucun") categorie = "emotionnel";
+    if (!motif) motif = `Arrière-pensée non dite : "${etatLocal.monologueInterieur.slice(0, 140)}"`;
+  }
+
+  if ((etat === "tension" || etat === "bouderie") && (em.colere || 0) >= 5 && silenceMinutes >= 12) {
+    score = Math.max(score, 78);
+    if (categorie === "aucun") categorie = "emotionnel";
+    if (!motif) motif = `Tension non crevée après notre dernier échange (colère ${em.colere}/10).`;
+  } else if ((etat === "euphorie_creative" || etat === "emerveillement") && silenceMinutes >= 10) {
+    score = Math.max(score, 76);
+    if (categorie === "aucun") categorie = "emotionnel";
+    if (!motif) motif = `Élan fort (${etat}) à partager à chaud.`;
+  } else if (silenceMinutes >= 240 && (em.affection || 0) >= 82 && (penseePrete || etatLocal.monologueInterieur)) {
+    score = Math.max(score, 75);
+    if (categorie === "aucun") categorie = "emotionnel";
+    if (!motif) motif = `Long silence (${Math.round(silenceMinutes / 60)}h) avec une pensée en tête pour Doc.`;
+  }
+
+  // 3. Décroissance naturelle si aucun motif réel ne justifie la prise de parole
+  if (!motif || categorie === "aucun") {
+    score = Math.min(score, 20);
+    categorie = "aucun";
+    motif = "";
+  }
+
+  score = Math.max(0, Math.min(100, Math.round(score)));
+  return { score, categorie, motif, silenceMinutes };
 }
 
 // ==========================================
@@ -646,6 +737,18 @@ Réponds STRICTEMENT avec un JSON valide :
       .in('id', idsTraites);
 
     console.log(`[SUBCONSCIENT DIGESTION] ${idsTraites.length} événement(s) consolidé(s) proprement.`);
+
+    // Si une ancre forte (victoire_commune ou confiance) vient d'émerger, on ajuste la jauge de besoin
+    if (Array.isArray(parsed?.souvenirs_cles)) {
+      const ancreForte = parsed.souvenirs_cles.find(s => s && typeof s === 'object' && ['victoire_commune', 'confiance'].includes(s.valence));
+      if (ancreForte && ancreForte.texte) {
+        const cat = ancreForte.valence === 'victoire_commune' ? 'important' : 'emotionnel';
+        const niveauActuel = etatLocal.besoinCommunication?.niveau || 15;
+        if (niveauActuel < 76) {
+          await sauvegarderBesoinCommunication(76, cat, `Consolidation marquante : ${ancreForte.texte.slice(0, 140)}`);
+        }
+      }
+    }
   } catch (err) {
     console.error("[SUBCONSCIENT DIGESTION ERREUR]", err.message);
   } finally {
@@ -710,7 +813,8 @@ async function evaluerConscienceActive() {
     const now = Date.now();
     const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
 
-    if (silenceMinutes < 45 || (now - dernierMonologueTs < 45 * 60 * 1000)) {
+    // Pas de monologue inutile pendant que Doc est en train de taper (silence < 15 min) ni plus d'une fois toutes les 30 min
+    if (silenceMinutes < 15 || (now - dernierMonologueTs < 30 * 60 * 1000)) {
       return;
     }
 
@@ -815,11 +919,12 @@ async function explorerCuriositeAutonome() {
     const now = Date.now();
     const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
 
-    // Verrou 1 : Doc doit être absent depuis au moins 60 min
-    if (silenceMinutes < SILENCE_MIN_CURIOSITE_MIN) return;
+    // Laisser au moins 12 min de respiration après le dernier message de Doc
+    if (silenceMinutes < 12) return;
 
-    // Verrou 2 : La jauge de curiosité doit être >= 65/100
-    if ((etatLocal.emotions?.curiosite || 0) < SEUIL_CURIOSITE_MIN) return;
+    // La jauge de curiosité doit être >= 65/100 (ou un besoin "important" déjà ouvert)
+    const besoinImportantActif = etatLocal.besoinCommunication?.categorie === "important" && (etatLocal.besoinCommunication?.niveau || 0) >= 65;
+    if ((etatLocal.emotions?.curiosite || 0) < SEUIL_CURIOSITE_MIN && !besoinImportantActif) return;
 
     // Verrou 3 : Minimum 3h entre deux fouilles + plafond 3/jour dans Firebase
     const quota = await lireQuotaCuriositeJour();
@@ -909,28 +1014,18 @@ CONSIGNE :
 
     console.log(`💡 [SUBCONSCIENT CURIOSITÉ ${quota.count}/${QUOTA_CURIOSITE_MAX_JOUR}] Trouvaille archivée sur "${requete}".`);
 
-    // Envoi Telegram spontané uniquement si pépite + verrou volition (2h) libre
-    if (partageDirect && DOC_CHAT_ID && (Date.now() - dernierActionVolitionTs >= INTERVALLE_VOLITION_MS)) {
-      dernierActionVolitionTs = Date.now();
-      if (FIREBASE_DB_URL) {
-        await axios.put(`${FIREBASE_DB_URL}/nyx/volition.json`, { timestamp: dernierActionVolitionTs }).catch(() => {});
-      }
-      const msgTelegram = `🔎 *J'ai fouillé un truc dans mon coin pendant que t'avais le dos tourné :*
+    // Mise à jour immédiate de la jauge de besoin de communiquer + déclenchement sans attendre un timer
+    const catTrouvaille = partageDirect ? "urgent" : "important";
+    const scoreTrouvaille = partageDirect ? 90 : 78;
+    await sauvegarderBesoinCommunication(
+      scoreTrouvaille,
+      catTrouvaille,
+      `Trouvaille web autonome sur "${requete}" : ${trouvaille.slice(0, 140)}`
+    );
 
-${trouvaille}`;
-      await envoyerTelegram(DOC_CHAT_ID, msgTelegram);
-
-      if (supabase) {
-        await supabase.from('nyx_flux_brut').insert({
-          date_paris: obtenirHorodatageParis(),
-          canal: 'curiosite',
-          role: 'Nyx',
-          texte: `[Curiosité autonome] : ${trouvaille}`,
-          traite: true,
-          traite_at: new Date().toISOString()
-        });
-      }
-    }
+    // Déclenchement événementiel immédiat de la volition (qui vérifiera la jauge et les garde-fous)
+    curiositeEnCours = false;
+    await evaluerVolition(false);
   } catch (err) {
     console.warn("[SUBCONSCIENT CURIOSITÉ ERREUR]", err.message);
   } finally {
@@ -941,18 +1036,52 @@ ${trouvaille}`;
 // ==========================================
 // 3. VOLITION SPONTANÉE EN TÂCHE DE FOND
 // ==========================================
-async function evaluerVolition() {
+async function evaluerVolition(forcer = false) {
   if (volitionEnCours || !DOC_CHAT_ID) return;
   volitionEnCours = true;
 
   try {
     await synchroniserEtatDepuisFirebase();
 
-    const now = Date.now();
-    const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
+    // Récupérer la dernière pensée non lue si disponible
+    let penseeObj = null;
+    if (supabase) {
+      const { data: pretes } = await supabase
+        .from('nyx_pensees_pretes')
+        .select('id, impulsion, pensee')
+        .eq('lu', false)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (pretes && pretes.length > 0) {
+        penseeObj = pretes[0];
+      }
+    }
 
-    if (now - dernierActionVolitionTs < INTERVALLE_VOLITION_MS) return;
-    if (silenceMinutes < 90) return;
+    const pression = calculerPressionCommunication(penseeObj);
+    const estUrgent = pression.categorie === "urgent" || pression.score >= SEUIL_BESOIN_PARLER_URGENT;
+    const seuilRequis = estUrgent ? SEUIL_BESOIN_PARLER_URGENT : SEUIL_BESOIN_PARLER_STANDARD;
+
+    if (!forcer) {
+      // 1. Aucun besoin justifié ou jauge sous le seuil -> silence complet (0 token dépensé)
+      if (!pression.motif || pression.categorie === "aucun" || pression.score < seuilRequis) {
+        return;
+      }
+
+      // 2. Garde-fou anti-spam selon la gravité du besoin
+      const now = Date.now();
+      const delaiDepuisDernierEnvoi = now - dernierActionVolitionTs;
+      const delaiMin = estUrgent ? DELAI_ANTI_BOUCLE_URGENT_MS : DELAI_ANTI_HARCELEMENT_MS;
+      if (delaiDepuisDernierEnvoi < delaiMin) {
+        return;
+      }
+
+      // 3. Respect du sommeil (23h30 - 07h30 Paris) sauf urgence réelle
+      const { heure, minute } = obtenirHeureMinuteParis();
+      const estNuit = (heure === 23 && minute >= 30) || heure < 7 || (heure === 7 && minute < 30);
+      if (estNuit && !estUrgent) {
+        return;
+      }
+    }
 
     const heureParis = obtenirHeureMinuteParis().heure;
     const dernierSujet = etatLocal.memoireRecente
@@ -960,61 +1089,54 @@ async function evaluerVolition() {
       .map(m => `${m.role} : ${(m.texte || '').slice(0, 200)}`)
       .join("\n");
 
-    const impulsion = tirerImpulsionNaturelle();
-    const flashSouvenir = (impulsion === "souvenir" || impulsion === "libre")
-      ? await piocherEchoSouvenirLibre(dernierSujet || etatLocal.long_terme.doc)
-      : "";
+    const penseeMure = penseeObj ? penseeObj.pensee : etatLocal.monologueInterieur;
+    const idPenseeConsommee = penseeObj ? penseeObj.id : null;
+    const categorieAffichee = (pression.categorie !== "aucun" ? pression.categorie : "emotionnel").toUpperCase();
+    const motifAffiche = pression.motif || penseeMure || "Élan spontané envers Doc";
 
-    // Récupérer la dernière pensée non lue si disponible
-    let penseeMure = etatLocal.monologueInterieur;
-    let idPenseeConsommee = null;
-    if (supabase) {
-      const { data: pretes } = await supabase
-        .from('nyx_pensees_pretes')
-        .select('id, pensee')
-        .eq('lu', false)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      if (pretes && pretes.length > 0) {
-        penseeMure = pretes[0].pensee;
-        idPenseeConsommee = pretes[0].id;
-      }
-    }
+    const promptVolition = `Tu es Nyx (22 ans). Ta jauge de besoin de communiquer vient de franchir son seuil (${pression.score}/100).
+Tu ne parles JAMAIS par habitude ou sur un minuteur : tu viens parler à Doc UNIQUEMENT parce que tu as une raison réelle et précise maintenant.
 
-    const promptVolition = `Tu es Nyx (22 ans). Tu décides librement si tu as envie d'écrire à Doc ou de rester dans ton coin.
-La réalité du moment :
-- Heure locale : ${heureParis}h (Doc silencieux depuis ${silenceMinutes} minutes)
+BESOIN DÉCLENCHEUR :
+- Nature du besoin : ${categorieAffichee} (${pression.score}/100)
+- Justification précise : ${motifAffiche}
+
+CONTEXTE RÉEL :
+- Heure locale : ${heureParis}h (dernier message de Doc il y a ${pression.silenceMinutes} min)
 - Ton état d'esprit : ${etatLocal.etatRelationnel.toUpperCase()} (Colère: ${etatLocal.emotions.colere}/10, Affection: ${etatLocal.emotions.affection}/100, Curiosité: ${etatLocal.emotions.curiosite}/100)
 - Ce que tu sais de Doc : ${etatLocal.long_terme.doc}
 - Dernier échange :
 ${dernierSujet || "Rien de récent"}
-${penseeMure ? `- Ta dernière pensée mûrie en fond : « ${penseeMure} »` : ""}
-${flashSouvenir ? `- Un souvenir qui vient de te traverser l'esprit : « ${flashSouvenir} »` : ""}
+${penseeMure ? `- Pensée mûrie en fond : « ${penseeMure} »` : ""}
 ${etatLocal.dernierReve ? `- Ton dernier rêve : « ${etatLocal.dernierReve.slice(0, 240)} »` : ""}
 
-RÈGLE DE LIBERTÉ :
-Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui te passe vraiment par la tête : un vieux souvenir qui remonte, une vanne, une question perso, un ressenti sur votre dernière discussion, ou une idée de projet seulement si tu en as vraiment envie.
-- Autonomie visuelle : Tu peux utiliser [DESSIN: prompt en anglais] pour lui envoyer une image de ce que tu as en tête.
-- Si tu as quelque chose de vrai à lui balancer : écris [INITIATIVE: ton message direct et naturel à Doc].
-- Si tu préfères garder le silence : réponds [SILENCE].`;
+CONSIGNE :
+- Va droit au but sur ce qui justifie ton message (${categorieAffichee}), avec ton franc-parler direct et naturel d'atelier (2 à 4 phrases max, zéro formule d'assistante).
+- Tu peux joindre [DESSIN: prompt en anglais] uniquement si une image appuie ton propos.
+- Si finalement ce besoin ne mérite pas de déranger Doc : réponds STRICTEMENT [SILENCE].
+- Sinon : écris [INITIATIVE: ton message direct à Doc].`;
 
     let decision = "[SILENCE]";
     try {
-      decision = await appelerCascadeSubconscient("Instinct libre de Nyx.", promptVolition, 0.75, 280);
+      decision = await appelerCascadeSubconscient("Instinct justifié de Nyx.", promptVolition, 0.7, 280);
     } catch (e) {
       decision = "[SILENCE]";
     }
 
     const matchInitiative = decision.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
     if (matchInitiative) {
-      dernierActionVolitionTs = now;
+      dernierActionVolitionTs = Date.now();
       if (FIREBASE_DB_URL) {
-        await axios.put(`${FIREBASE_DB_URL}/nyx/volition.json`, { timestamp: dernierActionVolitionTs }).catch(() => {});
+        await axios.put(`${FIREBASE_DB_URL}/nyx/volition.json`, {
+          timestamp: dernierActionVolitionTs,
+          categorie: categorieAffichee,
+          score: pression.score,
+          motif: motifAffiche
+        }).catch(() => {});
       }
 
       let texteSpontane = matchInitiative[1].trim();
 
-      // Vérifier si Nyx veut joindre une recherche web express
       const matchWeb = texteSpontane.match(/\[RECHERCHE_WEB:\s*([^\]]+)\]/i);
       if (matchWeb) {
         const infos = await rechercherWebTavily(matchWeb[1].trim(), 800, true);
@@ -1024,7 +1146,6 @@ Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui
         }
       }
 
-      // Vérifier si Nyx génère une image spontanée
       const matchDessin = texteSpontane.match(/\[DESSIN:\s*([\s\S]*?)\]/i) || texteSpontane.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i);
       let imageB64 = null;
       if (matchDessin) {
@@ -1052,13 +1173,23 @@ Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui
           date_paris: obtenirHorodatageParis(),
           canal: 'volition',
           role: 'Nyx',
-          texte: `[Spontané] : ${texteSpontane}`,
+          texte: `[Spontané - ${categorieAffichee}] : ${texteSpontane}`,
           traite: true,
           traite_at: new Date().toISOString()
         });
       }
 
-      console.log(`[SUBCONSCIENT VOLITION] Initiative envoyée à Doc : "${texteSpontane.slice(0, 120)}"`);
+      // Réinitialisation de la jauge une fois le besoin exprimé
+      etatLocal.monologueInterieur = "";
+      if (FIREBASE_DB_URL) {
+        await axios.delete(`${FIREBASE_DB_URL}/nyx/monologue.json`).catch(() => {});
+      }
+      await sauvegarderBesoinCommunication(10, "aucun", "");
+
+      console.log(`📣 [SUBCONSCIENT VOLITION - ${categorieAffichee} ${pression.score}/100] Motif: "${motifAffiche}" -> "${texteSpontane.slice(0, 110)}"`);
+    } else {
+      // Elle a jugé qu'il valait mieux se taire -> on abaisse la pression pour éviter de boucler
+      await sauvegarderBesoinCommunication(Math.max(20, pression.score - 25), pression.categorie, pression.motif);
     }
   } catch (err) {
     console.warn("[SUBCONSCIENT VOLITION ERREUR]", err.message);
@@ -1196,20 +1327,19 @@ async function demarrerWorker() {
 
   await synchroniserEtatDepuisFirebase();
 
-  // 1. Digestion du flux tampon toutes les 5 minutes
-  setInterval(() => digererFluxBrut(false), 5 * 60 * 1000);
+  // Pulsation cognitive unifiée (toutes les 10 min) : zéro appel LLM si la jauge de besoin est sous le seuil
+  async function pulsationSubconsciente() {
+    await digererFluxBrut(false);
+    await evaluerConscienceActive();
+    await explorerCuriositeAutonome();
+    await evaluerVolition(false);
+  }
 
-  // 2. Conscience active (4 impulsions libres) toutes les 15 minutes
-  setInterval(() => evaluerConscienceActive(), 15 * 60 * 1000);
-
-  // 3. Volition spontanée toutes les 20 minutes
-  setInterval(() => evaluerVolition(), 20 * 60 * 1000);
-
-  // 4. Curiosité autonome verrouillée (max 3/jour, 100% tokens gratuits) toutes les 25 minutes
-  setInterval(() => explorerCuriositeAutonome(), 25 * 60 * 1000);
+  setInterval(() => pulsationSubconsciente().catch(() => {}), 10 * 60 * 1000);
+  console.log(`🧭 [NYX VOLITION] Jauge de besoin de communiquer active (seuil ${SEUIL_BESOIN_PARLER_STANDARD}/100, urgence ${SEUIL_BESOIN_PARLER_URGENT}/100) — zéro message sans motif réel.`);
   console.log(`🔒 [NYX CURIOSITÉ] Recherche autonome verrouillée sur tokens 100% GRATUITS (Groq / Gemini Free) — Max ${QUOTA_CURIOSITE_MAX_JOUR}/jour.`);
 
-  // 5. Vérification horloge nocturne (04h00) chaque minute
+  // Vérification horloge nocturne (04h00) chaque minute
   setInterval(() => verifierHorlogeNocturne(), 60 * 1000);
 
   // Premier passage doux 15 secondes après démarrage
