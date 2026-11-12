@@ -1532,6 +1532,19 @@ async function lirePdfSecurise(fileId) {
   throw new Error(`Échec de lecture visuelle : ${erreurRetour?.response?.data?.error?.message || erreurRetour?.message || "Modèles 3.x inaccessibles"}`);
 }
 
+function plafonnerTexteDocument(texte, maxChars = 22000) {
+  const propre = String(texte || "").trim();
+  if (propre.length <= maxChars) return propre;
+  return propre.slice(0, maxChars) + "\n\n[...document tronqué à 22 000 caractères pour préserver la mémoire du serveur...]";
+}
+
+function formaterDocumentPourNyx(typeDoc, nomFichier, contenu, consigneDoc) {
+  const contenuSecurise = plafonnerTexteDocument(contenu, 22000);
+  const consigneFinale = (consigneDoc || "").trim()
+    || "Donne ton avis franc de binôme d'atelier sur ce document (ce qui te plaît, ce qui te fait tiquer ou ce qu'il faut ajuster), avec ton franc-parler habituel et zéro formule polie d'assistant.";
+  return `[${typeDoc} PARTAGÉ PAR DOC : "${nomFichier}"]\n${contenuSecurise}\n[FIN DU DOCUMENT]\n\nConsigne de réaction (ton oral direct d'atelier, zéro langue de bois corporate) : ${consigneFinale}`;
+}
+
 async function lireDocxSecurise(fileId) {
   const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
   const resMeta = await axios.get(urlMeta);
@@ -1539,7 +1552,7 @@ async function lireDocxSecurise(fileId) {
   const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
   const data = await mammoth.extractRawText({ buffer: Buffer.from(resDoc.data) });
   resDoc.data = null;
-  return data.value;
+  return plafonnerTexteDocument(data.value, 22000);
 }
 
 async function lireTexteSecurise(fileId) {
@@ -1549,7 +1562,7 @@ async function lireTexteSecurise(fileId) {
   const resDoc = await axios.get(urlDoc, { responseType: 'arraybuffer' });
   const texte = Buffer.from(resDoc.data).toString('utf-8');
   resDoc.data = null;
-  return texte;
+  return plafonnerTexteDocument(texte, 22000);
 }
 
 // ==========================================
@@ -2091,7 +2104,7 @@ app.post('/telegram', (req, res) => {
           await envoyerTelegram(chatId, "⏳ _Ingestion du PDF..._");
           let pdfText = await lirePdfSecurise(msg.document.file_id);
           if (!pdfText || pdfText.trim() === "") throw new Error("Document vide ou sans OCR.");
-          texteFinal = `[CONTENU PDF "${msg.document.file_name}"]\n\n${pdfText}\n\n[FIN]\n\n${texteFinal}`;
+          texteFinal = formaterDocumentPourNyx("CONTENU PDF", msg.document.file_name, pdfText, texteFinal);
           pdfText = null;
         } catch (err) {
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture PDF : ${err.message}`);
@@ -2102,7 +2115,7 @@ app.post('/telegram', (req, res) => {
           await envoyerTelegram(chatId, "⏳ _Lecture DOCX..._");
           let docxText = await lireDocxSecurise(msg.document.file_id);
           if (!docxText || docxText.trim() === "") throw new Error("Document vide.");
-          texteFinal = `[CONTENU DOCX "${msg.document.file_name}"]\n\n${docxText}\n\n[FIN]\n\n${texteFinal}`;
+          texteFinal = formaterDocumentPourNyx("CONTENU DOCX", msg.document.file_name, docxText, texteFinal);
           docxText = null;
         } catch (err) {
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture DOCX : ${err.message}`);
@@ -2119,7 +2132,7 @@ app.post('/telegram', (req, res) => {
         try {
           await envoyerTelegram(chatId, `⏳ _Lecture fichier "${msg.document.file_name}"..._`);
           let texteFichier = await lireTexteSecurise(msg.document.file_id);
-          texteFinal = `[FICHIER "${msg.document.file_name}"]\n\n${texteFichier}\n\n[FIN]\n\n${texteFinal}`;
+          texteFinal = formaterDocumentPourNyx("FICHIER", msg.document.file_name, texteFichier, texteFinal);
           texteFichier = null;
         } catch (err) {
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture fichier : ${err.message}`);
