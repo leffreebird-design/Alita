@@ -744,32 +744,49 @@ function analyserStlBuffer(buffer, nomFichier) {
 
 function analyserObjBuffer(buffer, nomFichier) {
   try {
-    const text = buffer.toString("utf8");
-    const lines = text.split(/\r?\n/);
-    let vCount = 0, fCount = 0, gCount = 0;
+    let vCount = 0, fCount = 0;
+    const objets = [];
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    
-    for (const line of lines) {
-      if (line.startsWith('v ')) {
-        vCount++;
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 4) {
-          const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
-          if (x < minX) minX = x; if (x > maxX) maxX = x;
-          if (y < minY) minY = y; if (y > maxY) maxY = y;
-          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+
+    let start = 0;
+    const len = buffer.length;
+    while (start < len) {
+      let end = buffer.indexOf(10, start); // '\n'
+      if (end === -1) end = len;
+      const b0 = buffer[start];
+      const b1 = start + 1 < end ? buffer[start + 1] : 0;
+
+      if (b1 === 32 && (b0 === 118 || b0 === 102 || b0 === 103 || b0 === 111)) { // 'v ', 'f ', 'g ', 'o '
+        const line = buffer.toString("utf8", start, end).trim();
+        if (b0 === 118) {
+          vCount++;
+          const parts = line.split(/\s+/);
+          if (parts.length >= 4) {
+            const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
+            if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+              if (x < minX) minX = x; if (x > maxX) maxX = x;
+              if (y < minY) minY = y; if (y > maxY) maxY = y;
+              if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            }
+          }
+        } else if (b0 === 102) {
+          fCount++;
+        } else {
+          const nomObj = line.slice(2).trim();
+          if (nomObj && !objets.includes(nomObj) && objets.length < 25) {
+            objets.push(nomObj);
+          }
         }
-      } else if (line.startsWith('f ')) {
-        fCount++;
-      } else if (line.startsWith('g ') || line.startsWith('o ')) {
-        gCount++;
       }
+      start = end + 1;
     }
-    
+
     if (vCount > 0) {
       const dim = `Dimensions : ${(maxX - minX).toFixed(1)} x ${(maxY - minY).toFixed(1)} x ${(maxZ - minZ).toFixed(1)} mm`;
-      const struct = gCount > 1 ? `${gCount} sous-objets` : '1 objet unifié';
-      return `Modèle 3D OBJ "${nomFichier}" : ${vCount} sommets, ${fCount} faces, ${struct} | ${dim}.`;
+      const struct = objets.length > 0
+        ? `${objets.length} groupe(s)/pièce(s) [${objets.slice(0, 12).join(", ")}${objets.length > 12 ? "..." : ""}]`
+        : "1 maillage unifié";
+      return `Modèle 3D OBJ "${nomFichier}" (${(buffer.length / (1024 * 1024)).toFixed(2)} Mo) : ${vCount} sommets, ${fCount} faces, ${struct} | ${dim}.`;
     }
   } catch (e) {}
   return `Fichier OBJ "${nomFichier}" (${buffer.length} octets).`;
@@ -2293,14 +2310,34 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
   return { texteNet, imageB64, artefactsProduits };
 }
 
-async function lireMediaSecurise(fileId) {
-  const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
-  const resMeta = await axios.get(urlMeta);
-  const urlMedia = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
-  const resMedia = await axios.get(urlMedia, { responseType: 'arraybuffer' });
-  const b64 = Buffer.from(resMedia.data).toString('base64');
-  resMedia.data = null;
-  return b64;
+const LIMITE_TELEGRAM_BOT_BYTES = 20 * 1024 * 1024; // Plafond strict de l'API Bot Telegram (20 Mo)
+
+async function lireBufferTelegramSecurise(fileId, fileSize = 0) {
+  if (fileSize && fileSize > LIMITE_TELEGRAM_BOT_BYTES) {
+    const tailleMo = (fileSize / (1024 * 1024)).toFixed(1);
+    throw new Error(`TELEGRAM_FILE_TOO_BIG:${tailleMo}`);
+  }
+  try {
+    const urlMeta = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/getFile?file_id=" + encodeURIComponent(fileId);
+    const resMeta = await axios.get(urlMeta, { timeout: 15000 });
+    const urlMedia = "https://api.telegram.org/file/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/" + resMeta.data.result.file_path;
+    const resMedia = await axios.get(urlMedia, { responseType: 'arraybuffer', timeout: 45000 });
+    const buf = Buffer.from(resMedia.data);
+    resMedia.data = null;
+    return buf;
+  } catch (err) {
+    const descTg = err.response?.data?.description || "";
+    if (/file is too big/i.test(descTg) || err.response?.status === 400) {
+      const tailleMo = fileSize ? (fileSize / (1024 * 1024)).toFixed(1) : ">20";
+      throw new Error(`TELEGRAM_FILE_TOO_BIG:${tailleMo}`);
+    }
+    throw new Error(descTg || err.message);
+  }
+}
+
+async function lireMediaSecurise(fileId, fileSize = 0) {
+  const buf = await lireBufferTelegramSecurise(fileId, fileSize);
+  return buf.toString('base64');
 }
 
 async function lirePdfSecurise(fileId) {
@@ -2943,6 +2980,56 @@ app.post('/telegram', (req, res) => {
       return;
     }
 
+    if (texteMessageClavier.startsWith('/importer_url') || texteMessageClavier.startsWith('!importer_url')) {
+      const urlCible = texteMessageClavier.replace(/^[\/!]importer_url\s*/i, '').trim();
+      if (!urlCible || !/^https?:\/\//i.test(urlCible)) {
+        return await envoyerTelegram(chatId, "⚠️ Donne un lien direct valide après `/importer_url` (ex: lien Supabase Storage, Drive direct ou serveur local).");
+      }
+      await envoyerTelegram(chatId, "📥 _Téléchargement direct haute capacité en cours (bypass limite 20 Mo Telegram)..._");
+      await afficherFrappeTelegram(chatId);
+      try {
+        const resDl = await axios.get(urlCible, { responseType: 'arraybuffer', timeout: 60000, maxContentLength: 100 * 1024 * 1024 });
+        const bufDl = Buffer.from(resDl.data);
+        resDl.data = null;
+        const nomUrl = decodeURIComponent(urlCible.split('?')[0].split('/').pop() || `import_${Date.now()}.obj`);
+        const nomMin = nomUrl.toLowerCase();
+
+        let resumeImport = "";
+        let typeImport = "fichier_importe";
+        let mimeImport = "application/octet-stream";
+
+        if (nomMin.endsWith('.obj')) {
+          resumeImport = analyserObjBuffer(bufDl, nomUrl);
+          typeImport = "obj_recu";
+          mimeImport = "text/plain";
+        } else if (nomMin.endsWith('.stl')) {
+          resumeImport = analyserStlBuffer(bufDl, nomUrl);
+          typeImport = "stl_recu";
+          mimeImport = "application/sla";
+        } else {
+          resumeImport = `Fichier importé "${nomUrl}" (${(bufDl.length / (1024 * 1024)).toFixed(2)} Mo).`;
+        }
+
+        await archiverArtefactAtelier({
+          projet: cacheEtatProfond.filConducteur || "pieces_doc",
+          type: typeImport,
+          nomFichier: nomUrl,
+          buffer: bufDl,
+          mimeType: mimeImport,
+          resume: resumeImport,
+          chatId
+        });
+
+        const promptAnalyseImport = formaterDocumentPourNyx(`FICHIER 3D IMPORTÉ (${(bufDl.length / (1024 * 1024)).toFixed(1)} Mo)`, nomUrl, resumeImport, "Analyse les cotes, la structure et ce qu'on peut faire de cette pièce.");
+        const reponseImport = await traiterFlux(promptAnalyseImport, null, "");
+        const sortieImp = await executerSortiesAtelier(reponseImport, chatId, cacheEtatProfond.filConducteur);
+        if (sortieImp.texteNet) await envoyerTelegram(chatId, sortieImp.texteNet);
+      } catch (errImp) {
+        await envoyerTelegram(chatId, `⚠️ Échec import URL : ${errImp.message}`);
+      }
+      return;
+    }
+
     if (texteMessageClavier.startsWith('/plan') || texteMessageClavier.startsWith('!plan')) {
       const descPlan = texteMessageClavier.replace(/^[\/!]plan\s*/i, '').trim();
       if (!descPlan) return await envoyerTelegram(chatId, "⚠️ Décris le schéma ou plan coté après `/plan`.");
@@ -3122,10 +3209,10 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
       } 
       else if (fileName.endsWith('.stl') || fileName.endsWith('.obj')) {
         try {
-          await envoyerTelegram(chatId, `🧊 _Inspection géométrique du modèle 3D "${msg.document.file_name}"..._`);
-          const b643D = await lireMediaSecurise(msg.document.file_id);
-          const buf3D = Buffer.from(b643D, 'base64');
-          
+          const tailleOctets = Number(msg.document.file_size) || 0;
+          await envoyerTelegram(chatId, `🧊 _Inspection géométrique du modèle 3D "${msg.document.file_name}"${tailleOctets ? ` (${(tailleOctets / (1024 * 1024)).toFixed(1)} Mo)` : ""}..._`);
+          const buf3D = await lireBufferTelegramSecurise(msg.document.file_id, tailleOctets);
+
           let resume3D = "";
           let mimeType3D = "application/sla";
           if (fileName.endsWith('.obj')) {
@@ -3134,7 +3221,7 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
           } else {
             resume3D = analyserStlBuffer(buf3D, msg.document.file_name);
           }
-          
+
           await archiverArtefactAtelier({
             projet: cacheEtatProfond.filConducteur || "pieces_doc",
             type: fileName.endsWith('.obj') ? "obj_recu" : "stl_recu",
@@ -3146,6 +3233,23 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
           });
           texteFinal = formaterDocumentPourNyx(`MODÈLE 3D ${fileName.endsWith('.obj') ? 'OBJ' : 'STL'}`, msg.document.file_name, resume3D, texteFinal);
         } catch (err) {
+          if (String(err.message || "").startsWith("TELEGRAM_FILE_TOO_BIG:")) {
+            const tailleStr = err.message.split(":")[1] || ">20";
+            // Délégation automatique à Ben sur le PC (0 VRAM) si libre
+            if (!missionEnAttente) {
+              const missionScanLocal = {
+                type: "RAW_TASK",
+                description: `Scanner géométriquement (0 VRAM, pur Python) le fichier 3D local "${msg.document.file_name}" dans C:\Nyx_Atelier\ ou Téléchargements (cotes X/Y/Z mm, sommets, faces, sous-objets) et renvoyer le rapport.`,
+                requiresHumanAck: false
+              };
+              missionEnAttente = { action: missionScanLocal, statut: "attente", chatId };
+              if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+            }
+            return await envoyerTelegram(
+              chatId,
+              `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nTelegram bloque le téléchargement direct côté serveur au-delà de 20 Mo. Trois options immédiates :\n1. *Via Ben (PC local, 0 VRAM) :* J'ai mis en file l'inspection locale de \`${msg.document.file_name}\` dès que Ben tourne.\n2. *Envoi direct haute capacité :* Pousse le fichier sur \`POST /api/atelier/upload\` (jusqu'à 100 Mo) ou utilise \`/importer_url <lien>\`.\n3. *Allègement :* Exporte en \`.stl\` binaire ou décime le maillage sous 20 Mo pour un envoi direct ici.`
+            );
+          }
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture 3D : ${err.message}`);
         }
       }
@@ -3462,6 +3566,63 @@ CONSIGNE :
     archiverDansJournalBrut("Doc", `[Livrable] ${titre || 'Rapport'} : ${contenuTronque}`, "ben");
     archiverDansJournalBrut("Nyx", `[Audit] ${texteAnalyseNettoye}`, "ben");
   });
+});
+
+// Upload direct haute capacité (jusqu'à 100 Mo) pour contourner la limite 20 Mo des bots Telegram
+app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), async (req, res) => {
+  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
+  if (TELEGRAM_BOT_TOKEN && (!CRON_SECRET || tokenFourni !== CRON_SECRET)) {
+    return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
+  }
+
+  const nomFichier = assainirParametre(req.headers['x-filename'] || req.query.filename) || `piece_${Date.now()}.obj`;
+  const projetNom = assainirParametre(req.headers['x-projet'] || req.query.projet) || cacheEtatProfond.filConducteur || "pieces_doc";
+  const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+
+  if (!buffer || buffer.length === 0) {
+    return res.status(400).json({ erreur: "Fichier vide." });
+  }
+
+  try {
+    const nomMin = nomFichier.toLowerCase();
+    let resume = `Fichier atelier "${nomFichier}" (${(buffer.length / (1024 * 1024)).toFixed(2)} Mo).`;
+    let typeArt = "fichier_upload";
+    let mimeType = "application/octet-stream";
+
+    if (nomMin.endsWith('.obj')) {
+      resume = analyserObjBuffer(buffer, nomFichier);
+      typeArt = "obj_recu";
+      mimeType = "text/plain";
+    } else if (nomMin.endsWith('.stl')) {
+      resume = analyserStlBuffer(buffer, nomFichier);
+      typeArt = "stl_recu";
+      mimeType = "application/sla";
+    }
+
+    const artefact = await archiverArtefactAtelier({
+      projet: projetNom,
+      type: typeArt,
+      nomFichier,
+      buffer,
+      mimeType,
+      resume,
+      chatId: DOC_CHAT_ID
+    });
+
+    res.json({ succes: true, resume, artefact });
+
+    if (DOC_CHAT_ID) {
+      empilerTraitement(async () => {
+        await envoyerTelegram(DOC_CHAT_ID, `📦 *Fichier haute capacité reçu sur l'établi :*\n${resume}`);
+        const promptSuite = formaterDocumentPourNyx("MODÈLE 3D REÇU (DIRECT)", nomFichier, resume, "Donne ton diagnostic technique rapide sur cette pièce.");
+        const rep = await traiterFlux(promptSuite, null, "");
+        const sortie = await executerSortiesAtelier(rep, DOC_CHAT_ID, projetNom);
+        if (sortie.texteNet) await envoyerTelegram(DOC_CHAT_ID, sortie.texteNet);
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ erreur: err.message });
+  }
 });
 
 // ==========================================
