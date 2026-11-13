@@ -415,7 +415,7 @@ async function archiverArtefactAtelier({ projet = "general", type = "fichier", n
   if (projetManager.estProjetActif() && !missionEnAttente && signedUrl && /\.(stl|scad|svg|py|js|json|md|html)$/i.test(nomPropre)) {
     const cmdMiroir = {
       type: "RAW_TASK",
-      description: `Télécharger et sauvegarder sur disque local (0 VRAM) dans C:\\Nyx_Atelier\\${projetSlug}\\${nomPropre} depuis ${signedUrl}`,
+      description: `Télécharger et sauvegarder sur disque local (0 VRAM) dans C:/Nyx_Atelier/${projetSlug}/${nomPropre} depuis ${signedUrl} (utilise des slashs / en Python pour éviter toute erreur d échappement)`,
       requiresHumanAck: false
     };
     missionEnAttente = { action: cmdMiroir, statut: "attente", chatId: chatId || DOC_CHAT_ID };
@@ -2980,6 +2980,22 @@ app.post('/telegram', (req, res) => {
       return;
     }
 
+    if (texteMessageClavier.startsWith('/analyser_local') || texteMessageClavier.startsWith('!analyser_local')) {
+      const cheminBrut = texteMessageClavier.replace(/^[\/!]analyser_local\s*/i, '').trim().replace(/^["']|["']$/g, '');
+      if (!cheminBrut) {
+        return await envoyerTelegram(chatId, "⚠️ Indique le chemin complet du fichier sur ton PC après `/analyser_local` (ex: `/analyser_local D:/3D/main_gauche.obj`).");
+      }
+      const cheminSlash = cheminBrut.replace(/\\/g, '/');
+      const missionScanExact = {
+        type: "RAW_TASK",
+        description: `En Python pur (utilise pathlib.Path(r"${cheminSlash}"), 0 VRAM, sans trimesh si absent), vérifie si le fichier "${cheminSlash}" existe. S'il n'existe pas, signale-le immédiatement. S'il existe, compte les sommets ('v '), faces ('f ') ou triangles STL, calcule les dimensions X/Y/Z en mm et renvoie le rapport.`,
+        requiresHumanAck: false
+      };
+      missionEnAttente = { action: missionScanExact, statut: "attente", chatId };
+      if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+      return await envoyerTelegram(chatId, `🔍 *Inspection locale demandée à Ben sur :*\n\`${cheminSlash}\``);
+    }
+
     if (texteMessageClavier.startsWith('/importer_url') || texteMessageClavier.startsWith('!importer_url')) {
       const urlCible = texteMessageClavier.replace(/^[\/!]importer_url\s*/i, '').trim();
       if (!urlCible || !/^https?:\/\//i.test(urlCible)) {
@@ -3235,19 +3251,9 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
         } catch (err) {
           if (String(err.message || "").startsWith("TELEGRAM_FILE_TOO_BIG:")) {
             const tailleStr = err.message.split(":")[1] || ">20";
-            // Délégation automatique à Ben sur le PC (0 VRAM) si libre
-            if (!missionEnAttente) {
-              const missionScanLocal = {
-                type: "RAW_TASK",
-                description: `Scanner géométriquement (0 VRAM, pur Python) le fichier 3D local "${msg.document.file_name}" dans C:\Nyx_Atelier\ ou Téléchargements (cotes X/Y/Z mm, sommets, faces, sous-objets) et renvoyer le rapport.`,
-                requiresHumanAck: false
-              };
-              missionEnAttente = { action: missionScanLocal, statut: "attente", chatId };
-              if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-            }
             return await envoyerTelegram(
               chatId,
-              `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nTelegram bloque le téléchargement direct côté serveur au-delà de 20 Mo. Trois options immédiates :\n1. *Via Ben (PC local, 0 VRAM) :* J'ai mis en file l'inspection locale de \`${msg.document.file_name}\` dès que Ben tourne.\n2. *Envoi direct haute capacité :* Pousse le fichier sur \`POST /api/atelier/upload\` (jusqu'à 100 Mo) ou utilise \`/importer_url <lien>\`.\n3. *Allègement :* Exporte en \`.stl\` binaire ou décime le maillage sous 20 Mo pour un envoi direct ici.`
+              `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nTelegram bloque le téléchargement côté serveur au-delà de 20 Mo. Pour me le passer :\n1. Exporte-le en \`.stl\` binaire (beaucoup plus léger que \`.obj\`) et renvoie-le ici.\n2. Ou pousse-le directement via \`/importer_url <lien>\` ou \`POST /api/atelier/upload\` (jusqu'à 100 Mo).\n3. S'il est sur ton PC, donne-moi son chemin exact avec \`/analyser_local <chemin>\`.`
             );
           }
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture 3D : ${err.message}`);
