@@ -741,6 +741,40 @@ function analyserStlBuffer(buffer, nomFichier) {
   return `Fichier STL "${nomFichier}" (${buffer.length} octets).`;
 }
 
+
+function analyserObjBuffer(buffer, nomFichier) {
+  try {
+    const text = buffer.toString("utf8");
+    const lines = text.split(/\r?\n/);
+    let vCount = 0, fCount = 0, gCount = 0;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    
+    for (const line of lines) {
+      if (line.startsWith('v ')) {
+        vCount++;
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+        }
+      } else if (line.startsWith('f ')) {
+        fCount++;
+      } else if (line.startsWith('g ') || line.startsWith('o ')) {
+        gCount++;
+      }
+    }
+    
+    if (vCount > 0) {
+      const dim = `Dimensions : ${(maxX - minX).toFixed(1)} x ${(maxY - minY).toFixed(1)} x ${(maxZ - minZ).toFixed(1)} mm`;
+      const struct = gCount > 1 ? `${gCount} sous-objets` : '1 objet unifié';
+      return `Modèle 3D OBJ "${nomFichier}" : ${vCount} sommets, ${fCount} faces, ${struct} | ${dim}.`;
+    }
+  } catch (e) {}
+  return `Fichier OBJ "${nomFichier}" (${buffer.length} octets).`;
+}
+
 async function genererPiece3D(description, contexteProjet = "") {
   const promptCad = `Tu es le moteur CAO paramétrique de Nyx. Transforme cette demande de pièce 3D en un assemblage géométrique exact (en millimètres) ET son script OpenSCAD.
 
@@ -3086,24 +3120,33 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture DOCX : ${err.message}`);
         }
       } 
-      else if (fileName.endsWith('.stl')) {
+      else if (fileName.endsWith('.stl') || fileName.endsWith('.obj')) {
         try {
           await envoyerTelegram(chatId, `🧊 _Inspection géométrique du modèle 3D "${msg.document.file_name}"..._`);
-          const b64Stl = await lireMediaSecurise(msg.document.file_id);
-          const bufStl = Buffer.from(b64Stl, 'base64');
-          const resumeStl = analyserStlBuffer(bufStl, msg.document.file_name);
+          const b643D = await lireMediaSecurise(msg.document.file_id);
+          const buf3D = Buffer.from(b643D, 'base64');
+          
+          let resume3D = "";
+          let mimeType3D = "application/sla";
+          if (fileName.endsWith('.obj')) {
+            resume3D = analyserObjBuffer(buf3D, msg.document.file_name);
+            mimeType3D = "text/plain";
+          } else {
+            resume3D = analyserStlBuffer(buf3D, msg.document.file_name);
+          }
+          
           await archiverArtefactAtelier({
             projet: cacheEtatProfond.filConducteur || "pieces_doc",
-            type: "stl_recu",
+            type: fileName.endsWith('.obj') ? "obj_recu" : "stl_recu",
             nomFichier: msg.document.file_name,
-            buffer: bufStl,
-            mimeType: "application/sla",
-            resume: resumeStl,
+            buffer: buf3D,
+            mimeType: mimeType3D,
+            resume: resume3D,
             chatId
           });
-          texteFinal = formaterDocumentPourNyx("MODÈLE 3D STL", msg.document.file_name, resumeStl, texteFinal);
+          texteFinal = formaterDocumentPourNyx(`MODÈLE 3D ${fileName.endsWith('.obj') ? 'OBJ' : 'STL'}`, msg.document.file_name, resume3D, texteFinal);
         } catch (err) {
-          return await envoyerTelegram(chatId, `⚠️ Erreur lecture STL : ${err.message}`);
+          return await envoyerTelegram(chatId, `⚠️ Erreur lecture 3D : ${err.message}`);
         }
       }
       else if (
@@ -3112,7 +3155,7 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
         mime === 'application/json' ||
         mime === 'application/javascript' ||
         mime === 'application/xml' ||
-        /\.(txt|js|json|py|md|html|htm|css|xml|sh|env|ts|jsx|tsx|c|cpp|h|cs|php|sql|yaml|yml|scad|svg|dxf|obj|csv)$/i.test(fileName)
+        /\.(txt|js|json|py|md|html|htm|css|xml|sh|env|ts|jsx|tsx|c|cpp|h|cs|php|sql|yaml|yml|scad|svg|dxf|csv)$/i.test(fileName)
       ) {
         try {
           await envoyerTelegram(chatId, `⏳ _Lecture fichier "${msg.document.file_name}"..._`);
