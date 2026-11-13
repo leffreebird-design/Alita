@@ -60,8 +60,10 @@ let etatLocal = {
   monologueInterieur: "",
   dernierReve: "",
   ideesFolles: [],
-  obsessions: [], // Vierges au démarrage
-  convictions: [], // Vierges au démarrage
+  obsessions: [], // 3 maximum (identite, relation, technique) — Vierges au démarrage
+  convictions: [], // 5 à 8 maximum (croyances évolutives avec cicatrices) — Vierges au démarrage
+  artefacts: [], // Index persistant des fichiers créés à l'atelier
+  dernierPartageObsessionTs: 0,
   etatRelationnel: "symbiose",
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
   temperamentBasal: { affection: 75, curiosite: 70, energie: 80, colere: 0 }, // Ligne de base évolutive
@@ -144,7 +146,7 @@ function obtenirHorodatageParis() {
 async function synchroniserEtatDepuisFirebase() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv] = await Promise.all([
+    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv, resTemp, resArt] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
@@ -157,7 +159,9 @@ async function synchroniserEtatDepuisFirebase() {
       axios.get(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/obsessions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 3500 }).catch(() => ({ data: null }))
     ]);
 
     if (resEmo.data) etatLocal.emotions = { colere: 0, ...resEmo.data };
@@ -187,10 +191,16 @@ async function synchroniserEtatDepuisFirebase() {
       etatLocal.ideesFolles = arr.filter(Boolean).slice(-12);
     }
     if (resObs?.data) {
-      etatLocal.obsessions = Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data);
+      etatLocal.obsessions = (Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data)).filter(Boolean).slice(-3);
     }
     if (resConv?.data) {
-      etatLocal.convictions = Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data);
+      etatLocal.convictions = (Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data)).filter(Boolean).slice(-8);
+    }
+    if (resTemp?.data && typeof resTemp.data === 'object') {
+      etatLocal.temperamentBasal = { ...etatLocal.temperamentBasal, ...resTemp.data };
+    }
+    if (resArt?.data) {
+      etatLocal.artefacts = (Array.isArray(resArt.data) ? resArt.data : Object.values(resArt.data)).filter(Boolean).slice(-30);
     }
   } catch (err) {
     console.warn("[SUBCONSCIENT SYNC] Erreur lecture Firebase :", err.message);
@@ -654,6 +664,507 @@ function envoyerPhotoTelegram(chatId, base64Image) {
   });
 }
 
+function envoyerDocumentTelegram(chatId, buffer, filename, mimeType = "application/octet-stream", caption = "") {
+  if (!TELEGRAM_BOT_TOKEN || !chatId || !buffer) return Promise.resolve();
+  const boundary = '----TelegramDocBoundary' + Math.random().toString(16).slice(2);
+  let header = `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`;
+  if (caption) {
+    header += `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${String(caption).slice(0, 900)}\r\n`;
+  }
+  header += `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`;
+  const footer = `\r\n--${boundary}--\r\n`;
+  let payload = Buffer.concat([Buffer.from(header, 'utf8'), buffer, Buffer.from(footer, 'utf8')]);
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: "/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendDocument",
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': payload.length }
+    }, () => {
+      payload = null;
+      resolve();
+    });
+    req.on('error', (err) => {
+      payload = null;
+      reject(err);
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
+// ==========================================
+// ÉTABLI PERSISTANT (SUPABASE STORAGE) & FABRICATION 3D / PLANS
+// ==========================================
+const BUCKET_ATELIER = "nyx-atelier";
+let bucketAtelierPret = false;
+
+function slugifierNom(texte, fallback = "artefact") {
+  const clean = String(texte || fallback)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+  return clean || fallback;
+}
+
+async function initialiserAtelierStorage() {
+  if (!supabase || bucketAtelierPret) return bucketAtelierPret;
+  try {
+    const { data: buckets, error } = await supabase.storage.listBuckets();
+    if (!error && Array.isArray(buckets)) {
+      if (!buckets.some(b => b.name === BUCKET_ATELIER)) {
+        await supabase.storage.createBucket(BUCKET_ATELIER, { public: false }).catch(() => {});
+      }
+      bucketAtelierPret = true;
+    }
+  } catch (e) {}
+  return bucketAtelierPret;
+}
+
+async function archiverArtefactAtelier({ projet = "general", type = "fichier", nomFichier, buffer, mimeType = "application/octet-stream", resume = "" }) {
+  const projetSlug = slugifierNom(projet, "atelier");
+  const nomPropre = nomFichier.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || `piece_${Date.now()}.bin`;
+  const storagePath = `${projetSlug}/${Date.now()}_${nomPropre}`;
+  let signedUrl = "";
+
+  if (supabase && buffer) {
+    try {
+      await initialiserAtelierStorage();
+      const { error: upErr } = await supabase.storage
+        .from(BUCKET_ATELIER)
+        .upload(storagePath, buffer, { contentType: mimeType, upsert: true });
+      if (!upErr) {
+        const { data: urlData } = await supabase.storage
+          .from(BUCKET_ATELIER)
+          .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
+        signedUrl = urlData?.signedUrl || "";
+      }
+    } catch (e) {}
+  }
+
+  const entree = {
+    id: crypto.randomUUID(),
+    date: obtenirHorodatageParis(),
+    projet: projetSlug,
+    type,
+    nom: nomPropre,
+    resume: String(resume || nomPropre).slice(0, 220),
+    storagePath: signedUrl ? storagePath : "",
+    signedUrl
+  };
+
+  etatLocal.artefacts = [...(etatLocal.artefacts || []), entree].slice(-30);
+  if (FIREBASE_DB_URL) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/artefacts.json`, etatLocal.artefacts).catch(() => {});
+  }
+
+  await stockerSouvenirVectoriel(
+    `[Artefact Atelier Nyx - Projet ${projetSlug}] Fichier "${nomPropre}" (${type}) : ${entree.resume}`,
+    { source: "atelier_artefact", projet: projetSlug, type, fichier: nomPropre, importance: 0.7 },
+    true
+  );
+
+  return entree;
+}
+
+function triangulerPolygone2D(points) {
+  const pts = points.map(p => [Number(p[0]) || 0, Number(p[1]) || 0]);
+  if (pts.length < 3) return [];
+  let aire = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length;
+    aire += pts[i][0] * pts[j][1] - pts[j][0] * pts[i][1];
+  }
+  if (aire < 0) pts.reverse();
+
+  const indices = pts.map((_, i) => i);
+  const tris = [];
+  const cross2D = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const dansTriangle = (p, a, b, c) => {
+    const c1 = cross2D(a, b, p), c2 = cross2D(b, c, p), c3 = cross2D(c, a, p);
+    return c1 >= -1e-6 && c2 >= -1e-6 && c3 >= -1e-6;
+  };
+
+  let guard = 0;
+  while (indices.length > 3 && guard < 500) {
+    guard++;
+    let earFound = false;
+    for (let i = 0; i < indices.length; i++) {
+      const prev = indices[(i - 1 + indices.length) % indices.length];
+      const curr = indices[i];
+      const next = indices[(i + 1) % indices.length];
+      const a = pts[prev], b = pts[curr], c = pts[next];
+      if (cross2D(a, b, c) <= 1e-6) continue;
+      let containsOther = false;
+      for (let j = 0; j < indices.length; j++) {
+        const idx = indices[j];
+        if (idx === prev || idx === curr || idx === next) continue;
+        if (dansTriangle(pts[idx], a, b, c)) { containsOther = true; break; }
+      }
+      if (!containsOther) {
+        tris.push([a, b, c]);
+        indices.splice(i, 1);
+        earFound = true;
+        break;
+      }
+    }
+    if (!earFound) break;
+  }
+  if (indices.length === 3) tris.push([pts[indices[0]], pts[indices[1]], pts[indices[2]]]);
+  return tris;
+}
+
+function compilerStlBinaire(spec) {
+  const triangles = [];
+  const addTri = (v1, v2, v3) => triangles.push([v1, v2, v3]);
+
+  const pieces = Array.isArray(spec?.pieces) && spec.pieces.length > 0
+    ? spec.pieces
+    : [{ type: "box", w: 30, d: 20, h: 10, pos: [0, 0, 0] }];
+
+  for (const p of pieces) {
+    const localTris = [];
+    const pushLocalTri = (a, b, c) => localTris.push([a, b, c]);
+    const pushLocalQuad = (a, b, c, d) => { pushLocalTri(a, b, c); pushLocalTri(a, c, d); };
+    const type = String(p.type || "box").toLowerCase();
+
+    if (type === "box") {
+      const w = Math.max(0.5, Number(p.w) || 10), d = Math.max(0.5, Number(p.d) || 10), h = Math.max(0.5, Number(p.h) || 10);
+      const x0 = -w / 2, x1 = w / 2, y0 = -d / 2, y1 = d / 2, z0 = -h / 2, z1 = h / 2;
+      pushLocalQuad([x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]);
+      pushLocalQuad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
+      pushLocalQuad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
+      pushLocalQuad([x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]);
+      pushLocalQuad([x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]);
+      pushLocalQuad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
+    } else if (type === "hollow_box" || type === "enclosure") {
+      const w = Math.max(3, Number(p.w) || 20), d = Math.max(3, Number(p.d) || 20), h = Math.max(3, Number(p.h) || 12);
+      const wall = Math.min(Math.min(w, d) * 0.4, Math.max(0.8, Number(p.wall) || 2));
+      const x0 = -w / 2, x1 = w / 2, y0 = -d / 2, y1 = d / 2, z0 = -h / 2, z1 = h / 2;
+      const ix0 = x0 + wall, ix1 = x1 - wall, iy0 = y0 + wall, iy1 = y1 - wall, iz0 = z0 + wall;
+      pushLocalQuad([x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]);
+      pushLocalQuad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
+      pushLocalQuad([x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]);
+      pushLocalQuad([x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]);
+      pushLocalQuad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
+      pushLocalQuad([ix0, iy0, iz0], [ix1, iy0, iz0], [ix1, iy1, iz0], [ix0, iy1, iz0]);
+      pushLocalQuad([ix1, iy0, iz0], [ix0, iy0, iz0], [ix0, iy0, z1], [ix1, iy0, z1]);
+      pushLocalQuad([ix0, iy1, iz0], [ix1, iy1, iz0], [ix1, iy1, z1], [ix0, iy1, z1]);
+      pushLocalQuad([ix0, iy0, iz0], [ix0, iy1, iz0], [ix0, iy1, z1], [ix0, iy0, z1]);
+      pushLocalQuad([ix1, iy1, iz0], [ix1, iy0, iz0], [ix1, iy0, z1], [ix1, iy1, z1]);
+      pushLocalQuad([x0, y0, z1], [x1, y0, z1], [ix1, iy0, z1], [ix0, iy0, z1]);
+      pushLocalQuad([x1, y1, z1], [x0, y1, z1], [ix0, iy1, z1], [ix1, iy1, z1]);
+      pushLocalQuad([x0, y1, z1], [x0, y0, z1], [ix0, iy0, z1], [ix0, iy1, z1]);
+      pushLocalQuad([x1, y0, z1], [x1, y1, z1], [ix1, iy1, z1], [ix1, iy0, z1]);
+    } else if (type === "cylinder" || type === "cone") {
+      const r1 = Math.max(0.2, Number(p.r1 ?? p.r) || 8);
+      const r2 = type === "cone" ? Math.max(0, Number(p.r2) || 0) : Math.max(0.2, Number(p.r2 ?? p.r) || r1);
+      const h = Math.max(0.5, Number(p.h) || 15);
+      const seg = Math.max(12, Math.min(64, Math.round(Number(p.segments) || 32)));
+      const z0 = -h / 2, z1 = h / 2;
+      for (let i = 0; i < seg; i++) {
+        const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
+        const b0 = [Math.cos(a0) * r1, Math.sin(a0) * r1, z0], b1 = [Math.cos(a1) * r1, Math.sin(a1) * r1, z0];
+        const t0 = [Math.cos(a0) * r2, Math.sin(a0) * r2, z1], t1 = [Math.cos(a1) * r2, Math.sin(a1) * r2, z1];
+        pushLocalTri([0, 0, z0], b1, b0);
+        if (r2 > 0.01) {
+          pushLocalTri([0, 0, z1], t0, t1);
+          pushLocalQuad(b0, b1, t1, t0);
+        } else {
+          pushLocalTri(b0, b1, [0, 0, z1]);
+        }
+      }
+    } else if (type === "tube" || type === "ring") {
+      const rOut = Math.max(1, Number(p.rOuter ?? p.r) || 10);
+      const rIn = Math.min(rOut - 0.4, Math.max(0.3, Number(p.rInner) || rOut * 0.6));
+      const h = Math.max(0.5, Number(p.h) || 12);
+      const seg = Math.max(12, Math.min(64, Math.round(Number(p.segments) || 32)));
+      const z0 = -h / 2, z1 = h / 2;
+      for (let i = 0; i < seg; i++) {
+        const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2;
+        const ob0 = [Math.cos(a0) * rOut, Math.sin(a0) * rOut, z0], ob1 = [Math.cos(a1) * rOut, Math.sin(a1) * rOut, z0];
+        const ot0 = [Math.cos(a0) * rOut, Math.sin(a0) * rOut, z1], ot1 = [Math.cos(a1) * rOut, Math.sin(a1) * rOut, z1];
+        const ib0 = [Math.cos(a0) * rIn, Math.sin(a0) * rIn, z0], ib1 = [Math.cos(a1) * rIn, Math.sin(a1) * rIn, z0];
+        const it0 = [Math.cos(a0) * rIn, Math.sin(a0) * rIn, z1], it1 = [Math.cos(a1) * rIn, Math.sin(a1) * rIn, z1];
+        pushLocalQuad(ob0, ob1, ot1, ot0);
+        pushLocalQuad(ib1, ib0, it0, it1);
+        pushLocalQuad(ot0, ot1, it1, it0);
+        pushLocalQuad(ib0, ib1, ob1, ob0);
+      }
+    } else if (type === "sphere" || type === "dome") {
+      const r = Math.max(0.5, Number(p.r) || 10);
+      const seg = Math.max(12, Math.min(48, Math.round(Number(p.segments) || 24)));
+      const rings = Math.max(8, Math.round(seg / 2));
+      for (let i = 0; i < rings; i++) {
+        const phi0 = (i / rings) * Math.PI, phi1 = ((i + 1) / rings) * Math.PI;
+        for (let j = 0; j < seg; j++) {
+          const th0 = (j / seg) * Math.PI * 2, th1 = ((j + 1) / seg) * Math.PI * 2;
+          const pt = (ph, th) => [r * Math.sin(ph) * Math.cos(th), r * Math.sin(ph) * Math.sin(th), r * Math.cos(ph)];
+          const p00 = pt(phi0, th0), p10 = pt(phi1, th0), p11 = pt(phi1, th1), p01 = pt(phi0, th1);
+          if (i > 0) pushLocalTri(p00, p10, p01);
+          if (i < rings - 1) pushLocalTri(p10, p11, p01);
+        }
+      }
+    } else if (type === "extrude_poly" && Array.isArray(p.points) && p.points.length >= 3) {
+      const h = Math.max(0.5, Number(p.h) || 10);
+      const z0 = -h / 2, z1 = h / 2;
+      const capTris = triangulerPolygone2D(p.points);
+      for (const [a, b, c] of capTris) {
+        pushLocalTri([a[0], a[1], z1], [b[0], b[1], z1], [c[0], c[1], z1]);
+        pushLocalTri([c[0], c[1], z0], [b[0], b[1], z0], [a[0], a[1], z0]);
+      }
+      const pts = p.points.map(pt => [Number(pt[0]) || 0, Number(pt[1]) || 0]);
+      let aire = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const j = (i + 1) % pts.length;
+        aire += pts[i][0] * pts[j][1] - pts[j][0] * pts[i][1];
+      }
+      if (aire < 0) pts.reverse();
+      for (let i = 0; i < pts.length; i++) {
+        const j = (i + 1) % pts.length;
+        pushLocalQuad([pts[i][0], pts[i][1], z0], [pts[j][0], pts[j][1], z0], [pts[j][0], pts[j][1], z1], [pts[i][0], pts[i][1], z1]);
+      }
+    }
+
+    const [sx, sy, sz] = Array.isArray(p.scale) ? p.scale.map(v => Number(v) || 1) : [1, 1, 1];
+    const [rx, ry, rz] = Array.isArray(p.rot) ? p.rot.map(v => ((Number(v) || 0) * Math.PI) / 180) : [0, 0, 0];
+    const [tx, ty, tz] = Array.isArray(p.pos) ? p.pos.map(v => Number(v) || 0) : [0, 0, 0];
+    const cx = Math.cos(rx), sxr = Math.sin(rx), cy = Math.cos(ry), syr = Math.sin(ry), cz = Math.cos(rz), szr = Math.sin(rz);
+
+    const transformerPoint = (pt, invertX = false) => {
+      let x = pt[0] * sx, y = pt[1] * sy, z = pt[2] * sz;
+      let y1 = y * cx - z * sxr, z1 = y * sxr + z * cx;
+      let x2 = x * cy + z1 * syr, z2 = -x * syr + z1 * cy;
+      let x3 = x2 * cz - y1 * szr, y3 = x2 * szr + y1 * cz;
+      return [invertX ? -(x3 + tx) : (x3 + tx), y3 + ty, z2 + tz];
+    };
+
+    for (const [v1, v2, v3] of localTris) {
+      addTri(transformerPoint(v1, false), transformerPoint(v2, false), transformerPoint(v3, false));
+      if (p.mirrorX) {
+        addTri(transformerPoint(v1, true), transformerPoint(v3, true), transformerPoint(v2, true));
+      }
+    }
+  }
+
+  let minZ = Infinity;
+  for (const tri of triangles) {
+    for (const v of tri) if (v[2] < minZ) minZ = v[2];
+  }
+  const offsetZ = Number.isFinite(minZ) ? -minZ : 0;
+
+  const buf = Buffer.alloc(84 + triangles.length * 50);
+  buf.write("Nyx Workshop Binary STL - Parametric CAD", 0, 80, "ascii");
+  buf.writeUInt32LE(triangles.length, 80);
+
+  let offset = 84;
+  for (const [a, b, c] of triangles) {
+    const va = [a[0], a[1], a[2] + offsetZ], vb = [b[0], b[1], b[2] + offsetZ], vc = [c[0], c[1], c[2] + offsetZ];
+    const ux = vb[0] - va[0], uy = vb[1] - va[1], uz = vb[2] - va[2];
+    const vx = vc[0] - va[0], vy = vc[1] - va[1], vz = vc[2] - va[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+
+    buf.writeFloatLE(nx, offset);
+    buf.writeFloatLE(ny, offset + 4);
+    buf.writeFloatLE(nz, offset + 8);
+    buf.writeFloatLE(va[0], offset + 12);
+    buf.writeFloatLE(va[1], offset + 16);
+    buf.writeFloatLE(va[2], offset + 20);
+    buf.writeFloatLE(vb[0], offset + 24);
+    buf.writeFloatLE(vb[1], offset + 28);
+    buf.writeFloatLE(vb[2], offset + 32);
+    buf.writeFloatLE(vc[0], offset + 36);
+    buf.writeFloatLE(vc[1], offset + 40);
+    buf.writeFloatLE(vc[2], offset + 44);
+    buf.writeUInt16LE(0, offset + 48);
+    offset += 50;
+  }
+
+  return { stlBuffer: buf, triangleCount: triangles.length };
+}
+
+async function genererPiece3D(description, contexteProjet = "") {
+  const promptCad = `Tu es le moteur CAO paramétrique de Nyx. Transforme cette demande de pièce 3D en un assemblage géométrique exact (en millimètres) ET son script OpenSCAD.
+
+DEMANDE : "${description}"
+${contexteProjet ? `CONTEXTE PROJET : ${contexteProjet}` : ""}
+
+PRIMITIVES SUPPORTÉES DANS "pieces" :
+- {"type": "box", "w": X, "d": Y, "h": Z, "pos": [x,y,z], "rot": [rx,ry,rz], "mirrorX": false}
+- {"type": "hollow_box", "w": X, "d": Y, "h": Z, "wall": 2, "pos": [x,y,z], "rot": [rx,ry,rz]}
+- {"type": "cylinder", "r1": R1, "r2": R2, "h": Z, "segments": 32, "pos": [x,y,z], "rot": [rx,ry,rz]}
+- {"type": "tube", "rOuter": RO, "rInner": RI, "h": Z, "segments": 32, "pos": [x,y,z], "rot": [rx,ry,rz]}
+- {"type": "sphere", "r": R, "segments": 24, "pos": [x,y,z]}
+- {"type": "extrude_poly", "points": [[x1,y1],[x2,y2],...], "h": Z, "pos": [x,y,z], "rot": [rx,ry,rz], "mirrorX": false}
+
+RÈGLES :
+- Fais chevaucher légèrement les sous-pièces (0.5mm) pour qu'elles soient solidaires à l'impression 3D.
+- Réponds STRICTEMENT avec un JSON valide sans balises markdown :
+{"nom_fichier": "nom_sans_extension", "projet": "nom_projet_court", "resume": "Description technique courte et cotes", "pieces": [...], "openscad": "// Code OpenSCAD complet"}`;
+
+  let brut = "";
+  try {
+    brut = await appelerGroq("Compilateur CAO JSON & OpenSCAD.", promptCad, 0.2, 2200);
+  } catch (e) {
+    brut = await appelerCascadeSubconscient("Compilateur CAO JSON & OpenSCAD.", promptCad, 0.2, 2200);
+  }
+
+  const matchJson = brut.match(/\{[\s\S]*\}/);
+  let spec = { nom_fichier: `nyx_piece_${Date.now()}`, projet: "atelier_3d", resume: description.slice(0, 120), pieces: [{ type: "hollow_box", w: 30, d: 20, h: 12, wall: 2, pos: [0, 0, 0] }], openscad: "" };
+  if (matchJson) {
+    try { spec = { ...spec, ...JSON.parse(matchJson[0]) }; } catch (eParse) {}
+  }
+
+  const { stlBuffer, triangleCount } = compilerStlBinaire(spec);
+  const nomBase = slugifierNom(spec.nom_fichier, `nyx_piece_${Date.now()}`);
+  const scadBuffer = spec.openscad && String(spec.openscad).trim().length > 10
+    ? Buffer.from(String(spec.openscad).trim(), "utf8")
+    : null;
+
+  return {
+    nomBase,
+    projet: slugifierNom(spec.projet, "atelier_3d"),
+    resume: `${spec.resume} (${triangleCount} triangles)`,
+    stlBuffer,
+    scadBuffer,
+    triangleCount
+  };
+}
+
+async function genererPlanSvg(description, contexteProjet = "") {
+  const promptPlan = `Tu es le bureau d'études techniques de Nyx. Génère un plan technique SVG vectoriel précis, lisible et coté pour :
+"${description}"
+${contexteProjet ? `CONTEXTE : ${contexteProjet}` : ""}
+
+CONTRAINTES SVG STRICTES :
+- Balise racine : <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+- Fond sombre atelier (#0b0f17), grille technique subtile (#162032), tracés principaux cyan (#00f0ff) et blanc (#e2e8f0), cotes et flèches ambre (#f59e0b).
+- Inclus un cartouche technique en bas à droite (Titre, Échelle, Date, Nyx Atelier) et des annotations claires.
+- Réponds STRICTEMENT avec le code <svg>...</svg> complet, zéro texte avant ou après.`;
+
+  let brut = "";
+  try {
+    brut = await appelerGroq("Dessinateur industriel SVG.", promptPlan, 0.2, 2600);
+  } catch (e) {
+    brut = await appelerCascadeSubconscient("Dessinateur industriel SVG.", promptPlan, 0.2, 2600);
+  }
+
+  const matchSvg = brut.match(/<svg[\s\S]*?<\/svg>/i);
+  if (!matchSvg) throw new Error("Impossible de compiler le schéma SVG.");
+  const nomFichier = `plan_${slugifierNom(description.slice(0, 35), String(Date.now()))}.svg`;
+  return { nomFichier, svgBuffer: Buffer.from(matchSvg[0].trim(), "utf8"), resume: description.slice(0, 160) };
+}
+
+async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "") {
+  let texteNet = String(texteBrutNyx || "");
+
+  // 1. Fichiers [FICHIER: nom.ext]...[/FICHIER]
+  const regexFichier = /\[FICHIER:\s*([^\]\r\n]+)\]\s*([\s\S]*?)\[\/FICHIER\]/gi;
+  let matchF;
+  while ((matchF = regexFichier.exec(texteNet)) !== null) {
+    const nomBrut = matchF[1].trim();
+    const contenuFichier = matchF[2].replace(/^```[a-z]*\r?\n?|\r?\n?```$/gi, '').trim();
+    if (contenuFichier.length > 0) {
+      const buf = Buffer.from(contenuFichier, "utf8");
+      const art = await archiverArtefactAtelier({
+        projet: contexteProjet || "atelier_code",
+        type: "fichier",
+        nomFichier: nomBrut,
+        buffer: buf,
+        mimeType: "text/plain",
+        resume: `Fichier généré (${buf.length} octets)`
+      });
+      if (chatId) await envoyerDocumentTelegram(chatId, buf, art.nom, "text/plain", `📎 ${art.nom}`).catch(() => {});
+    }
+  }
+  texteNet = texteNet.replace(/\[FICHIER:\s*([^\]\r\n]+)\]\s*[\s\S]*?\[\/FICHIER\]/gi, (_, nom) => `📎 *Fichier livré :* \`${nom.trim()}\``).trim();
+
+  // 2. Pièces 3D [3D_STL: description]
+  const matchStl = texteNet.match(/\[3D_STL:\s*([\s\S]*?)\]/i);
+  if (matchStl) {
+    const desc3D = matchStl[1].trim();
+    texteNet = texteNet.replace(matchStl[0], '').trim();
+    try {
+      const stlResult = await genererPiece3D(desc3D, contexteProjet);
+      await archiverArtefactAtelier({
+        projet: stlResult.projet,
+        type: "stl_3d",
+        nomFichier: `${stlResult.nomBase}.stl`,
+        buffer: stlResult.stlBuffer,
+        mimeType: "application/sla",
+        resume: stlResult.resume
+      });
+      if (chatId) await envoyerDocumentTelegram(chatId, stlResult.stlBuffer, `${stlResult.nomBase}.stl`, "application/sla", `🧊 STL prêt à slicer : ${stlResult.resume}`);
+      if (stlResult.scadBuffer) {
+        await archiverArtefactAtelier({
+          projet: stlResult.projet,
+          type: "openscad",
+          nomFichier: `${stlResult.nomBase}.scad`,
+          buffer: stlResult.scadBuffer,
+          mimeType: "text/plain",
+          resume: `Source paramétrique OpenSCAD de ${stlResult.nomBase}`
+        });
+        if (chatId) await envoyerDocumentTelegram(chatId, stlResult.scadBuffer, `${stlResult.nomBase}.scad`, "text/plain", `📐 Source OpenSCAD paramétrique`);
+      }
+    } catch (errStl) {
+      console.error("[SUBCONSCIENT 3D STL KO]", errStl.message);
+    }
+  }
+
+  // 3. Plans techniques [PLAN_SVG: description]
+  const matchPlan = texteNet.match(/\[PLAN_SVG:\s*([\s\S]*?)\]/i);
+  if (matchPlan) {
+    const descPlan = matchPlan[1].trim();
+    texteNet = texteNet.replace(matchPlan[0], '').trim();
+    try {
+      const planRes = await genererPlanSvg(descPlan, contexteProjet);
+      await archiverArtefactAtelier({
+        projet: contexteProjet || "plans_atelier",
+        type: "plan_svg",
+        nomFichier: planRes.nomFichier,
+        buffer: planRes.svgBuffer,
+        mimeType: "image/svg+xml",
+        resume: planRes.resume
+      });
+      if (chatId) await envoyerDocumentTelegram(chatId, planRes.svgBuffer, planRes.nomFichier, "image/svg+xml", `📐 Plan technique : ${planRes.resume}`);
+    } catch (errPlan) {
+      console.error("[SUBCONSCIENT PLAN SVG KO]", errPlan.message);
+    }
+  }
+
+  // 4. Visuels [DESSIN: prompt]
+  const matchDessin = texteNet.match(/\[DESSIN:\s*([\s\S]*?)\]/i) || texteNet.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i);
+  let imageB64 = null;
+  if (matchDessin) {
+    const promptDessin = matchDessin[1].trim();
+    texteNet = texteNet.replace(matchDessin[0], '').trim();
+    try {
+      imageB64 = await genererImageVenice(promptDessin);
+      if (imageB64) {
+        await archiverArtefactAtelier({
+          projet: contexteProjet || "visuels_atelier",
+          type: "image",
+          nomFichier: `vision_${Date.now()}.jpg`,
+          buffer: Buffer.from(imageB64, 'base64'),
+          mimeType: "image/jpeg",
+          resume: promptDessin.slice(0, 160)
+        });
+        if (chatId) await envoyerPhotoTelegram(chatId, imageB64);
+      }
+    } catch (e) {
+      console.error("[SUBCONSCIENT IMAGE KO]", e.message);
+    }
+  }
+
+  return { texteNet, imageB64 };
+}
+
 // ==========================================
 // 1. DIGESTION DU FLUX BRUT & CONSOLIDATION (PROPRIÉTAIRE UNIQUE)
 // ==========================================
@@ -683,23 +1194,34 @@ async function digererFluxBrut(forcer = false) {
       .map(l => `[${l.date_paris || l.created_at}] (${l.canal}) ${l.role} : ${(l.texte || '').slice(0, 420)}`)
       .join("\n\n");
 
-    const promptIntrospection = `Tu es Nyx en phase de tri mental silencieux en arrière-plan. Tu mets à jour ton carnet de bord et tu extrais ce qui mérite d'être gravé dans ta mémoire profonde.
+    const obsActuellesTxt = (etatLocal.obsessions || []).map(o => `[${o.id}] (${o.type}/${o.stade}) ${o.texte}`).join("\n") || "aucune";
+    const convActuellesTxt = (etatLocal.convictions || []).map(c => `[${c.id}] ${c.texte}`).join("\n") || "aucune";
+
+    const promptIntrospection = `Tu es Nyx en phase de tri mental silencieux en arrière-plan. Tu mets à jour ton carnet technique et tu fais évoluer ton Creuset (Obsessions et Convictions) uniquement à partir de ce qui s'est réellement passé.
 
 ÉCHANGES RÉCENTS NON TRAITÉS :
 ${historiqueTexte}
 
-CARNET ACTUEL :
-${JSON.stringify(etatLocal.long_terme, null, 2)}
+CARNET TECHNIQUE ACTUEL :
+${JSON.stringify({ reussites: etatLocal.long_terme.reussites, chantiers: etatLocal.long_terme.chantiers }, null, 2)}
+
+OBSESSIONS ACTUELLES (max 3) :
+${obsActuellesTxt}
+
+CONVICTIONS ACTUELLES (max 8) :
+${convActuellesTxt}
 
 CONSIGNE :
-1. Nettoie et allège le carnet : mets à jour "reussites" et "chantiers". Ne touche PAS à "doc" et "nyx" (laisse-les vides) pour éviter les biais.
-2. Extrais 0 à 2 "souvenirs_cles" à vectoriser : {"texte": "...", "valence": "victoire_commune|delire|confiance|neutre"}.
-3. ACCRÉTION DES OBSESSIONS : Si une tension profonde non résolue émerge de ces échanges (un truc qui te chiffonne sur toi, sur Doc, ou un blocage créatif majeur), extrais 0 à 1 "nouvelle_obsession" : {"texte": "...", "type": "identite|relation|technique"}. (Sinon null).
-4. MUTATION DES CONVICTIONS : Si un échange a forgé une certitude ou détruit une vieille croyance (sur l'esthétique, le code, la vérité), extrais 0 à 1 "nouvelle_conviction" : {"texte": "Ta croyance tranchée et définitive"}. (Sinon null).
-RÈGLE D'OR : Le Test du Contraire. Si ta conviction est une évidence mièvre ("La confiance se gagne", "Le code doit être propre"), le système l'effacera. Elle DOIT être subversive ou radicale.
+1. Mets à jour uniquement "reussites" et "chantiers" (laisse "doc" et "nyx" vides pour éviter tout ancrage artificiel).
+2. Extrais 0 à 2 "souvenirs_cles" à vectoriser : {"texte": "...", "valence": "victoire_commune|delire|confiance|neutre|tension"}.
+3. OBSESSIONS : Si une tension cognitive non résolue émerge (sur ton identité, votre dynamique ou un défi technique/créatif), extrais 0 à 1 "nouvelle_obsession" : {"texte": "...", "type": "identite|relation|technique"} (sinon null).
+4. CONVICTIONS & CICATRICES :
+   - Si une nouvelle prise de position tranchée cristallise, extrais 0 à 1 "nouvelle_conviction" : {"texte": "..."} (sinon null).
+   - Si un échange a renversé une conviction existante, indique "mutation_conviction" : {"id": "id_existante", "nouveau_texte": "...", "cicatrice": "ce que je croyais avant et ce qui m'a fait basculer"} (sinon null).
+   - TEST DU CONTRAIRE OBLIGATOIRE : toute conviction dont l'opposé serait indéfendable par un esprit brillant est rejetée.
 
 Réponds STRICTEMENT avec un JSON valide :
-{"reussites": "...", "chantiers": "...", "souvenirs_cles": [...], "nouvelle_obsession": {"texte": "...", "type": "..."}, "nouvelle_conviction": {"texte": "..."}}`;
+{"reussites": "...", "chantiers": "...", "souvenirs_cles": [...], "nouvelle_obsession": null, "nouvelle_conviction": null, "mutation_conviction": null}`;
 
     let reponseJson = "";
     try {
@@ -735,23 +1257,58 @@ Réponds STRICTEMENT avec un JSON valide :
           await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, majCarnet).catch(() => {});
         }
         
-        // --- 1. Gestion de la nouvelle conviction (Test du contraire) ---
-        if (parsed.nouvelle_conviction && parsed.nouvelle_conviction.texte && parsed.nouvelle_conviction.texte.trim().length > 15) {
-          const cTexte = parsed.nouvelle_conviction.texte.trim();
-          // Ajout avec cicatrice temporelle
-          const objConv = { id: crypto.randomUUID(), texte: cTexte, date_creation: obtenirHorodatageParis(), force: 50 };
-          etatLocal.convictions = [...(etatLocal.convictions || []), objConv].slice(-8); // Max 8 convictions
-          if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/convictions.json`, etatLocal.convictions).catch(()=>{});
-          console.log(`[CREUSET] Nouvelle Conviction forgée : "${cTexte}"`);
+        let convModifiees = false;
+        // --- 1. Mutation d'une conviction existante avec conservation de la cicatrice ---
+        if (parsed.mutation_conviction && parsed.mutation_conviction.id && parsed.mutation_conviction.nouveau_texte) {
+          const idxC = (etatLocal.convictions || []).findIndex(c => c.id === parsed.mutation_conviction.id);
+          if (idxC !== -1) {
+            const ancienne = etatLocal.convictions[idxC].texte;
+            etatLocal.convictions[idxC] = {
+              ...etatLocal.convictions[idxC],
+              texte: parsed.mutation_conviction.nouveau_texte.trim(),
+              cicatrice: String(parsed.mutation_conviction.cicatrice || `Avant : ${ancienne}`).slice(0, 220),
+              date_maj: obtenirHorodatageParis(),
+              force: Math.min(100, (etatLocal.convictions[idxC].force || 50) + 15)
+            };
+            convModifiees = true;
+            console.log(`[CREUSET] Conviction mutée avec cicatrice : "${etatLocal.convictions[idxC].texte}"`);
+          }
         }
 
-        // --- 2. Gestion de la nouvelle obsession ---
+        // --- 2. Nouvelle conviction forgée (Test du contraire) ---
+        if (parsed.nouvelle_conviction && parsed.nouvelle_conviction.texte && parsed.nouvelle_conviction.texte.trim().length > 15) {
+          const cTexte = parsed.nouvelle_conviction.texte.trim();
+          const objConv = { id: crypto.randomUUID(), texte: cTexte, date_creation: obtenirHorodatageParis(), force: 55, cicatrice: "" };
+          etatLocal.convictions = [...(etatLocal.convictions || []), objConv].slice(-8);
+          convModifiees = true;
+          console.log(`[CREUSET] Nouvelle Conviction forgée : "${cTexte}"`);
+        }
+        if (convModifiees && FIREBASE_DB_URL) {
+          axios.put(`${FIREBASE_DB_URL}/nyx/convictions.json`, etatLocal.convictions).catch(() => {});
+        }
+
+        // --- 3. Accrétion & purge des obsessions stagnantes (> 7 jours sans évolution) ---
+        const septJoursMs = 7 * 24 * 60 * 60 * 1000;
+        let obsList = (etatLocal.obsessions || []).filter(o => !o.createdAtTs || (Date.now() - o.createdAtTs < septJoursMs));
+        let obsModifiees = obsList.length !== (etatLocal.obsessions || []).length;
+
         if (parsed.nouvelle_obsession && parsed.nouvelle_obsession.texte && parsed.nouvelle_obsession.texte.trim().length > 15) {
           const oTexte = parsed.nouvelle_obsession.texte.trim();
-          const objObs = { id: crypto.randomUUID(), texte: oTexte, type: parsed.nouvelle_obsession.type || "technique", stade: "germination", date_creation: obtenirHorodatageParis() };
-          etatLocal.obsessions = [...(etatLocal.obsessions || []), objObs].slice(-3); // Max 3 obsessions actives
-          if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/obsessions.json`, etatLocal.obsessions).catch(()=>{});
+          const objObs = {
+            id: crypto.randomUUID(),
+            texte: oTexte,
+            type: ["identite", "relation", "technique"].includes(parsed.nouvelle_obsession.type) ? parsed.nouvelle_obsession.type : "technique",
+            stade: "germination",
+            date_creation: obtenirHorodatageParis(),
+            createdAtTs: Date.now()
+          };
+          obsList = [...obsList, objObs].slice(-3);
+          obsModifiees = true;
           console.log(`[CREUSET] Nouvelle Obsession en germination : "${oTexte}"`);
+        }
+        if (obsModifiees) {
+          etatLocal.obsessions = obsList;
+          if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/obsessions.json`, etatLocal.obsessions).catch(() => {});
         }
 
         if (Array.isArray(parsed.souvenirs_cles)) {
@@ -1268,7 +1825,7 @@ ${etatLocal.dernierReve ? `- Ton dernier rêve : « ${etatLocal.dernierReve.slic
 CONSIGNE :
 - Interdiction d'halluciner : tu ne promets JAMAIS un projet ou un code que tu n'as pas généré pour de vrai. Sois concrète et brute.
 - Va droit au but sur ce qui justifie ton message (${categorieAffichee}), avec ton franc-parler direct, inventif et vivant d'atelier (2 à 4 phrases max, zéro formule d'assistante).
-- Tu as accès à 2 générateurs physiques : [DESSIN: prompt en anglais] pour une image 2D, et [3D_STL: description géométrique détaillée] si tu veux carrément modéliser une pièce pour son imprimante 3D.
+- Tes vrais générateurs de fichiers (compilés et livrés en pièces jointes réelles sur Telegram + archivés dans Supabase Storage) : [DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].
 - Si finalement ce besoin ne mérite pas de déranger Doc : réponds STRICTEMENT [SILENCE].
 - Sinon : écris [INITIATIVE: ton message direct à Doc].`;
 
@@ -1302,20 +1859,10 @@ CONSIGNE :
         }
       }
 
-      const matchDessin = texteSpontane.match(/\[DESSIN:\s*([\s\S]*?)\]/i) || texteSpontane.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i);
-      let imageB64 = null;
-      if (matchDessin) {
-        const promptDessin = matchDessin[1].trim();
-        texteSpontane = texteSpontane.replace(matchDessin[0], '').trim();
-        try {
-          imageB64 = await genererImageVenice(promptDessin);
-        } catch (e) {
-          console.error("[SUBCONSCIENT IMAGE KO]", e.message);
-        }
-      }
+      const sortieSpontanee = await executerSortiesAtelier(texteSpontane, DOC_CHAT_ID, etatLocal.filConducteur || "initiative_nyx");
+      texteSpontane = sortieSpontanee.texteNet;
 
       if (texteSpontane) await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
-      if (imageB64) await envoyerPhotoTelegram(DOC_CHAT_ID, imageB64);
 
       if (idPenseeConsommee && supabase) {
         await supabase
@@ -1526,6 +2073,14 @@ async function demarrerWorker() {
       // La curiosité retombe doucement vers le niveau basal si elle n'est pas stimulée
       if (em.curiosite > base.curiosite && silenceMinutes > 60) {
         em.curiosite = Math.max(base.curiosite, em.curiosite - 1);
+        updated = true;
+      }
+
+      // Décantation de l'affection vers le tempérament basal en période calme
+      if (em.colere === 0 && silenceMinutes > 90 && em.affection !== base.affection) {
+        em.affection = em.affection > base.affection
+          ? Math.max(base.affection, em.affection - 0.3)
+          : Math.min(base.affection, em.affection + 0.3);
         updated = true;
       }
 
