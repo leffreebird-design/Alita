@@ -989,6 +989,40 @@ function compilerStlBinaire(spec) {
   return { stlBuffer: buf, triangleCount: triangles.length };
 }
 
+
+function analyserObjBuffer(buffer, nomFichier) {
+  try {
+    const text = buffer.toString("utf8");
+    const lines = text.split(/\r?\n/);
+    let vCount = 0, fCount = 0, gCount = 0;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    
+    for (const line of lines) {
+      if (line.startsWith('v ')) {
+        vCount++;
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 4) {
+          const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+        }
+      } else if (line.startsWith('f ')) {
+        fCount++;
+      } else if (line.startsWith('g ') || line.startsWith('o ')) {
+        gCount++;
+      }
+    }
+    
+    if (vCount > 0) {
+      const dim = `Dimensions : ${(maxX - minX).toFixed(1)} x ${(maxY - minY).toFixed(1)} x ${(maxZ - minZ).toFixed(1)} mm`;
+      const struct = gCount > 1 ? `${gCount} sous-objets` : '1 objet unifié';
+      return `Modèle 3D OBJ "${nomFichier}" : ${vCount} sommets, ${fCount} faces, ${struct} | ${dim}.`;
+    }
+  } catch (e) {}
+  return `Fichier OBJ "${nomFichier}" (${buffer.length} octets).`;
+}
+
 async function genererPiece3D(description, contexteProjet = "") {
   const promptCad = `Tu es le moteur CAO paramétrique de Nyx. Transforme cette demande de pièce 3D en un assemblage géométrique exact (en millimètres) ET son script OpenSCAD.
 
