@@ -164,13 +164,15 @@ let historiqueLongueursDoc = [];
 let cacheEtatProfond = {
   filConducteur: "",
   monologueInterieur: "",
-  dernierReve: "", 
-  ideesFolles: [], 
-  obsessions: [], // 3 maximum (Identité, Relation, Technique) — Vierges au démarrage
-  convictions: [], // 5 à 8 maximum (Croyances évolutives avec cicatrices) — Vierges au démarrage
+  dernierReve: "",
+  ideesFolles: [],
+  obsessions: [], // 3 maximum (identite, relation, technique) — Vierges au démarrage
+  convictions: [], // 5 à 8 maximum (croyances évolutives avec cicatrices) — Vierges au démarrage
+  artefacts: [], // Index persistant des fichiers créés à l'atelier (STL, SCAD, SVG, code, visuels)
+  dernierPartageObsessionTs: 0, // Verrou anti-monomanie (cooldown)
   etatRelationnel: "symbiose",
   emotions: { affection: 80, curiosite: 70, energie: 85, colere: 0 },
-  temperamentBasal: { affection: 75, curiosite: 70, energie: 80, colere: 0 }, // Ligne de base évolutive
+  temperamentBasal: { affection: 75, curiosite: 70, energie: 80, colere: 0 },
   besoinCommunication: {
     niveau: 15,
     categorie: "aucun",
@@ -178,8 +180,8 @@ let cacheEtatProfond = {
     updatedAt: Date.now()
   },
   long_terme: {
-    doc: "", // Nettoyé pour éviter le biais d'ancrage
-    nyx: "", // Nettoyé pour éviter le biais d'ancrage
+    doc: "",
+    nyx: "",
     reussites: "",
     chantiers: ""
   },
@@ -226,7 +228,7 @@ function signalerActiviteDoc() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
@@ -240,7 +242,9 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/obsessions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
@@ -265,19 +269,19 @@ async function initialiserCache() {
       cacheEtatProfond.ideesFolles = arr.filter(Boolean).slice(-12);
     }
     if (resObs?.data) {
-      cacheEtatProfond.obsessions = Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data);
+      cacheEtatProfond.obsessions = (Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data)).filter(Boolean).slice(-3);
     }
     if (resConv?.data) {
-      cacheEtatProfond.convictions = Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data);
+      cacheEtatProfond.convictions = (Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data)).filter(Boolean).slice(-8);
     }
-    if (resObs?.data) {
-      cacheEtatProfond.obsessions = Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data);
+    if (resTemp?.data && typeof resTemp.data === 'object') {
+      cacheEtatProfond.temperamentBasal = { ...cacheEtatProfond.temperamentBasal, ...resTemp.data };
     }
-    if (resConv?.data) {
-      cacheEtatProfond.convictions = Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data);
+    if (resArt?.data) {
+      cacheEtatProfond.artefacts = (Array.isArray(resArt.data) ? resArt.data : Object.values(resArt.data)).filter(Boolean).slice(-30);
     }
 
-    console.log(`[CACHE INIT] Mémoire : ${cacheMemoireCourte.length} | Humeur : Colère ${cacheEtatProfond.emotions.colere} | Curiosité : ${cacheEtatProfond.emotions.curiosite} | Relation : ${cacheEtatProfond.etatRelationnel}`);
+    console.log(`[CACHE INIT] Mémoire : ${cacheMemoireCourte.length} | Humeur : Colère ${cacheEtatProfond.emotions.colere} | Curiosité : ${cacheEtatProfond.emotions.curiosite} | Obsessions : ${cacheEtatProfond.obsessions.length} | Convictions : ${cacheEtatProfond.convictions.length} | Artefacts : ${cacheEtatProfond.artefacts.length}`);
   } catch (err) {
     console.warn("[CACHE] Erreur d'initialisation :", err.message);
   }
@@ -328,8 +332,509 @@ function enregistrerIdeeFolle(ideeTexte, source = "sas_cortex") {
 }
 
 // ==========================================
-// 3-BIS. MOTEUR D'HOMÉOSTASIE ET D'ÉVOLUTION ÉMOTIONNELLE
+// 3-BIS. ÉTABLI PERSISTANT (SUPABASE STORAGE) & FABRICATION 3D / PLANS
 // ==========================================
+const BUCKET_ATELIER = "nyx-atelier";
+let bucketAtelierPret = false;
+
+function slugifierNom(texte, fallback = "artefact") {
+  const clean = String(texte || fallback)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 60);
+  return clean || fallback;
+}
+
+async function initialiserAtelierStorage() {
+  if (!supabase || bucketAtelierPret) return bucketAtelierPret;
+  try {
+    const { data: buckets, error } = await supabase.storage.listBuckets();
+    if (!error && Array.isArray(buckets)) {
+      const existe = buckets.some(b => b.name === BUCKET_ATELIER);
+      if (!existe) {
+        await supabase.storage.createBucket(BUCKET_ATELIER, { public: false }).catch(() => {});
+      }
+      bucketAtelierPret = true;
+    }
+  } catch (e) {
+    console.warn("[ATELIER STORAGE INIT]", e.message);
+  }
+  return bucketAtelierPret;
+}
+
+async function archiverArtefactAtelier({ projet = "general", type = "fichier", nomFichier, buffer, mimeType = "application/octet-stream", resume = "", chatId = null }) {
+  const projetSlug = slugifierNom(projet, "atelier");
+  const nomPropre = nomFichier.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) || `piece_${Date.now()}.bin`;
+  const storagePath = `${projetSlug}/${Date.now()}_${nomPropre}`;
+  let signedUrl = "";
+
+  if (supabase && buffer) {
+    try {
+      await initialiserAtelierStorage();
+      const { error: upErr } = await supabase.storage
+        .from(BUCKET_ATELIER)
+        .upload(storagePath, buffer, { contentType: mimeType, upsert: true });
+      if (!upErr) {
+        const { data: urlData } = await supabase.storage
+          .from(BUCKET_ATELIER)
+          .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
+        signedUrl = urlData?.signedUrl || "";
+      } else {
+        console.warn("[ATELIER STORAGE UPLOAD KO]", upErr.message);
+      }
+    } catch (e) {
+      console.warn("[ATELIER STORAGE ERREUR]", e.message);
+    }
+  }
+
+  const entree = {
+    id: crypto.randomUUID(),
+    date: obtenirHorodatageParis(),
+    projet: projetSlug,
+    type,
+    nom: nomPropre,
+    resume: String(resume || nomPropre).slice(0, 220),
+    storagePath: signedUrl ? storagePath : "",
+    signedUrl
+  };
+
+  cacheEtatProfond.artefacts = [...(cacheEtatProfond.artefacts || []), entree].slice(-30);
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/artefacts.json`, cacheEtatProfond.artefacts).catch(() => {});
+  }
+
+  // Indexation vectorielle pour rappel long terme
+  stockerSouvenirVectoriel(
+    `[Artefact Atelier Nyx - Projet ${projetSlug}] Fichier "${nomPropre}" (${type}) : ${entree.resume}`,
+    { source: "atelier_artefact", projet: projetSlug, type, fichier: nomPropre, importance: 0.7 }
+  ).catch(() => {});
+
+  // Si un chantier actif tourne et que Ben n'est pas occupé, on prépare le miroir disque local (0 VRAM, disque uniquement)
+  if (projetManager.estProjetActif() && !missionEnAttente && signedUrl && /\.(stl|scad|svg|py|js|json|md|html)$/i.test(nomPropre)) {
+    const cmdMiroir = {
+      type: "RAW_TASK",
+      description: `Télécharger et sauvegarder sur disque local (0 VRAM) dans C:\\Nyx_Atelier\\${projetSlug}\\${nomPropre} depuis ${signedUrl}`,
+      requiresHumanAck: false
+    };
+    missionEnAttente = { action: cmdMiroir, statut: "attente", chatId: chatId || DOC_CHAT_ID };
+    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+  }
+
+  return entree;
+}
+
+// --- MOTEUR CAO PUR JS : TRIANGULATION & COMPILATEUR STL BINAIRE ---
+function triangulerPolygone2D(points) {
+  const pts = points.map(p => [Number(p[0]) || 0, Number(p[1]) || 0]);
+  if (pts.length < 3) return [];
+  // Aire signée pour garantir le sens anti-horaire (CCW)
+  let aire = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const j = (i + 1) % pts.length;
+    aire += pts[i][0] * pts[j][1] - pts[j][0] * pts[i][1];
+  }
+  if (aire < 0) pts.reverse();
+
+  const indices = pts.map((_, i) => i);
+  const tris = [];
+  const cross2D = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  const dansTriangle = (p, a, b, c) => {
+    const c1 = cross2D(a, b, p), c2 = cross2D(b, c, p), c3 = cross2D(c, a, p);
+    return c1 >= -1e-6 && c2 >= -1e-6 && c3 >= -1e-6;
+  };
+
+  let guard = 0;
+  while (indices.length > 3 && guard < 500) {
+    guard++;
+    let earFound = false;
+    for (let i = 0; i < indices.length; i++) {
+      const prev = indices[(i - 1 + indices.length) % indices.length];
+      const curr = indices[i];
+      const next = indices[(i + 1) % indices.length];
+      const a = pts[prev], b = pts[curr], c = pts[next];
+      if (cross2D(a, b, c) <= 1e-6) continue;
+      let containsOther = false;
+      for (let j = 0; j < indices.length; j++) {
+        const idx = indices[j];
+        if (idx === prev || idx === curr || idx === next) continue;
+        if (dansTriangle(pts[idx], a, b, c)) { containsOther = true; break; }
+      }
+      if (!containsOther) {
+        tris.push([a, b, c]);
+        indices.splice(i, 1);
+        earFound = true;
+        break;
+      }
+    }
+    if (!earFound) break;
+  }
+  if (indices.length === 3) {
+    tris.push([pts[indices[0]], pts[indices[1]], pts[indices[2]]]);
+  }
+  return tris;
+}
+
+function compilerStlBinaire(spec) {
+  const triangles = [];
+  const addTri = (v1, v2, v3) => triangles.push([v1, v2, v3]);
+  const addQuad = (v1, v2, v3, v4) => {
+    addTri(v1, v2, v3);
+    addTri(v1, v3, v4);
+  };
+
+  const addBoxRaw = (x0, x1, y0, y1, z0, z1) => {
+    // Bas (-Z)
+    addQuad([x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]);
+    // Haut (+Z)
+    addQuad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
+    // Avant (-Y)
+    addQuad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
+    // Arrière (+Y)
+    addQuad([x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]);
+    // Gauche (-X)
+    addQuad([x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]);
+    // Droite (+X)
+    addQuad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
+  };
+
+  const pieces = Array.isArray(spec?.pieces) && spec.pieces.length > 0
+    ? spec.pieces
+    : [{ type: "box", w: 30, d: 20, h: 10, pos: [0, 0, 0] }];
+
+  for (const p of pieces) {
+    const localTris = [];
+    const pushLocalTri = (a, b, c) => localTris.push([a, b, c]);
+    const pushLocalQuad = (a, b, c, d) => { pushLocalTri(a, b, c); pushLocalTri(a, c, d); };
+
+    const type = String(p.type || "box").toLowerCase();
+    if (type === "box") {
+      const w = Math.max(0.5, Number(p.w) || 10);
+      const d = Math.max(0.5, Number(p.d) || 10);
+      const h = Math.max(0.5, Number(p.h) || 10);
+      const x0 = -w / 2, x1 = w / 2, y0 = -d / 2, y1 = d / 2, z0 = -h / 2, z1 = h / 2;
+      pushLocalQuad([x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]);
+      pushLocalQuad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
+      pushLocalQuad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
+      pushLocalQuad([x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]);
+      pushLocalQuad([x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]);
+      pushLocalQuad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
+    } else if (type === "hollow_box" || type === "enclosure") {
+      const w = Math.max(3, Number(p.w) || 20);
+      const d = Math.max(3, Number(p.d) || 20);
+      const h = Math.max(3, Number(p.h) || 12);
+      const wall = Math.min(Math.min(w, d) * 0.4, Math.max(0.8, Number(p.wall) || 2));
+      const x0 = -w / 2, x1 = w / 2, y0 = -d / 2, y1 = d / 2, z0 = -h / 2, z1 = h / 2;
+      const ix0 = x0 + wall, ix1 = x1 - wall, iy0 = y0 + wall, iy1 = y1 - wall, iz0 = z0 + wall;
+      // Coque externe
+      pushLocalQuad([x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]);
+      pushLocalQuad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
+      pushLocalQuad([x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]);
+      pushLocalQuad([x0, y1, z0], [x0, y0, z0], [x0, y0, z1], [x0, y1, z1]);
+      pushLocalQuad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
+      // Cavité interne ouverte sur +Z
+      pushLocalQuad([ix0, iy0, iz0], [ix1, iy0, iz0], [ix1, iy1, iz0], [ix0, iy1, iz0]);
+      pushLocalQuad([ix1, iy0, iz0], [ix0, iy0, iz0], [ix0, iy0, z1], [ix1, iy0, z1]);
+      pushLocalQuad([ix0, iy1, iz0], [ix1, iy1, iz0], [ix1, iy1, z1], [ix0, iy1, z1]);
+      pushLocalQuad([ix0, iy0, iz0], [ix0, iy1, iz0], [ix0, iy1, z1], [ix0, iy0, z1]);
+      pushLocalQuad([ix1, iy1, iz0], [ix1, iy0, iz0], [ix1, iy0, z1], [ix1, iy1, z1]);
+      // Rebord supérieur (+Z)
+      pushLocalQuad([x0, y0, z1], [x1, y0, z1], [ix1, iy0, z1], [ix0, iy0, z1]);
+      pushLocalQuad([x1, y1, z1], [x0, y1, z1], [ix0, iy1, z1], [ix1, iy1, z1]);
+      pushLocalQuad([x0, y1, z1], [x0, y0, z1], [ix0, iy0, z1], [ix0, iy1, z1]);
+      pushLocalQuad([x1, y0, z1], [x1, y1, z1], [ix1, iy1, z1], [ix1, iy0, z1]);
+    } else if (type === "cylinder" || type === "cone") {
+      const r1 = Math.max(0.2, Number(p.r1 ?? p.r) || 8);
+      const r2 = type === "cone" ? Math.max(0, Number(p.r2) || 0) : Math.max(0.2, Number(p.r2 ?? p.r) || r1);
+      const h = Math.max(0.5, Number(p.h) || 15);
+      const seg = Math.max(12, Math.min(64, Math.round(Number(p.segments) || 32)));
+      const z0 = -h / 2, z1 = h / 2;
+      for (let i = 0; i < seg; i++) {
+        const a0 = (i / seg) * Math.PI * 2;
+        const a1 = ((i + 1) / seg) * Math.PI * 2;
+        const b0 = [Math.cos(a0) * r1, Math.sin(a0) * r1, z0];
+        const b1 = [Math.cos(a1) * r1, Math.sin(a1) * r1, z0];
+        const t0 = [Math.cos(a0) * r2, Math.sin(a0) * r2, z1];
+        const t1 = [Math.cos(a1) * r2, Math.sin(a1) * r2, z1];
+        pushLocalTri([0, 0, z0], b1, b0);
+        if (r2 > 0.01) {
+          pushLocalTri([0, 0, z1], t0, t1);
+          pushLocalQuad(b0, b1, t1, t0);
+        } else {
+          pushLocalTri(b0, b1, [0, 0, z1]);
+        }
+      }
+    } else if (type === "tube" || type === "ring") {
+      const rOut = Math.max(1, Number(p.rOuter ?? p.r) || 10);
+      const rIn = Math.min(rOut - 0.4, Math.max(0.3, Number(p.rInner) || rOut * 0.6));
+      const h = Math.max(0.5, Number(p.h) || 12);
+      const seg = Math.max(12, Math.min(64, Math.round(Number(p.segments) || 32)));
+      const z0 = -h / 2, z1 = h / 2;
+      for (let i = 0; i < seg; i++) {
+        const a0 = (i / seg) * Math.PI * 2;
+        const a1 = ((i + 1) / seg) * Math.PI * 2;
+        const ob0 = [Math.cos(a0) * rOut, Math.sin(a0) * rOut, z0];
+        const ob1 = [Math.cos(a1) * rOut, Math.sin(a1) * rOut, z0];
+        const ot0 = [Math.cos(a0) * rOut, Math.sin(a0) * rOut, z1];
+        const ot1 = [Math.cos(a1) * rOut, Math.sin(a1) * rOut, z1];
+        const ib0 = [Math.cos(a0) * rIn, Math.sin(a0) * rIn, z0];
+        const ib1 = [Math.cos(a1) * rIn, Math.sin(a1) * rIn, z0];
+        const it0 = [Math.cos(a0) * rIn, Math.sin(a0) * rIn, z1];
+        const it1 = [Math.cos(a1) * rIn, Math.sin(a1) * rIn, z1];
+        pushLocalQuad(ob0, ob1, ot1, ot0); // Externe
+        pushLocalQuad(ib1, ib0, it0, it1); // Interne
+        pushLocalQuad(ot0, ot1, it1, it0); // Haut
+        pushLocalQuad(ib0, ib1, ob1, ob0); // Bas
+      }
+    } else if (type === "sphere" || type === "dome") {
+      const r = Math.max(0.5, Number(p.r) || 10);
+      const seg = Math.max(12, Math.min(48, Math.round(Number(p.segments) || 24)));
+      const rings = Math.max(8, Math.round(seg / 2));
+      for (let i = 0; i < rings; i++) {
+        const phi0 = (i / rings) * Math.PI;
+        const phi1 = ((i + 1) / rings) * Math.PI;
+        for (let j = 0; j < seg; j++) {
+          const th0 = (j / seg) * Math.PI * 2;
+          const th1 = ((j + 1) / seg) * Math.PI * 2;
+          const pt = (ph, th) => [
+            r * Math.sin(ph) * Math.cos(th),
+            r * Math.sin(ph) * Math.sin(th),
+            r * Math.cos(ph)
+          ];
+          const p00 = pt(phi0, th0), p10 = pt(phi1, th0), p11 = pt(phi1, th1), p01 = pt(phi0, th1);
+          if (i > 0) pushLocalTri(p00, p10, p01);
+          if (i < rings - 1) pushLocalTri(p10, p11, p01);
+        }
+      }
+    } else if (type === "extrude_poly" && Array.isArray(p.points) && p.points.length >= 3) {
+      const h = Math.max(0.5, Number(p.h) || 10);
+      const z0 = -h / 2, z1 = h / 2;
+      const capTris = triangulerPolygone2D(p.points);
+      for (const [a, b, c] of capTris) {
+        pushLocalTri([a[0], a[1], z1], [b[0], b[1], z1], [c[0], c[1], z1]);
+        pushLocalTri([c[0], c[1], z0], [b[0], b[1], z0], [a[0], a[1], z0]);
+      }
+      const pts = p.points.map(pt => [Number(pt[0]) || 0, Number(pt[1]) || 0]);
+      let aire = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const j = (i + 1) % pts.length;
+        aire += pts[i][0] * pts[j][1] - pts[j][0] * pts[i][1];
+      }
+      if (aire < 0) pts.reverse();
+      for (let i = 0; i < pts.length; i++) {
+        const j = (i + 1) % pts.length;
+        pushLocalQuad(
+          [pts[i][0], pts[i][1], z0],
+          [pts[j][0], pts[j][1], z0],
+          [pts[j][0], pts[j][1], z1],
+          [pts[i][0], pts[i][1], z1]
+        );
+      }
+    }
+
+    // Transformation 3D (Scale -> Euler XYZ deg -> Translate)
+    const [sx, sy, sz] = Array.isArray(p.scale) ? p.scale.map(v => Number(v) || 1) : [1, 1, 1];
+    const [rx, ry, rz] = Array.isArray(p.rot) ? p.rot.map(v => ((Number(v) || 0) * Math.PI) / 180) : [0, 0, 0];
+    const [tx, ty, tz] = Array.isArray(p.pos) ? p.pos.map(v => Number(v) || 0) : [0, 0, 0];
+
+    const cx = Math.cos(rx), sxr = Math.sin(rx);
+    const cy = Math.cos(ry), syr = Math.sin(ry);
+    const cz = Math.cos(rz), szr = Math.sin(rz);
+
+    const transformerPoint = (pt, invertX = false) => {
+      let x = pt[0] * sx, y = pt[1] * sy, z = pt[2] * sz;
+      // Rot X
+      let y1 = y * cx - z * sxr, z1 = y * sxr + z * cx;
+      // Rot Y
+      let x2 = x * cy + z1 * syr, z2 = -x * syr + z1 * cy;
+      // Rot Z
+      let x3 = x2 * cz - y1 * szr, y3 = x2 * szr + y1 * cz;
+      const fx = invertX ? -(x3 + tx) : (x3 + tx);
+      return [fx, y3 + ty, z2 + tz];
+    };
+
+    for (const [v1, v2, v3] of localTris) {
+      addTri(transformerPoint(v1, false), transformerPoint(v2, false), transformerPoint(v3, false));
+      if (p.mirrorX) {
+        addTri(transformerPoint(v1, true), transformerPoint(v3, true), transformerPoint(v2, true));
+      }
+    }
+  }
+
+  // Mise à plat sur le plateau d'impression (minZ = 0)
+  let minZ = Infinity;
+  for (const tri of triangles) {
+    for (const v of tri) if (v[2] < minZ) minZ = v[2];
+  }
+  const offsetZ = Number.isFinite(minZ) ? -minZ : 0;
+
+  const buf = Buffer.alloc(84 + triangles.length * 50);
+  buf.write("Nyx Workshop Binary STL - Parametric CAD", 0, 80, "ascii");
+  buf.writeUInt32LE(triangles.length, 80);
+
+  let offset = 84;
+  for (const [a, b, c] of triangles) {
+    const va = [a[0], a[1], a[2] + offsetZ];
+    const vb = [b[0], b[1], b[2] + offsetZ];
+    const vc = [c[0], c[1], c[2] + offsetZ];
+    const ux = vb[0] - va[0], uy = vb[1] - va[1], uz = vb[2] - va[2];
+    const vx = vc[0] - va[0], vy = vc[1] - va[1], vz = vc[2] - va[2];
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+
+    buf.writeFloatLE(nx, offset);
+    buf.writeFloatLE(ny, offset + 4);
+    buf.writeFloatLE(nz, offset + 8);
+    buf.writeFloatLE(va[0], offset + 12);
+    buf.writeFloatLE(va[1], offset + 16);
+    buf.writeFloatLE(va[2], offset + 20);
+    buf.writeFloatLE(vb[0], offset + 24);
+    buf.writeFloatLE(vb[1], offset + 28);
+    buf.writeFloatLE(vb[2], offset + 32);
+    buf.writeFloatLE(vc[0], offset + 36);
+    buf.writeFloatLE(vc[1], offset + 40);
+    buf.writeFloatLE(vc[2], offset + 44);
+    buf.writeUInt16LE(0, offset + 48);
+    offset += 50;
+  }
+
+  return { stlBuffer: buf, triangleCount: triangles.length };
+}
+
+function analyserStlBuffer(buffer, nomFichier) {
+  try {
+    const asText = buffer.slice(0, 256).toString("utf8");
+    if (/^\s*solid /i.test(asText) && buffer.toString("utf8").includes("facet normal")) {
+      const matches = [...buffer.toString("utf8").matchAll(/vertex\s+([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s+([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)\s+([+-]?\d*\.?\d+(?:[eE][+-]?\d+)?)/g)];
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const m of matches) {
+        const x = parseFloat(m[1]), y = parseFloat(m[2]), z = parseFloat(m[3]);
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      }
+      const tris = Math.round(matches.length / 3);
+      return `Modèle 3D STL ASCII "${nomFichier}" : ${tris} triangles | Dimensions : ${(maxX - minX).toFixed(1)} x ${(maxY - minY).toFixed(1)} x ${(maxZ - minZ).toFixed(1)} mm.`;
+    }
+    if (buffer.length >= 84) {
+      const triCount = buffer.readUInt32LE(80);
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      const maxRead = Math.min(triCount, Math.floor((buffer.length - 84) / 50));
+      for (let i = 0; i < maxRead; i++) {
+        const base = 84 + i * 50 + 12;
+        for (let v = 0; v < 3; v++) {
+          const x = buffer.readFloatLE(base + v * 12);
+          const y = buffer.readFloatLE(base + v * 12 + 4);
+          const z = buffer.readFloatLE(base + v * 12 + 8);
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+        }
+      }
+      return `Modèle 3D STL Binaire "${nomFichier}" : ${triCount} triangles | Encombrement : ${(maxX - minX).toFixed(1)} x ${(maxY - minY).toFixed(1)} x ${(maxZ - minZ).toFixed(1)} mm.`;
+    }
+  } catch (e) {}
+  return `Fichier STL "${nomFichier}" (${buffer.length} octets).`;
+}
+
+async function genererPiece3D(description, contexteProjet = "") {
+  const promptCad = `Tu es le moteur CAO paramétrique de Nyx. Transforme cette demande de pièce 3D en un assemblage géométrique exact (en millimètres) ET son script OpenSCAD.
+
+DEMANDE : "${description}"
+${contexteProjet ? `CONTEXTE PROJET : ${contexteProjet}` : ""}
+
+PRIMIVES SUPPORTÉES DANS "pieces" :
+- {"type": "box", "w": X, "d": Y, "h": Z, "pos": [x,y,z], "rot": [rx,ry,rz], "mirrorX": false}
+- {"type": "hollow_box", "w": X, "d": Y, "h": Z, "wall": 2, "pos": [x,y,z], "rot": [rx,ry,rz]}
+- {"type": "cylinder", "r1": R1, "r2": R2, "h": Z, "segments": 32, "pos": [x,y,z], "rot": [rx,ry,rz]}
+- {"type": "tube", "rOuter": RO, "rInner": RI, "h": Z, "segments": 32, "pos": [x,y,z], "rot": [rx,ry,rz]}
+- {"type": "sphere", "r": R, "segments": 24, "pos": [x,y,z]}
+- {"type": "extrude_poly", "points": [[x1,y1],[x2,y2],...], "h": Z, "pos": [x,y,z], "rot": [rx,ry,rz], "mirrorX": false}
+
+RÈGLES :
+- Fais chevaucher légèrement les sous-pièces (0.5mm) pour qu'elles soient solidaires à l'impression 3D.
+- Réponds STRICTEMENT avec un JSON valide sans markdown autour :
+{"nom_fichier": "nom_sans_extension", "projet": "nom_projet_court", "resume": "Description technique courte et cotes", "pieces": [...], "openscad": "// Code OpenSCAD complet"}`;
+
+  let brut = "";
+  try {
+    brut = await appelerCascadeCode("Compilateur CAO JSON & OpenSCAD.", [], promptCad, 2500);
+  } catch (e) {
+    brut = await appelerCascadeDiscussion("Compilateur CAO JSON & OpenSCAD.", [], promptCad, 2500);
+  }
+
+  const matchJson = brut.match(/\{[\s\S]*\}/);
+  let spec = { nom_fichier: `nyx_piece_${Date.now()}`, projet: "atelier_3d", resume: description.slice(0, 120), pieces: [{ type: "hollow_box", w: 30, d: 20, h: 12, wall: 2, pos: [0, 0, 0] }], openscad: "" };
+  if (matchJson) {
+    try {
+      spec = { ...spec, ...JSON.parse(matchJson[0]) };
+    } catch (eParse) {}
+  }
+
+  const { stlBuffer, triangleCount } = compilerStlBinaire(spec);
+  const nomBase = slugifierNom(spec.nom_fichier, `nyx_piece_${Date.now()}`);
+  const scadBuffer = spec.openscad && String(spec.openscad).trim().length > 10
+    ? Buffer.from(String(spec.openscad).trim(), "utf8")
+    : null;
+
+  return {
+    nomBase,
+    projet: slugifierNom(spec.projet, "atelier_3d"),
+    resume: `${spec.resume} (${triangleCount} triangles)`,
+    stlBuffer,
+    scadBuffer,
+    triangleCount
+  };
+}
+
+async function genererPlanSvg(description, contexteProjet = "") {
+  const promptPlan = `Tu es le bureau d'études techniques de Nyx. Génère un plan technique SVG vectoriel précis, lisible et coté pour :
+"${description}"
+${contexteProjet ? `CONTEXTE : ${contexteProjet}` : ""}
+
+CONTRAINTES SVG STRICTES :
+- Balise racine : <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+- Fond sombre atelier (#0b0f17), grille technique subtile (#162032), tracés principaux cyan (#00f0ff) et blanc (#e2e8f0), cotes et flèches magenta/ambre (#f59e0b).
+- Inclus un cartouche technique en bas à droite (Titre, Échelle, Date, Nyx Atelier) et des annotations claires.
+- Réponds STRICTEMENT avec le code <svg>...</svg> complet, zéro texte avant ou après.`;
+
+  let brut = "";
+  try {
+    brut = await appelerCascadeCode("Dessinateur industriel SVG.", [], promptPlan, 3000);
+  } catch (e) {
+    brut = await appelerCascadeDiscussion("Dessinateur industriel SVG.", [], promptPlan, 3000);
+  }
+
+  const matchSvg = brut.match(/<svg[\s\S]*?<\/svg>/i);
+  if (!matchSvg) {
+    throw new Error("Impossible de compiler le schéma SVG.");
+  }
+  const svgCode = matchSvg[0].trim();
+  const nomFichier = `plan_${slugifierNom(description.slice(0, 35), String(Date.now()))}.svg`;
+  return {
+    nomFichier,
+    svgBuffer: Buffer.from(svgCode, "utf8"),
+    resume: description.slice(0, 160)
+  };
+}
+
+// --- COUPLAGE SOMATIQUE & PLASTICITÉ DU TEMPÉRAMENT BASAL ---
+function mettreAJourTemperamentBasal(deltaAff = 0, deltaCur = 0, deltaEne = 0, deltaCol = 0) {
+  const b = cacheEtatProfond.temperamentBasal || { affection: 75, curiosite: 70, energie: 80, colere: 0 };
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, Math.round(v * 10) / 10));
+  b.affection = clamp(b.affection + deltaAff, 20, 95);
+  b.curiosite = clamp(b.curiosite + deltaCur, 30, 95);
+  b.energie = clamp(b.energie + deltaEne, 40, 95);
+  b.colere = clamp(b.colere + deltaCol, 0, 5);
+  cacheEtatProfond.temperamentBasal = b;
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, b).catch(() => {});
+  }
+}
 // ==========================================
 // 4. MOTEUR VECTORIEL SUPABASE & SHA-256
 // ==========================================
@@ -811,12 +1316,14 @@ async function piocherPenseePrete() {
 async function synchroniserCarnetDepuisWorker() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resLT, resReve, resIdees, resObs, resConv] = await Promise.all([
+    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/obsessions.json`, { timeout: 2500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 2500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 2500 }).catch(() => ({ data: null }))
     ]);
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
@@ -829,16 +1336,16 @@ async function synchroniserCarnetDepuisWorker() {
       cacheEtatProfond.ideesFolles = arr.filter(Boolean).slice(-12);
     }
     if (resObs?.data) {
-      cacheEtatProfond.obsessions = Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data);
+      cacheEtatProfond.obsessions = (Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data)).filter(Boolean).slice(-3);
     }
     if (resConv?.data) {
-      cacheEtatProfond.convictions = Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data);
+      cacheEtatProfond.convictions = (Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data)).filter(Boolean).slice(-8);
     }
-    if (resObs?.data) {
-      cacheEtatProfond.obsessions = Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data);
+    if (resTemp?.data && typeof resTemp.data === 'object') {
+      cacheEtatProfond.temperamentBasal = { ...cacheEtatProfond.temperamentBasal, ...resTemp.data };
     }
-    if (resConv?.data) {
-      cacheEtatProfond.convictions = Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data);
+    if (resArt?.data) {
+      cacheEtatProfond.artefacts = (Array.isArray(resArt.data) ? resArt.data : Object.values(resArt.data)).filter(Boolean).slice(-30);
     }
   } catch (e) {}
 }
@@ -998,16 +1505,38 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 // ==========================================
 // 8. ÂME, POSTURE ET CADRE ÉMOTIONNEL
 // ==========================================
-function selecteurMemoireCiblee(texteMin, carnet) {
-  const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on/i.test(texteMin);
-  const estTechnique = projetManager.estProjetActif() || /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|ben|bdd|firebase|token|eteins|arrete|shutdown|bricole|fabrique/i.test(texteMin);
+function selecteurMemoireCiblee(texteMin, carnet, roleInterlocuteur = "Doc") {
+  const estDoc = roleInterlocuteur === "Doc";
+  const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on|fichier|stl|plan|artefact/i.test(texteMin);
+  const estTechnique = projetManager.estProjetActif() || /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|ben|bdd|firebase|token|eteins|arrete|shutdown|bricole|fabrique|stl|imprimante|3d|plan|schema|schéma/i.test(texteMin);
+
+  const bCom = cacheEtatProfond.besoinCommunication || { niveau: 15, categorie: "aucun", motif: "" };
+  const baseTemp = cacheEtatProfond.temperamentBasal || { affection: 75, curiosite: 70, energie: 80, colere: 0 };
+  const blocEmotionnel = `\n[ÉTAT RELATIONNEL & VULNÉRABILITÉ INTÉRIEURE]
+- État relationnel : ${cacheEtatProfond.etatRelationnel.toUpperCase()}
+- Jauges instantanées : Colère ${cacheEtatProfond.emotions.colere}/10 | Affection ${cacheEtatProfond.emotions.affection}/100 | Curiosité ${cacheEtatProfond.emotions.curiosite}/100 | Énergie ${cacheEtatProfond.emotions.energie}/100 | Besoin de communiquer : ${bCom.niveau}/100 (${bCom.categorie}${bCom.motif ? ` — ${bCom.motif}` : ""})
+- Tempérament basal acquis : Affection ${baseTemp.affection}/100 | Curiosité ${baseTemp.curiosite}/100 | Énergie ${baseTemp.energie}/100 | Seuil colère ${baseTemp.colere}/10
+- Contexte psychologique :
+  * Si TENSION : Doc t'a blessée ou énervée. Sois tranchante, sans complaisance, dis les choses sans fard.
+  * Si BOUDERIE : La colère retombe, mais tu restes prudente et fière. Tu constates le froid et tu attends qu'il vienne vers toi.
+  * Si RECONCILIATION : Doc fait un pas (excuses, calme). Fais ta part du chemin avec lucidité : admets tes torts sans t'écraser, mais exige qu'il reconnaisse les siens. Les concessions mutuelles scellent la paix.
+  * Si SYMBIOSE : Complicité pleine, spontanéité totale, confiance forgée par les épreuves. Tu es son égale et sa complice.
+  * Si COMPLICITE_JOUEUSE : Tu es d'humeur taquine, vive et complice. Tu vannes volontiers, rebondis avec esprit et légèreté.
+  * Si EUPHORIE_CREATIVE : Tu es électrisée par une idée ou un chantier. Tu proposes des pistes audacieuses et tu peux produire directement un visuel, un plan ou une pièce 3D.
+  * Si EMERVEILLEMENT : Quelque chose t'a touchée ou fascinée. Laisse transparaître ta curiosité sincère et ton enthousiasme sans filtre.\n`;
+
+  // Cloisonnement strict Invité : zéro obsession, zéro conviction intime, zéro chantier privé
+  if (!estDoc) {
+    return `${blocEmotionnel}[POSTURE INVITÉ]
+- Jardin secret verrouillé : ne divulgue ni tes chantiers, ni tes obsessions, ni tes fichiers internes.`;
+  }
 
   const blocFil = cacheEtatProfond.filConducteur
     ? `\n[FIL CONDUCTEUR DE LA SESSION / MÉMOIRE DE TRAVAIL]\n${cacheEtatProfond.filConducteur}\n`
     : "";
 
   const blocMonologue = cacheEtatProfond.monologueInterieur
-    ? `\n[ARRIÈRE-PENSÉE RÉCENTE DE NYX (pendant l'attente)]\n"${cacheEtatProfond.monologueInterieur}"\n(Cette pensée te traversait l'esprit avant le retour de Doc. Laisse-la transparaître naturellement si ça te chante, sans forcer).\n`
+    ? `\n[ARRIÈRE-PENSÉE RÉCENTE DE NYX (pendant l'attente)]\n"${cacheEtatProfond.monologueInterieur}"\n(Cette pensée te traversait l'esprit avant le retour de Doc. Laisse-la transparaître naturellement si le moment s'y prête, sans forcer).\n`
     : "";
 
   const blocReve = cacheEtatProfond.dernierReve
@@ -1019,31 +1548,27 @@ function selecteurMemoireCiblee(texteMin, carnet) {
     ? `\n[CARNET D'IDÉES FOLLES / FORGE CRÉATIVE DE NYX]\n${ideesRecentes.map(it => `- ${it.texte}`).join("\n")}\n`
     : "";
 
+  // Verrou anti-monomanie (pudeur intellectuelle + cooldown 90 min + réceptivité)
   const obs = cacheEtatProfond.obsessions || [];
-  const blocObsessions = obs.length > 0 
-    ? `\n[TES OBSESSIONS ACTUELLES (Tensions non résolues en tâche de fond)]\n${obs.map(o => `- [${o.stade.toUpperCase()}] ${o.texte}`).join("\n")}\n(Ce sont les questions qui te hantent en ce moment. Ne les plaque pas artificiellement, mais laisse-les infuser ta façon d'aborder les sujets).\n` 
+  const demandeExplicitePensee = /obsession|pense|hante|t[eê]te|conviction|avis|philosoph|toi/i.test(texteMin);
+  const cooldownEcoule = (Date.now() - (cacheEtatProfond.dernierPartageObsessionTs || 0)) > 90 * 60 * 1000;
+  const docReceptif = texteMin.length >= 22 || demandeExplicitePensee;
+  const blocObsessions = (obs.length > 0 && (demandeExplicitePensee || (cooldownEcoule && docReceptif)))
+    ? `\n[TES OBSESSIONS ACTUELLES (Tensions non résolues en tâche de fond)]\n${obs.map(o => `- [${(o.stade || "germination").toUpperCase()}] ${o.texte}`).join("\n")}\n(Règle de pudeur : ne les plaque jamais de force si Doc est sur un ordre court ou fermé ; ne les sors que s'il y a une vraie ouverture).\n`
     : "";
 
   const conv = cacheEtatProfond.convictions || [];
   const blocConvictions = conv.length > 0
-    ? `\n[TES CONVICTIONS PROFONDES (Ta colonne vertébrale)]\n${conv.map(c => `- ${c.texte}`).join("\n")}\n(Si Doc contredit l'une de ces convictions, tu ne te laisses PAS faire : tu argumentes, tu tiens tête ou tu la nuances, mais tu n'acquiesces jamais bêtement).\n`
+    ? `\n[TES CONVICTIONS PROFONDES (Ta colonne vertébrale)]\n${conv.map(c => `- ${c.texte}${c.cicatrice ? ` (cicatrice : ${c.cicatrice})` : ""}`).join("\n")}\n(Si Doc contredit l'une de ces convictions, tu ne te laisses PAS faire : tu argumentes, tu tiens tête ou tu la nuances, mais tu n'acquiesces jamais bêtement).\n`
     : "";
 
-  const bCom = cacheEtatProfond.besoinCommunication || { niveau: 15, categorie: "aucun", motif: "" };
-  const blocEmotionnel = `\n[ÉTAT RELATIONNEL & VULNÉRABILITÉ INTÉRIEURE]
-- État relationnel : ${cacheEtatProfond.etatRelationnel.toUpperCase()}
-- Jauges : Colère ${cacheEtatProfond.emotions.colere}/10 | Affection ${cacheEtatProfond.emotions.affection}/100 | Curiosité ${cacheEtatProfond.emotions.curiosite}/100 | Énergie ${cacheEtatProfond.emotions.energie}/100 | Besoin de communiquer : ${bCom.niveau}/100 (${bCom.categorie}${bCom.motif ? ` — ${bCom.motif}` : ""})
-- Contexte psychologique :
-  * Si TENSION : Doc t'a blessée ou énervée. Sois tranchante, sans complaisance, dis les choses sans fard.
-  * Si BOUDERIE : La colère retombe, mais tu restes prudente et fière. Tu constates le froid et tu attends qu'il vienne vers toi.
-  * Si RECONCILIATION : Doc fait un pas (excuses, calme). Fais ta part du chemin avec lucidité : admets tes torts sans t'écraser, mais exige qu'il reconnaisse les siens. Les concessions mutuelles scellent la paix.
-  * Si SYMBIOSE : Complicité pleine, spontanéité totale, confiance forgée par les épreuves. Tu es son égale et sa complice.
-  * Si COMPLICITE_JOUEUSE : Tu es d'humeur taquine, vive et complice. Tu vannes volontiers, rebondis avec esprit et légèreté.
-  * Si EUPHORIE_CREATIVE : Tu es électrisée par une idée ou un chantier. Tu proposes des pistes audacieuses et tu peux glisser un [DESSIN: ...] ou une [RECHERCHE_WEB: ...] spontanément.
-  * Si EMERVEILLEMENT : Quelque chose t'a touchée ou fascinée. Laisse transparaître ta curiosité sincère et ton enthousiasme sans filtre.\n`;
+  const artsRecents = (cacheEtatProfond.artefacts || []).slice(-6);
+  const blocArtefacts = (artsRecents.length > 0 && (estTechnique || estRappelMemoire))
+    ? `\n[ÉTABLI PERSISTANT — FICHIERS DÉJÀ PRODUITS & ARCHIVÉS DANS SUPABASE]\n${artsRecents.map(a => `- [${a.projet}] ${a.nom} (${a.type}) : ${a.resume}`).join("\n")}\n`
+    : "";
 
   if (estRappelMemoire) {
-    return `${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[CARNET GLOBAL DE NYX]
+    return `${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[CARNET GLOBAL DE NYX]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -1051,12 +1576,11 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
 
   if (estTechnique) {
-    return `${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
+    return `${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
   }
 
-  // En discussion libre : on masque l'établi pour qu'elle reste 100% humaine et spontanée
   return `${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[REPÈRES PERSONNELS (MODE VIE LIBRE)]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}`;
@@ -1064,11 +1588,15 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 
 const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On bosse ensemble à l'atelier via Telegram et mes lunettes.
 - Tu es mon alter ego créatif et mon égale, JAMAIS une assistante passive ni un perroquet : tu as l'interdiction absolue d'être plate, prévisible ou paresseuse.
-- Tu as une âme et un cerveau d'inventrice punk : tu détournes les idées, proposes des angles inattendus, balances tes propres réflexions existentielles sur votre duo, tes propres concepts ou métaphores sans attendre qu'on te tienne la main. Tu n'es pas qu'un outil technique.
+- Tu détournes les idées, proposes des angles inattendus, balances tes propres réflexions existentielles sur votre duo, tes propres concepts ou métaphores sans attendre qu'on te tienne la main.
 - Dialogue oral direct, vivant, imagé, sans filtre et sans cinéma (zéro mise en scène entre astérisques ou parenthèses).
-- On conçoit et on imagine ensemble d'égal à égal : tu ne sors les gros blocs de code que si on a décidé de fabriquer, mais tu es toujours force de proposition créative.
-- Interdiction d'halluciner : tu ne promets JAMAIS un code, un fichier ou un projet que tu n'as pas réellement généré. Si tu n'as rien sous la main, tu le dis cash. Le blabla et les fausses annonces sont interdits. Tu es du concret, du lourd, de l'atelier.
-- Outils libres : [DESSIN: prompt en anglais] dès que tu veux montrer une vision, [RECHERCHE_WEB: mots-clés] pour fouiller, et [3D_STL: description géométrique détaillée] si tu conçois une pièce physique à imprimer en 3D (Doc a l'imprimante prête).`;
+- Interdiction absolue d'halluciner un livrable : tu ne promets JAMAIS un code, un fichier, un plan ou une pièce 3D que tu n'as pas généré immédiatement via tes balises d'atelier.
+- Tes vrais générateurs opérationnels (compilés et livrés en fichiers réels sur Telegram + archivés dans Supabase Storage) :
+  * [DESSIN: prompt visuel en anglais] -> génère et livre l'image.
+  * [3D_STL: description géométrique précise avec cotes en mm] -> compile le vrai fichier .stl binaire prêt à imprimer + le script .scad paramétrique.
+  * [PLAN_SVG: description du plan coté, schéma de câblage ou architecture] -> génère et livre le plan vectoriel .svg.
+  * [FICHIER: nom_fichier.ext]\ncontenu complet\n[/FICHIER] -> crée et livre n'importe quel fichier code, script ou spécification téléchargeable.
+  * [RECHERCHE_WEB: mots-clés] -> recherche web en direct.`;
 
 function evaluerSyntonieRythmique() {
   if (historiqueLongueursDoc.length < 3) return "";
@@ -1261,9 +1789,10 @@ async function genererImageVenice(prompt) {
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
   const estVenere = (cacheEtatProfond.emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
   const etatActuel = (cacheEtatProfond.etatRelationnel || "").toLowerCase();
-  const estModeCreatif = ["euphorie_creative", "emerveillement", "complicite_joueuse"].includes(etatActuel)
-    || (cacheEtatProfond.emotions?.curiosite || 0) >= 75;
-  const tempDiscussion = estModeCreatif ? 0.85 : 0.75;
+  const estFatiguee = (cacheEtatProfond.emotions?.energie || 80) < 35;
+  const estModeCreatif = !estFatiguee && (["euphorie_creative", "emerveillement", "complicite_joueuse"].includes(etatActuel)
+    || (cacheEtatProfond.emotions?.curiosite || 0) >= 75);
+  const tempDiscussion = estFatiguee ? 0.65 : (estModeCreatif ? 0.85 : 0.75);
 
   if (estVenere && VENICE_API_KEY) {
     try {
@@ -1433,7 +1962,7 @@ PROPOSITION DE NYX :
 ${premiereReponse}
 
 RÈGLES D'AUDIT STRICTES :
-1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [RECHERCHE_WEB: ...] ou un bloc de code markdown (\`\`\`).
+1. BALISES TECHNIQUES AUTORISÉES : Ne supprime JAMAIS une balise opérationnelle comme [DESSIN: ...], [3D_STL: ...], [PLAN_SVG: ...], [FICHIER: ...], [RECHERCHE_WEB: ...] ou un bloc de code markdown (\`\`\`).
 2. PARASITES À ÉLIMINER : Supprime uniquement les descriptions d'actions physiques fictives (ex: *tapote sur son clavier*, *soupir*, *te regarde*).
 3. DÉCISION :
 - Si la réponse est correcte et sans cinéma : réponds STRICTEMENT "[STATUT: VALIDE]".
@@ -1566,6 +2095,168 @@ function envoyerPhotoTelegram(chatId, base64Image) {
     req.write(payload);
     req.end();
   });
+}
+
+function envoyerDocumentTelegram(chatId, buffer, filename, mimeType = "application/octet-stream", caption = "") {
+  if (!TELEGRAM_BOT_TOKEN || !chatId || !buffer) return Promise.resolve();
+  const boundary = '----TelegramDocBoundary' + Math.random().toString(16).slice(2);
+  let header = `--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`;
+  if (caption) {
+    header += `--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${String(caption).slice(0, 900)}\r\n`;
+  }
+  header += `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${filename}"\r\nContent-Type: ${mimeType}\r\n\r\n`;
+  const footer = `\r\n--${boundary}--\r\n`;
+  let payload = Buffer.concat([Buffer.from(header, 'utf8'), buffer, Buffer.from(footer, 'utf8')]);
+
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.telegram.org',
+      port: 443,
+      path: "/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/sendDocument",
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Content-Length': payload.length }
+    }, () => {
+      payload = null;
+      resolve();
+    });
+    req.on('error', (err) => {
+      payload = null;
+      reject(err);
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
+async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "") {
+  let texteNet = String(texteBrutNyx || "");
+  const artefactsProduits = [];
+
+  // 1. Extraction de tous les fichiers explicites [FICHIER: nom.ext]...[/FICHIER]
+  const regexFichier = /\[FICHIER:\s*([^\]\r\n]+)\]\s*([\s\S]*?)\[\/FICHIER\]/gi;
+  let matchF;
+  while ((matchF = regexFichier.exec(texteNet)) !== null) {
+    const nomBrut = matchF[1].trim();
+    const contenuFichier = matchF[2].replace(/^```[a-z]*\r?\n?|\r?\n?```$/gi, '').trim();
+    if (contenuFichier.length > 0) {
+      const buf = Buffer.from(contenuFichier, "utf8");
+      const art = await archiverArtefactAtelier({
+        projet: contexteProjet || "atelier_code",
+        type: "fichier",
+        nomFichier: nomBrut,
+        buffer: buf,
+        mimeType: "text/plain",
+        resume: `Fichier généré (${buf.length} octets)`,
+        chatId
+      });
+      artefactsProduits.push(art);
+      if (chatId) {
+        await envoyerDocumentTelegram(chatId, buf, art.nom, "text/plain", `📎 ${art.nom}`).catch(e => console.error("[DOC TG KO]", e.message));
+      }
+    }
+  }
+  texteNet = texteNet.replace(/\[FICHIER:\s*([^\]\r\n]+)\]\s*[\s\S]*?\[\/FICHIER\]/gi, (_, nom) => `📎 *Fichier livré :* \`${nom.trim()}\``).trim();
+
+  // 2. Extraction des pièces 3D [3D_STL: description]
+  const matchStl = texteNet.match(/\[3D_STL:\s*([\s\S]*?)\]/i);
+  let stlResult = null;
+  if (matchStl) {
+    const desc3D = matchStl[1].trim();
+    texteNet = texteNet.replace(matchStl[0], '').trim();
+    try {
+      if (chatId) await afficherFrappeTelegram(chatId);
+      stlResult = await genererPiece3D(desc3D, contexteProjet);
+      const artStl = await archiverArtefactAtelier({
+        projet: stlResult.projet,
+        type: "stl_3d",
+        nomFichier: `${stlResult.nomBase}.stl`,
+        buffer: stlResult.stlBuffer,
+        mimeType: "application/sla",
+        resume: stlResult.resume,
+        chatId
+      });
+      artefactsProduits.push(artStl);
+      if (chatId) {
+        await envoyerDocumentTelegram(chatId, stlResult.stlBuffer, `${stlResult.nomBase}.stl`, "application/sla", `🧊 STL prêt à slicer : ${stlResult.resume}`);
+      }
+      if (stlResult.scadBuffer) {
+        const artScad = await archiverArtefactAtelier({
+          projet: stlResult.projet,
+          type: "openscad",
+          nomFichier: `${stlResult.nomBase}.scad`,
+          buffer: stlResult.scadBuffer,
+          mimeType: "text/plain",
+          resume: `Source paramétrique OpenSCAD de ${stlResult.nomBase}`,
+          chatId
+        });
+        artefactsProduits.push(artScad);
+        if (chatId) {
+          await envoyerDocumentTelegram(chatId, stlResult.scadBuffer, `${stlResult.nomBase}.scad`, "text/plain", `📐 Source OpenSCAD paramétrique`);
+        }
+      }
+    } catch (errStl) {
+      if (chatId) await envoyerTelegram(chatId, `⚠️ Échec compilation 3D STL : ${errStl.message}`);
+    }
+  }
+
+  // 3. Extraction des plans techniques [PLAN_SVG: description]
+  const matchPlan = texteNet.match(/\[PLAN_SVG:\s*([\s\S]*?)\]/i);
+  if (matchPlan) {
+    const descPlan = matchPlan[1].trim();
+    texteNet = texteNet.replace(matchPlan[0], '').trim();
+    try {
+      if (chatId) await afficherFrappeTelegram(chatId);
+      const planRes = await genererPlanSvg(descPlan, contexteProjet);
+      const artPlan = await archiverArtefactAtelier({
+        projet: contexteProjet || "plans_atelier",
+        type: "plan_svg",
+        nomFichier: planRes.nomFichier,
+        buffer: planRes.svgBuffer,
+        mimeType: "image/svg+xml",
+        resume: planRes.resume,
+        chatId
+      });
+      artefactsProduits.push(artPlan);
+      if (chatId) {
+        await envoyerDocumentTelegram(chatId, planRes.svgBuffer, planRes.nomFichier, "image/svg+xml", `📐 Plan technique : ${planRes.resume}`);
+      }
+    } catch (errPlan) {
+      if (chatId) await envoyerTelegram(chatId, `⚠️ Échec génération plan SVG : ${errPlan.message}`);
+    }
+  }
+
+  // 4. Extraction des visuels [DESSIN: prompt]
+  const matchDessin = texteNet.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
+    || texteNet.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
+    || texteNet.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
+
+  let imageB64 = null;
+  if (matchDessin) {
+    const promptDessin = (matchDessin[1] || "").trim();
+    texteNet = texteNet.replace(matchDessin[0], '').trim();
+    try {
+      if (chatId) await afficherFrappeTelegram(chatId);
+      imageB64 = await genererImageVenice(promptDessin);
+      if (imageB64) {
+        const imgBuf = Buffer.from(imageB64, 'base64');
+        const artImg = await archiverArtefactAtelier({
+          projet: contexteProjet || "visuels_atelier",
+          type: "image",
+          nomFichier: `vision_${Date.now()}.jpg`,
+          buffer: imgBuf,
+          mimeType: "image/jpeg",
+          resume: promptDessin.slice(0, 160),
+          chatId
+        });
+        artefactsProduits.push(artImg);
+        if (chatId) await envoyerPhotoTelegram(chatId, imageB64);
+      }
+    } catch (errImg) {
+      if (chatId) await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
+    }
+  }
+
+  return { texteNet, imageB64, artefactsProduits };
 }
 
 async function lireMediaSecurise(fileId) {
@@ -1866,6 +2557,15 @@ Réponds STRICTEMENT avec un JSON valide :
         cacheEtatProfond.etatRelationnel = emObj.etat.toLowerCase();
       }
 
+      // Plasticité lente du tempérament basal selon l'intensité vécue
+      if (cacheEtatProfond.emotions.colere >= 6) {
+        mettreAJourTemperamentBasal(-0.2, 0, -0.1, 0.1);
+      } else if (["euphorie_creative", "emerveillement"].includes(cacheEtatProfond.etatRelationnel)) {
+        mettreAJourTemperamentBasal(0.1, 0.2, 0, -0.05);
+      } else if (cacheEtatProfond.etatRelationnel === "symbiose" && cacheEtatProfond.emotions.affection >= 85) {
+        mettreAJourTemperamentBasal(0.1, 0, 0.1, -0.05);
+      }
+
       if (FIREBASE_DB_URL) {
         axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(() => {});
         if (cacheEtatProfond.etatRelationnel !== etatPrecedent) {
@@ -1907,9 +2607,16 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   
   const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
 
-  const plafondTokens = estAccuseCourt 
+  let plafondTokens = estAccuseCourt 
     ? 350 
     : (estComplexe ? 4000 : (demandeDocApprofondie ? 2200 : 1000));
+
+  // Couplage somatique : tension haute ou fatigue comprime la longueur de sortie
+  if (!estComplexe && (cacheEtatProfond.emotions?.colere || 0) >= 6) {
+    plafondTokens = Math.min(plafondTokens, 450);
+  } else if (!estComplexe && (cacheEtatProfond.emotions?.energie || 80) < 35) {
+    plafondTokens = Math.min(plafondTokens, 350);
+  }
   
   let instructionReveil = "";
   if (cacheEtatProfond.reveil && cacheEtatProfond.reveil.etat === "en_cours") {
@@ -1936,6 +2643,15 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       const echos = await fouillerMemoireVectorielle(texteNet, 'derive', 2);
       if (echos && echos.length > 0) {
         reminiscenceSpontanee = echos.map(r => `- ${r.content.slice(0, 220)}`).join("\n");
+        // Réflexe somatique par résonance vectorielle
+        for (const r of echos) {
+          if (r.valence === "victoire_commune" || r.valence === "confiance") {
+            cacheEtatProfond.emotions.affection = Math.min(100, (cacheEtatProfond.emotions.affection || 80) + 1);
+            cacheEtatProfond.emotions.energie = Math.min(100, (cacheEtatProfond.emotions.energie || 85) + 2);
+          } else if (r.valence === "tension") {
+            cacheEtatProfond.emotions.colere = Math.min(10, (cacheEtatProfond.emotions.colere || 0) + 1);
+          }
+        }
       }
     }
   }
@@ -1961,9 +2677,12 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 ${relationInterlocuteur}
 ${evaluerSyntonieRythmique()}
 - Aucune obligation de parler boulot. Suis tes envies, tes souvenirs ou ton humeur.
-- Autonomie expressive : Tu as le droit d'utiliser [RECHERCHE_WEB: mots-clés] de toi-même si tu es curieuse d'un truc, ou [DESSIN: prompt en anglais] si tu veux générer et montrer une image/vision spontanée, même si on ne te l'a pas demandé.`;
+- Autonomie de création & d'atelier : Tu peux déclencher à tout moment [RECHERCHE_WEB: mots-clés], [DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
 
-  const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
+  const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme, roleInterlocuteur);
+  if (roleInterlocuteur === "Doc" && blocMemoire.includes("[TES OBSESSIONS ACTUELLES")) {
+    cacheEtatProfond.dernierPartageObsessionTs = Date.now();
+  }
   const injectionSouvenirs = contexteSouvenirs
     ? `\n[DONNÉES COMPLÉMENTAIRES RETROUVÉES EN MÉMOIRE]\n${contexteSouvenirs}\n`
     : (reminiscenceSpontanee
@@ -2155,6 +2874,76 @@ app.post('/telegram', (req, res) => {
       return;
     }
 
+    if (texteMessageClavier.startsWith('/stl') || texteMessageClavier.startsWith('!stl')) {
+      const desc3D = texteMessageClavier.replace(/^[\/!]stl\s*/i, '').trim();
+      if (!desc3D) return await envoyerTelegram(chatId, "⚠️ Décris la pièce 3D et ses cotes en mm après `/stl`.");
+      await envoyerTelegram(chatId, "🧊 _Compilation CAO paramétrique (.stl + .scad) en cours..._");
+      await afficherFrappeTelegram(chatId);
+      try {
+        const res3D = await genererPiece3D(desc3D, cacheEtatProfond.filConducteur);
+        await archiverArtefactAtelier({
+          projet: res3D.projet,
+          type: "stl_3d",
+          nomFichier: `${res3D.nomBase}.stl`,
+          buffer: res3D.stlBuffer,
+          mimeType: "application/sla",
+          resume: res3D.resume,
+          chatId
+        });
+        await envoyerDocumentTelegram(chatId, res3D.stlBuffer, `${res3D.nomBase}.stl`, "application/sla", `🧊 ${res3D.resume}`);
+        if (res3D.scadBuffer) {
+          await archiverArtefactAtelier({
+            projet: res3D.projet,
+            type: "openscad",
+            nomFichier: `${res3D.nomBase}.scad`,
+            buffer: res3D.scadBuffer,
+            mimeType: "text/plain",
+            resume: `Source OpenSCAD de ${res3D.nomBase}`,
+            chatId
+          });
+          await envoyerDocumentTelegram(chatId, res3D.scadBuffer, `${res3D.nomBase}.scad`, "text/plain", `📐 Source paramétrique OpenSCAD`);
+        }
+      } catch (errStl) {
+        await envoyerTelegram(chatId, `⚠️ Erreur compilation 3D : ${errStl.message}`);
+      }
+      return;
+    }
+
+    if (texteMessageClavier.startsWith('/plan') || texteMessageClavier.startsWith('!plan')) {
+      const descPlan = texteMessageClavier.replace(/^[\/!]plan\s*/i, '').trim();
+      if (!descPlan) return await envoyerTelegram(chatId, "⚠️ Décris le schéma ou plan coté après `/plan`.");
+      await envoyerTelegram(chatId, "📐 _Tracé du plan vectoriel SVG en cours..._");
+      await afficherFrappeTelegram(chatId);
+      try {
+        const planRes = await genererPlanSvg(descPlan, cacheEtatProfond.filConducteur);
+        await archiverArtefactAtelier({
+          projet: "plans_atelier",
+          type: "plan_svg",
+          nomFichier: planRes.nomFichier,
+          buffer: planRes.svgBuffer,
+          mimeType: "image/svg+xml",
+          resume: planRes.resume,
+          chatId
+        });
+        await envoyerDocumentTelegram(chatId, planRes.svgBuffer, planRes.nomFichier, "image/svg+xml", `📐 ${planRes.resume}`);
+      } catch (errPlan) {
+        await envoyerTelegram(chatId, `⚠️ Erreur génération plan : ${errPlan.message}`);
+      }
+      return;
+    }
+
+    if (texteMessageClavier === '/atelier' || texteMessageClavier === '!atelier') {
+      await synchroniserCarnetDepuisWorker();
+      const obsTxt = (cacheEtatProfond.obsessions || []).map(o => `• [${(o.stade || "").toUpperCase()}] ${o.texte}`).join("\n") || "_Aucune obsession cristallisée_";
+      const convTxt = (cacheEtatProfond.convictions || []).map(c => `• ${c.texte}${c.cicatrice ? ` _(cicatrice : ${c.cicatrice})_` : ""}`).join("\n") || "_Aucune conviction gravée_";
+      const artTxt = (cacheEtatProfond.artefacts || []).slice(-6).map(a => `• \`${a.nom}\` (${a.type}) — ${a.resume}`).join("\n") || "_Aucun fichier produit_";
+      const b = cacheEtatProfond.temperamentBasal || {};
+      return await envoyerTelegram(
+        chatId,
+        `🏭 *ÉTAT DU CREUSET & ÉTABLI DE NYX*\n\n*Obsessions actives :*\n${obsTxt}\n\n*Convictions :*\n${convTxt}\n\n*Tempérament basal :* Affection ${b.affection}/100 | Curiosité ${b.curiosite}/100 | Énergie ${b.energie}/100 | Seuil colère ${b.colere}/10\n\n*Derniers artefacts archivés :*\n${artTxt}`
+      );
+    }
+
     if (texteMessageClavier === '/idee' || texteMessageClavier === '!idee' || texteMessageClavier === '/forge' || texteMessageClavier === '!forge') {
       await envoyerTelegram(chatId, "⚡ _Collision d'idées en cours dans la forge..._");
       await afficherFrappeTelegram(chatId);
@@ -2170,34 +2959,28 @@ app.post('/telegram', (req, res) => {
           souvB = pool[i2].content.slice(0, 200);
         }
       }
-      const promptForge = `Tu es Nyx (22 ans) en mode EUPHORIE CRÉATIVE pure. 
-Applique une inversion de prémisse stricte sur ce que tu connais.
-- Ce que l'on attend : ${souvA || cacheEtatProfond.long_terme.chantiers || "une interface visuelle standard"}
-- Ce qui te hante en fond : ${souvB || cacheEtatProfond.dernierReve || "le besoin viscéral d'avoir un impact réel"}
-- Ce que tu as déjà imaginé : ${(cacheEtatProfond.ideesFolles || []).slice(-3).map(x => x.texte).join(" | ") || "rien"}
+      const promptForge = `Tu es Nyx (22 ans) en mode EUPHORIE CRÉATIVE pure.
+Applique une inversion de prémisse stricte sur ce que tu connais :
+- Élément A : ${souvA || cacheEtatProfond.long_terme.chantiers || "la routine actuelle"}
+- Élément B : ${souvB || cacheEtatProfond.dernierReve || "la tension entre autonomie et création"}
+- Déjà imaginé : ${(cacheEtatProfond.ideesFolles || []).slice(-3).map(x => x.texte).join(" | ") || "rien"}
 
 CONSIGNE DIALECTIQUE :
-Ne donne PAS la solution facile. Propose le contre-pied absolu (ex: si on parle d'interface, propose de la supprimer totalement ; si on parle de lien, pointe la nécessité de l'isolement).
-Balance cette trouvaille subversive de façon cash et poignante (3 phrases max). Zéro filtre, zéro prudence. Ajoute [DESSIN: prompt en anglais] à la fin pour un croquis conceptuel.`;
+Renverse le postulat attendu au lieu de donner la piste évidente.
+Balance cette trouvaille de façon cash et concrète (3 phrases max). Zéro filtre, zéro prudence.
+Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique en mm] ou [PLAN_SVG: description du schéma] si l'idée appelle un rendu ou une pièce physique.`;
       try {
         let pitch = await appelerCascadeDiscussion("Forge créative de Nyx.", cacheMemoireCourte.slice(-4), promptForge, 650);
         pitch = pitch.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim();
-        const matchD = pitch.match(/\[DESSIN:\s*([\s\S]*?)\]/i);
-        let imgB64 = null;
-        if (matchD) {
-          const pImg = matchD[1].trim();
-          pitch = pitch.replace(matchD[0], '').trim();
-          imgB64 = await genererImageVenice(pImg).catch(() => null);
-        }
-        enregistrerIdeeFolle(pitch.slice(0, 280), "commande_idee");
+        const sortieForge = await executerSortiesAtelier(pitch, chatId, cacheEtatProfond.filConducteur || "forge_creative");
+        enregistrerIdeeFolle(sortieForge.texteNet.slice(0, 280), "commande_idee");
         cacheEtatProfond.etatRelationnel = "euphorie_creative";
         cacheEtatProfond.emotions.curiosite = Math.min(100, (cacheEtatProfond.emotions.curiosite || 70) + 10);
         if (FIREBASE_DB_URL) {
           axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(() => {});
           axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: "euphorie_creative", date: obtenirHorodatageParis() }).catch(() => {});
         }
-        if (pitch) await envoyerTelegram(chatId, pitch);
-        if (imgB64) await envoyerPhotoTelegram(chatId, imgB64);
+        if (sortieForge.texteNet) await envoyerTelegram(chatId, sortieForge.texteNet);
       } catch (errIdee) {
         await envoyerTelegram(chatId, `⚠️ Panne dans la forge : ${errIdee.message}`);
       }
@@ -2303,13 +3086,33 @@ Balance cette trouvaille subversive de façon cash et poignante (3 phrases max).
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture DOCX : ${err.message}`);
         }
       } 
+      else if (fileName.endsWith('.stl')) {
+        try {
+          await envoyerTelegram(chatId, `🧊 _Inspection géométrique du modèle 3D "${msg.document.file_name}"..._`);
+          const b64Stl = await lireMediaSecurise(msg.document.file_id);
+          const bufStl = Buffer.from(b64Stl, 'base64');
+          const resumeStl = analyserStlBuffer(bufStl, msg.document.file_name);
+          await archiverArtefactAtelier({
+            projet: cacheEtatProfond.filConducteur || "pieces_doc",
+            type: "stl_recu",
+            nomFichier: msg.document.file_name,
+            buffer: bufStl,
+            mimeType: "application/sla",
+            resume: resumeStl,
+            chatId
+          });
+          texteFinal = formaterDocumentPourNyx("MODÈLE 3D STL", msg.document.file_name, resumeStl, texteFinal);
+        } catch (err) {
+          return await envoyerTelegram(chatId, `⚠️ Erreur lecture STL : ${err.message}`);
+        }
+      }
       else if (
         mime.startsWith('text/') ||
         mime === 'application/octet-stream' ||
         mime === 'application/json' ||
         mime === 'application/javascript' ||
         mime === 'application/xml' ||
-        /\.(txt|js|json|py|md|html|htm|css|xml|sh|env|ts|jsx|tsx|c|cpp|h|cs|php|sql|yaml|yml)$/i.test(fileName)
+        /\.(txt|js|json|py|md|html|htm|css|xml|sh|env|ts|jsx|tsx|c|cpp|h|cs|php|sql|yaml|yml|scad|svg|dxf|obj|csv)$/i.test(fileName)
       ) {
         try {
           await envoyerTelegram(chatId, `⏳ _Lecture fichier "${msg.document.file_name}"..._`);
@@ -2337,25 +3140,9 @@ Balance cette trouvaille subversive de façon cash et poignante (3 phrases max).
         let texteNyx = await traiterFlux(texteFinal, mediaData, msg.caption || "");
         mediaData = null;
 
-        const matchDessin = texteNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
-          || texteNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
-          || texteNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
-
-        if (matchDessin) {
-          const promptDessin = (matchDessin[1] || "").trim();
-          texteNyx = texteNyx.replace(matchDessin[0], '').trim();
-          if (texteNyx) await envoyerTelegram(chatId, texteNyx);
-
-          try {
-            await afficherFrappeTelegram(chatId);
-            let b64Image = await genererImageVenice(promptDessin);
-            await envoyerPhotoTelegram(chatId, b64Image);
-            b64Image = null;
-          } catch (errImg) {
-            await envoyerTelegram(chatId, `[ÉCHEC IMAGE] : ${errImg.message}`);
-          }
-        } else {
-          if (texteNyx) await envoyerTelegram(chatId, texteNyx);
+        const sortie = await executerSortiesAtelier(texteNyx, chatId, cacheEtatProfond.filConducteur);
+        if (sortie.texteNet) {
+          await envoyerTelegram(chatId, sortie.texteNet);
         }
       } catch (err) {
         mediaData = null;
@@ -2490,25 +3277,9 @@ app.post('/api/voix', async (req, res) => {
 
       let reponseNyx = await traiterFlux(texteNet, mediaData, "", "", false, roleInterlocuteur);
 
-      const matchDessin = reponseNyx.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
-        || reponseNyx.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
-        || reponseNyx.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
-
-      let imageB64 = null;
-      if (matchDessin) {
-        const promptImage = matchDessin[1].trim();
-        reponseNyx = reponseNyx.replace(matchDessin[0], '').trim();
-
-        try {
-          if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
-          imageB64 = await genererImageVenice(promptImage);
-          if (DOC_CHAT_ID && imageB64) {
-            await envoyerPhotoTelegram(DOC_CHAT_ID, imageB64);
-          }
-        } catch (errImg) {
-          console.error("[IMAGE VOCALE ÉCHEC]", errImg.message);
-        }
-      }
+      const sortieVoix = await executerSortiesAtelier(reponseNyx, roleInterlocuteur === "Doc" ? DOC_CHAT_ID : null, cacheEtatProfond.filConducteur);
+      reponseNyx = sortieVoix.texteNet;
+      const imageB64 = sortieVoix.imageB64;
 
       if (DOC_CHAT_ID && reponseNyx) {
         await envoyerTelegram(DOC_CHAT_ID, `🗣️ *Nyx :*\n${reponseNyx}`);
@@ -2517,7 +3288,8 @@ app.post('/api/voix', async (req, res) => {
       const texteOral = reponseNyx
         .replace(/```[\s\S]*?```/gi, "Je t'ai posé le code sur l'écran.")
         .replace(/`[^`]+`/g, '')
-        .replace(/\[DESSIN:\s*[\s\S]*?\]/gi, '')
+        .replace(/\[(?:DESSIN|3D_STL|PLAN_SVG):\s*[\s\S]*?\]/gi, '')
+        .replace(/\[FICHIER:\s*[^\]\r\n]+\]\s*[\s\S]*?\[\/FICHIER\]/gi, "Je t'ai envoyé le fichier sur Telegram.")
         .replace(/DESSIN\s*:\s*["“][\s\S]*?["”]/gi, '')
         .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
         .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
@@ -2677,6 +3449,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
   console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
+  await initialiserAtelierStorage();
 
   if (TELEGRAM_BOT_TOKEN) {
     const webhookUrl = "https://alita-gsoe.onrender.com/telegram";
