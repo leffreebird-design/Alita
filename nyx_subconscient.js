@@ -1,8 +1,3 @@
-
-
-
-Icône JS
-nyx_subconscient
 const axios = require('axios');
 const https = require('https');
 const crypto = require('crypto');
