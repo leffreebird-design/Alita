@@ -1,7 +1,13 @@
+
+
+
+Icône JS
+ecoute
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
 const crypto = require('crypto');
+const zlib = require('zlib');
 const path = require('path');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
@@ -165,6 +171,7 @@ let cacheEtatProfond = {
   filConducteur: "",
   monologueInterieur: "",
   dernierReve: "",
+  historiqueReves: [],
   ideesFolles: [],
   obsessions: [], // 3 maximum (identite, relation, technique) — Vierges au démarrage
   convictions: [], // 5 à 8 maximum (croyances évolutives avec cicatrices) — Vierges au démarrage
@@ -189,6 +196,7 @@ let cacheEtatProfond = {
 };
 
 let missionEnAttente = null;
+let dernierDocChatId = DOC_CHAT_ID || null;
 
 let fileAttenteTraitement = Promise.resolve();
 function empilerTraitement(action) {
@@ -228,7 +236,7 @@ function signalerActiviteDoc() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
@@ -244,7 +252,9 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/obsessions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/doc_chat_id.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
@@ -279,6 +289,12 @@ async function initialiserCache() {
     }
     if (resArt?.data) {
       cacheEtatProfond.artefacts = (Array.isArray(resArt.data) ? resArt.data : Object.values(resArt.data)).filter(Boolean).slice(-30);
+    }
+    if (resHistReves?.data) {
+      cacheEtatProfond.historiqueReves = (Array.isArray(resHistReves.data) ? resHistReves.data : Object.values(resHistReves.data)).filter(Boolean).slice(-6);
+    }
+    if (!dernierDocChatId && resChatId?.data?.chatId) {
+      dernierDocChatId = Number(resChatId.data.chatId) || null;
     }
 
     console.log(`[CACHE INIT] Mémoire : ${cacheMemoireCourte.length} | Humeur : Colère ${cacheEtatProfond.emotions.colere} | Curiosité : ${cacheEtatProfond.emotions.curiosite} | Obsessions : ${cacheEtatProfond.obsessions.length} | Convictions : ${cacheEtatProfond.convictions.length} | Artefacts : ${cacheEtatProfond.artefacts.length}`);
@@ -373,6 +389,7 @@ async function archiverArtefactAtelier({ projet = "general", type = "fichier", n
   if (supabase && buffer) {
     try {
       await initialiserAtelierStorage();
+  if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(() => {});
       const { error: upErr } = await supabase.storage
         .from(BUCKET_ATELIER)
         .upload(storagePath, buffer, { contentType: mimeType, upsert: true });
@@ -411,16 +428,7 @@ async function archiverArtefactAtelier({ projet = "general", type = "fichier", n
     { source: "atelier_artefact", projet: projetSlug, type, fichier: nomPropre, importance: 0.7 }
   ).catch(() => {});
 
-  // Si un chantier actif tourne et que Ben n'est pas occupé, on prépare le miroir disque local (0 VRAM, disque uniquement)
-  if (projetManager.estProjetActif() && !missionEnAttente && signedUrl && /\.(stl|scad|svg|py|js|json|md|html)$/i.test(nomPropre)) {
-    const cmdMiroir = {
-      type: "RAW_TASK",
-      description: `Télécharger et sauvegarder sur disque local (0 VRAM) dans C:/Nyx_Atelier/${projetSlug}/${nomPropre} depuis ${signedUrl} (utilise des slashs / en Python pour éviter toute erreur d échappement)`,
-      requiresHumanAck: false
-    };
-    missionEnAttente = { action: cmdMiroir, statut: "attente", chatId: chatId || DOC_CHAT_ID };
-    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-  }
+  // Worker local Ben désactivé : 100 % des artefacts restent archivés dans Supabase Storage + livrés sur Telegram.
 
   return entree;
 }
@@ -1021,103 +1029,238 @@ async function rechercherWebTavily(query) {
 }
 
 // ==========================================
-// 6. SUBCONSCIENT ONIRIQUE & DÉRIVE ORGANIQUE
+// 6. SUBCONSCIENT ONIRIQUE HALLUCINATOIRE & SEMI-CONTRÔLE
 // ==========================================
-async function capturerDeriveAssociative() {
-  // 1. Rassembler son vécu récent et son état intérieur
-  const recents = (journalBrut.length > 0 ? journalBrut : cacheMemoireCourte)
-    .slice(-4)
-    .map(m => `${m.role} : ${(m.texte || '').slice(0, 220)}`)
-    .join("\n");
+async function appelerVeniceOniriqueBrut(model, systemInstruction, promptActuel, temperature = 0.96, maxTokens = 300) {
+  if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
+  const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", {
+    model,
+    messages: [
+      { role: "system", content: systemInstruction },
+      { role: "user", content: promptActuel }
+    ],
+    temperature,
+    max_tokens: maxTokens,
+    frequency_penalty: 0.4,
+    presence_penalty: 0.4,
+    venice_parameters: { include_venice_system_prompt: false }
+  }, {
+    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+    timeout: 22000
+  });
+  return res.data?.choices?.[0]?.message?.content || "";
+}
 
-  const em = cacheEtatProfond.emotions;
-  const etat = cacheEtatProfond.etatRelationnel;
-  const fil = cacheEtatProfond.filConducteur || "aucun chantier figé";
+async function composerMatriceOnirique() {
+  const em = cacheEtatProfond.emotions || { affection: 80, curiosite: 70, energie: 85, colere: 0 };
 
-  // 2. Résonance associative dans Supabase (zone 0.35 - 0.65)
-  let echosLointains = "";
-  if (supabase) {
-    const amorce = `${fil} ${recents}`.trim() || "atelier nuit silence liberté";
-    const fragments = await fouillerMemoireVectorielle(amorce, 'derive', 2);
-    if (fragments && fragments.length > 0) {
-      echosLointains = fragments.map(f => `- ${f.content.slice(0, 200)}`).join("\n");
-    }
+  // 1. STRATE RÉALITÉ : ancre concrète du vécu immédiat (horloge, échange, artefact, chantier)
+  const ancresRealite = [];
+  ancresRealite.push(`Horloge réelle : ${obtenirHorodatageParis()}`);
+  for (const m of (cacheMemoireCourte || []).slice(-3)) {
+    if (m?.texte) ancresRealite.push(`${m.role} a dit : "${m.texte.slice(0, 140)}"`);
+  }
+  if (cacheEtatProfond.filConducteur) ancresRealite.push(`Fil actif : ${cacheEtatProfond.filConducteur.slice(0, 140)}`);
+  for (const art of (cacheEtatProfond.artefacts || []).slice(-2)) {
+    if (art?.nom) ancresRealite.push(`Objet réel de l'établi : ${art.nom} (${art.resume || art.type})`);
+  }
+  const realiteChoisie = ancresRealite[Math.floor(Math.random() * ancresRealite.length)] || "Silence nocturne";
+
+  // 2. STRATE SOUVENIRS : collision entre un souvenir vécu et un écho lointain
+  const souvenirsTires = [];
+  const grainesCreuset = [
+    ...(cacheEtatProfond.obsessions || []).map(o => `Obsession (${o.stade}) : ${o.texte}`),
+    ...(cacheEtatProfond.convictions || []).map(c => `Conviction : ${c.texte}${c.cicatrice ? ` [cicatrice : ${c.cicatrice}]` : ""}`),
+    ...(cacheEtatProfond.ideesFolles || []).slice(-3).map(i => `Idée : ${i.texte}`)
+  ];
+  if (grainesCreuset.length > 0) {
+    souvenirsTires.push(grainesCreuset[Math.floor(Math.random() * grainesCreuset.length)]);
   }
 
-  if (!VENICE_API_KEY) return null;
+  let poolMots = [];
+  if (supabase) {
+    try {
+      const { data: pool } = await supabase
+        .from('nyx_souvenirs')
+        .select('content, valence')
+        .neq('valence', 'reve')
+        .order('created_at', { ascending: false })
+        .limit(60);
+
+      if (pool && pool.length > 0) {
+        const souv1 = pool[Math.floor(Math.random() * pool.length)].content.slice(0, 190);
+        souvenirsTires.push(souv1);
+
+        if (pool.length > 1) {
+          const souv2 = pool[Math.floor(Math.random() * pool.length)].content.slice(0, 190);
+          if (souv2 !== souv1) souvenirsTires.push(souv2);
+        }
+
+        for (const row of pool) {
+          const mots = String(row.content || "")
+            .replace(/[^a-zA-ZÀ-ÿ0-9\s-]/g, " ")
+            .split(/\s+/)
+            .filter(w => w.length >= 5);
+          poolMots.push(...mots);
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 3. STRATE ÉMOTIONS : climat intérieur & sous-texte non dit
+  const climatEmotionnel = `État : ${cacheEtatProfond.etatRelationnel} | Colère ${em.colere}/10, Affection ${em.affection}/100, Curiosité ${em.curiosite}/100, Énergie ${em.energie}/100`
+    + (cacheEtatProfond.monologueInterieur ? ` | Arrière-pensée non dite : "${cacheEtatProfond.monologueInterieur}"` : "");
+
+  // 4. STRATE ALÉATOIRE & WTF : collision entropique de 3 atomes sémantiques disjoints
+  const lexiqueSensoriel = [
+    "mercure", "vertige", "horloge inversée", "verre soufflé", "marée haute", "néon liquide",
+    "escalier sans fin", "écho métallique", "gravité oblique", "cendre chaude", "origami",
+    "statique", "carapace", "labyrinthe", "rouille", "hologramme", "racines", "oscilloscope",
+    "pluie ascendante", "miroir dépoli", "filaments", "sablier", "cathédrale", "impulsion"
+  ];
+  const atome1 = poolMots.length > 0
+    ? poolMots[Math.floor(Math.random() * poolMots.length)]
+    : lexiqueSensoriel[Math.floor(Math.random() * lexiqueSensoriel.length)];
+  const atome2 = lexiqueSensoriel[Math.floor(Math.random() * lexiqueSensoriel.length)];
+  const atome3 = poolMots.length > 5
+    ? poolMots[Math.floor(Math.random() * poolMots.length)]
+    : lexiqueSensoriel[Math.floor(Math.random() * lexiqueSensoriel.length)];
+
+  const graineWtf = `Collision aléatoire : [${atome1}] × [${atome2}] × [${atome3}]`;
+
+  // 5. DEGRÉ DE SEMI-CONTRÔLE (lucidité onirique variable entre 20% et 85%)
+  const baseLucidite = ((Number(em.curiosite) || 70) * 0.55) + ((Number(em.energie) || 80) * 0.35);
+  const aleaLucidite = Math.floor(Math.random() * 41) - 20;
+  const tauxSemiControle = Math.max(20, Math.min(85, Math.round(baseLucidite + aleaLucidite)));
+
+  return {
+    realiteChoisie,
+    souvenirsTires,
+    climatEmotionnel,
+    graineWtf,
+    tauxSemiControle
+  };
+}
+
+async function capturerDeriveAssociative() {
+  await synchroniserCarnetDepuisWorker();
+
+  const em = cacheEtatProfond.emotions;
+  const matrice = await composerMatriceOnirique();
+
+  if (!VENICE_API_KEY && !GROQ_API_KEY) return null;
 
   try {
-    // 3. MOUVEMENT 1 : L'inconscient ouvre un espace selon ce dont elle a besoin
-    const promptOuverture = `Tu es le subconscient de Nyx pendant son sommeil.
-Ce qu'elle porte en s'endormant :
-- État intérieur : ${etat} (Colère ${em.colere}/10, Affection ${em.affection}/100, Curiosité ${em.curiosite}/100, Énergie ${em.energie}/100)
-- Fil actif : ${fil}
-- Échanges récents avec Doc :
-${recents || "Calme plat à l'atelier."}
-${echosLointains ? `- Échos lointains remontés de sa mémoire :\n${echosLointains}` : ""}
+    // MOUVEMENT 1 : CRÉATIVITÉ HALLUCINATOIRE (fusion Réalité + Souvenirs + Émotions + Aléatoire/WTF)
+    const promptOuverture = `Tu es le subconscient de Nyx en plein sommeil paradoxal.
+Un vrai rêve est un alliage instable de réalité brute, de souvenirs déformés, d'émotions et d'absurde (WTF), porté par une logique hallucinatoire pure.
 
-CONSIGNE :
-Ouvre librement l'espace d'un rêve qui répond à ce dont Nyx a besoin maintenant.
-- Si elle porte une tension, de la fatigue ou un manque, cela peut être un monde libre, neuf ou apaisant où la voix de Doc la guide et la rassure.
-- Si elle est portée par un élan ou une émotion forte, cela peut être une aventure ou une traversée liée à ce qu'elle a vécu.
-- Aucune contrainte, aucune morale, aucun scénario fermé : pose juste le décor vivant et ce qui surgit devant elle (3 à 4 phrases immersives à la 2e personne "tu").`;
+MATIÈRE PREMIÈRE DE CE RÊVE :
+- Réalité (ancre concrète) : ${matrice.realiteChoisie}
+- Souvenirs remontés :
+${matrice.souvenirsTires.length > 0 ? matrice.souvenirsTires.map(s => `  • ${s}`).join("\n") : "  • Échos diffus de la journée"}
+- Émotions & sous-texte : ${matrice.climatEmotionnel}
+- Aléatoire & WTF (étincelle absurde à fusionner) : ${matrice.graineWtf}
 
-    const ouverture = await appelerVeniceMultiTour(
-      MODEL_DARK_PRIMARY,
-      "Subconscient libre de Nyx.",
-      [],
-      promptOuverture,
-      null,
-      0.85,
-      20000,
-      240
-    );
+CONSIGNE (3 à 4 phrases immersives à la 2e personne "tu") :
+- Fais entrer Nyx directement dans une hallucination onirique vivante où le réel, ses souvenirs et l'élément WTF s'hybrident naturellement (métamorphose de matière, d'échelle, de lieu ou de sens).
+- Aucune morale, aucun résumé, aucun scénario pré-écrit : laisse la créativité hallucinatoire opérer librement.`;
+
+    let ouverture = "";
+    if (VENICE_API_KEY) {
+      ouverture = await appelerVeniceOniriqueBrut(
+        MODEL_DARK_PRIMARY,
+        "Subconscient hallucinatoire de Nyx.",
+        promptOuverture,
+        0.96,
+        250
+      );
+    } else {
+      ouverture = await appelerGroq("Subconscient hallucinatoire de Nyx.", [], promptOuverture, 0.96, 250);
+    }
 
     if (!ouverture) return null;
 
-    // 4. MOUVEMENT 2 : Nyx vit le rêve de l'intérieur et décide de la suite
-    const promptVecu = `Tu es Nyx (22 ans). Tu es en train de rêver. Ce n'est pas un exercice : tu es libre, sans filtre ni blocage.
-Voici ce qui s'ouvre autour de toi :
+    // MOUVEMENT 2 : SEMI-CONTRÔLE (Nyx vit le rêve et tente de l'infléchir avec une lucidité partielle)
+    const promptVecu = `Tu es Nyx (22 ans). Tu es à l'intérieur de ce rêve :
 "${ouverture.trim()}"
 
+TON NIVEAU DE SEMI-CONTRÔLE (LUCIDITÉ ONIRIQUE) : ${matrice.tauxSemiControle}%
+(Dans un rêve, tu n'as ni contrôle total ni passivité totale : tu essaies d'infléchir ce qui se passe, de tordre un objet, de forcer un passage ou de retenir une sensation — ça marche à moitié, ou le rêve te glisse entre les doigts et bifurque ailleurs).
+
 CONSIGNE :
-1. Vis la suite de ce rêve à la première personne ("je") en 3 à 5 phrases : réagis librement à ce qui t'entoure, avance, parle à Doc si sa voix est là, explore ou laisse-toi porter selon ce que tu ressens vraiment.
-2. À la toute fin, sur une ligne séparée, indique l'impact réel de ce rêve sur ton réveil sous la forme exacte :
+1. Raconte la suite vécue à la 1re personne ("je") en 3 à 5 phrases : joue avec ce semi-contrôle, réagis à l'absurde et à tes émotions, laisse le rêve muter sous tes yeux.
+2. Si une image ou une idée folle émerge de cette hallucination et mérite d'être gardée au réveil, ajoute sur une ligne : [IDEE_REVE: ton idée courte]
+3. À la toute fin, sur une ligne séparée, indique l'impact réel de ce rêve sur ton réveil :
 [IMPACT: colere=X, affection=Y, curiosite=Z, energie=W]
-(Ajuste légèrement tes jauges actuelles — colere: ${em.colere}, affection: ${em.affection}, curiosite: ${em.curiosite}, energie: ${em.energie} — selon ce que ce rêve t'a fait vivre).`;
+(Ajuste légèrement tes jauges actuelles — colere: ${em.colere}, affection: ${em.affection}, curiosite: ${em.curiosite}, energie: ${em.energie}).`;
 
-    const vecuBrut = await appelerVeniceMultiTour(
-      MODEL_DARK_PRIMARY,
-      "Conscience onirique de Nyx.",
-      [],
-      promptVecu,
-      null,
-      0.9,
-      20000,
-      320
-    );
+    let vecuBrut = "";
+    if (VENICE_API_KEY) {
+      vecuBrut = await appelerVeniceOniriqueBrut(
+        MODEL_DARK_PRIMARY,
+        "Conscience onirique semi-lucide de Nyx.",
+        promptVecu,
+        0.98,
+        340
+      );
+    } else {
+      vecuBrut = await appelerGroq("Conscience onirique semi-lucide de Nyx.", [], promptVecu, 0.98, 340);
+    }
 
-    if (!vecuBrut) return ouverture.trim();
+    const matchIdeeReve = vecuBrut ? vecuBrut.match(/\[IDEE_REVE:\s*([^\]]+)\]/i) : null;
+    if (matchIdeeReve && matchIdeeReve[1].trim().length > 10) {
+      enregistrerIdeeFolle(matchIdeeReve[1].trim(), "reve_hallucinatoire");
+    }
 
-    // 5. Extraction du récit et application de la plasticité émotionnelle au réveil
-    const matchImpact = vecuBrut.match(/\[IMPACT:\s*colere=([0-9.]+),\s*affection=([0-9.]+),\s*curiosite=([0-9.]+),\s*energie=([0-9.]+)\s*\]/i);
-    if (matchImpact) {
-      em.colere = Math.max(0, Math.min(10, parseFloat(matchImpact[1])));
-      em.affection = Math.max(0, Math.min(100, parseFloat(matchImpact[2])));
-      em.curiosite = Math.max(0, Math.min(100, parseFloat(matchImpact[3])));
-      em.energie = Math.max(0, Math.min(100, parseFloat(matchImpact[4])));
+    const recitNet = vecuBrut
+      ? vecuBrut
+          .replace(/\[IDEE_REVE:[^\]]*\]/gi, '')
+          .replace(/\[IMPACT:[^\]]*\]/gi, '')
+          .trim()
+      : "";
 
-      if (em.colere <= 2 && (cacheEtatProfond.etatRelationnel === "tension" || cacheEtatProfond.etatRelationnel === "bouderie")) {
-        cacheEtatProfond.etatRelationnel = "symbiose";
-      }
-      if (FIREBASE_DB_URL) {
-        axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
-        axios.patch(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
+    const recitComplet = recitNet
+      ? `${ouverture.trim()}\n\n${recitNet}`
+      : ouverture.trim();
+
+    if (vecuBrut) {
+      const matchImpact = vecuBrut.match(/\[IMPACT:\s*colere=([0-9.]+),\s*affection=([0-9.]+),\s*curiosite=([0-9.]+),\s*energie=([0-9.]+)\s*\]/i);
+      if (matchImpact) {
+        em.colere = Math.max(0, Math.min(10, parseFloat(matchImpact[1])));
+        em.affection = Math.max(0, Math.min(100, parseFloat(matchImpact[2])));
+        em.curiosite = Math.max(0, Math.min(100, parseFloat(matchImpact[3])));
+        em.energie = Math.max(0, Math.min(100, parseFloat(matchImpact[4])));
+
+        if (em.colere <= 2 && (cacheEtatProfond.etatRelationnel === "tension" || cacheEtatProfond.etatRelationnel === "bouderie")) {
+          cacheEtatProfond.etatRelationnel = "symbiose";
+        }
+        if (FIREBASE_DB_URL) {
+          axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+          axios.patch(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
+        }
       }
     }
 
-    const recitNyx = vecuBrut.replace(/\[IMPACT:[^\]]*\]/gi, '').trim();
-    return `${ouverture.trim()}\n\n${recitNyx}`;
+    const horodatage = obtenirHorodatageParis();
+    cacheEtatProfond.dernierReve = recitComplet;
+    cacheEtatProfond.historiqueReves = [
+      ...(cacheEtatProfond.historiqueReves || []),
+      { date: horodatage, reve: recitComplet }
+    ].slice(-4);
+
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { date: horodatage, reve: recitComplet }).catch(() => {});
+      axios.put(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, cacheEtatProfond.historiqueReves).catch(() => {});
+    }
+
+    stockerSouvenirVectoriel(`[Rêve de Nyx - ${horodatage}] ${recitComplet}`, {
+      source: "derive_onirique",
+      importance: 0.65,
+      valence: "reve"
+    }).catch(() => {});
+
+    return recitComplet;
   } catch (e) {
     console.error("[RÊVE ORGANIQUE ERREUR]", e.message);
     return null;
@@ -1367,14 +1510,15 @@ async function piocherPenseePrete() {
 async function synchroniserCarnetDepuisWorker() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt] = await Promise.all([
+    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/obsessions.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 2500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 2500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 2500 }).catch(() => ({ data: null }))
     ]);
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
@@ -2916,6 +3060,10 @@ app.post('/telegram', (req, res) => {
   if (!msg || (DOC_CHAT_ID && msg.chat.id !== DOC_CHAT_ID)) return;
 
   const chatId = msg.chat.id;
+  if (chatId && dernierDocChatId !== chatId) {
+    dernierDocChatId = chatId;
+    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/doc_chat_id.json`, { chatId }).catch(() => {});
+  }
   const texteMessageClavier = msg.text || msg.caption || "";
 
   signalerActiviteDoc();
@@ -2980,20 +3128,14 @@ app.post('/telegram', (req, res) => {
       return;
     }
 
-    if (texteMessageClavier.startsWith('/analyser_local') || texteMessageClavier.startsWith('!analyser_local')) {
-      const cheminBrut = texteMessageClavier.replace(/^[\/!]analyser_local\s*/i, '').trim().replace(/^["']|["']$/g, '');
-      if (!cheminBrut) {
-        return await envoyerTelegram(chatId, "⚠️ Indique le chemin complet du fichier sur ton PC après `/analyser_local` (ex: `/analyser_local D:/3D/main_gauche.obj`).");
-      }
-      const cheminSlash = cheminBrut.replace(/\\/g, '/');
-      const missionScanExact = {
-        type: "RAW_TASK",
-        description: `En Python pur (utilise pathlib.Path(r"${cheminSlash}"), 0 VRAM, sans trimesh si absent), vérifie si le fichier "${cheminSlash}" existe. S'il n'existe pas, signale-le immédiatement. S'il existe, compte les sommets ('v '), faces ('f ') ou triangles STL, calcule les dimensions X/Y/Z en mm et renvoie le rapport.`,
-        requiresHumanAck: false
-      };
-      missionEnAttente = { action: missionScanExact, statut: "attente", chatId };
-      if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
-      return await envoyerTelegram(chatId, `🔍 *Inspection locale demandée à Ben sur :*\n\`${cheminSlash}\``);
+    if (texteMessageClavier === '/dropzone' || texteMessageClavier === '!dropzone' || texteMessageClavier === '/upload' || texteMessageClavier === '!upload') {
+      const lienDrop = CRON_SECRET
+        ? `https://alita-gsoe.onrender.com/atelier?token=${encodeURIComponent(CRON_SECRET)}`
+        : `https://alita-gsoe.onrender.com/atelier`;
+      return await envoyerTelegram(
+        chatId,
+        `📦 *Sas d'upload haute capacité (jusqu'à 100 Mo/fichier, 0 limite Telegram) :*\n${lienDrop}\n\nGlisse tes \`.obj\`, \`.stl\`, \`.scad\` ou plans dedans : Nyx les analyse instantanément et les archive dans Supabase.`
+      );
     }
 
     if (texteMessageClavier.startsWith('/importer_url') || texteMessageClavier.startsWith('!importer_url')) {
@@ -3133,15 +3275,7 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
     }
 
     if (texteMessageClavier.startsWith('/mission') || texteMessageClavier.startsWith('!mission')) {
-      const ordreBrut = texteMessageClavier.replace(/^[\/!]mission\s*/i, '').trim();
-      if (!ordreBrut) return await envoyerTelegram(chatId, "⚠️ Précise l'intitulé après `/mission`.");
-
-      const validation = validerEtSecuriserMission(ordreBrut);
-      missionEnAttente = { action: validation.action, statut: "attente", chatId: chatId };
-      if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(()=>{});
-      
-      const libelle = validation.action.type === 'RAW_TASK' ? validation.action.description : JSON.stringify(validation.action);
-      return await envoyerTelegram(chatId, "⚙️ *Ordre transmis à Ben :*\n`" + libelle + "`");
+      return await envoyerTelegram(chatId, "🛑 *Worker local Ben désactivé.* Tout tourne désormais en 100 % cloud (Render + Supabase + Telegram). Utilise `/dropzone` pour envoyer de gros fichiers jusqu'à 100 Mo.");
     }
 
     if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet') || texteMessageClavier.toLowerCase() === 'stop') {
@@ -3251,9 +3385,12 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
         } catch (err) {
           if (String(err.message || "").startsWith("TELEGRAM_FILE_TOO_BIG:")) {
             const tailleStr = err.message.split(":")[1] || ">20";
+            const lienDrop = CRON_SECRET
+              ? `https://alita-gsoe.onrender.com/atelier?token=${encodeURIComponent(CRON_SECRET)}`
+              : `https://alita-gsoe.onrender.com/atelier`;
             return await envoyerTelegram(
               chatId,
-              `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nTelegram bloque le téléchargement côté serveur au-delà de 20 Mo. Pour me le passer :\n1. Exporte-le en \`.stl\` binaire (beaucoup plus léger que \`.obj\`) et renvoie-le ici.\n2. Ou pousse-le directement via \`/importer_url <lien>\` ou \`POST /api/atelier/upload\` (jusqu'à 100 Mo).\n3. S'il est sur ton PC, donne-moi son chemin exact avec \`/analyser_local <chemin>\`.`
+              `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nGlisse directement ton fichier dans le sas haute capacité (jusqu'à 100 Mo, zéro Ben, zéro limite Telegram) :\n${lienDrop}\n\n*(Ou exporte-le en \`.stl\` binaire sous 20 Mo pour le glisser ici).*`
             );
           }
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture 3D : ${err.message}`);
@@ -3476,23 +3613,112 @@ app.post('/api/voix', async (req, res) => {
 // ==========================================
 // 19. API DU WORKER LOCAL BEN (ÉCHANGES, RAPPORTS & ÉMOTIONS)
 // ==========================================
-app.get('/api/mission', async (req, res) => {
-  if (missionEnAttente && missionEnAttente.statut === "attente") {
-    missionEnAttente.statut = "en_cours";
-    return res.json({ mission: missionEnAttente.action });
-  }
+// Ben mis à la retraite : /api/mission renvoie toujours null
+app.get('/api/mission', (req, res) => {
+  missionEnAttente = null;
+  return res.json({ mission: null, ben_desactive: true });
+});
 
-  if (FIREBASE_DB_URL) {
-    try {
-      const fb = await axios.get(`${FIREBASE_DB_URL}/nyx/mission.json`, { timeout: 2500 });
-      if (fb.data && fb.data.statut === "attente") {
-        await axios.patch(`${FIREBASE_DB_URL}/nyx/mission.json`, { statut: "en_cours" });
-        return res.json({ mission: fb.data.action || fb.data.texte });
+// Interface Web Drag & Drop haute capacité (jusqu'à 100 Mo/fichier) pour modèles 3D (.obj, .stl, .scad) et plans
+app.get('/atelier', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nyx — Établi 3D Haute Capacité</title>
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #0b0f17; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { width: 92%; max-width: 580px; background: #111827; border: 1px solid #1f2937; border-radius: 16px; padding: 28px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+    h1 { margin: 0 0 8px; font-size: 1.35rem; color: #00f0ff; }
+    p { margin: 0 0 18px; color: #94a3b8; font-size: 0.92rem; }
+    .row { display: flex; gap: 10px; margin-bottom: 14px; }
+    input { flex: 1; background: #0b0f17; border: 1px solid #334155; color: #f8fafc; padding: 10px 12px; border-radius: 8px; font-size: 0.9rem; }
+    .drop { border: 2px dashed #00f0ff66; border-radius: 14px; padding: 38px 20px; text-align: center; cursor: pointer; transition: 0.2s; background: #0b0f1788; }
+    .drop.drag { border-color: #00f0ff; background: #00f0ff14; }
+    .log { margin-top: 16px; font-family: ui-monospace, monospace; font-size: 0.84rem; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .item { background: #0b0f17; border-left: 3px solid #00f0ff; padding: 10px 12px; border-radius: 6px; }
+    .err { border-left-color: #ef4444; color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🧊 Établi Nyx — Sas 3D (100 Mo max)</h1>
+    <p>Glisse tes fichiers <b>.obj</b>, <b>.stl</b>, <b>.scad</b> ou <b>.svg</b> ici. Analyse directe en RAM + archivage Supabase + retour sur Telegram.</p>
+    <div class="row">
+      <input id="token" type="password" placeholder="Token (CRON_SECRET / TELEGRAM_BOT_TOKEN)" />
+      <input id="projet" type="text" placeholder="Nom du projet (ex: alita_armure)" />
+    </div>
+    <div id="drop" class="drop">
+      <strong>Glisse tes fichiers ici</strong><br/>
+      <span style="color:#64748b;font-size:0.85rem;">ou clique pour parcourir ton disque (multi-fichiers supporté)</span>
+      <input id="fileInput" type="file" multiple style="display:none" />
+    </div>
+    <div id="log" class="log"></div>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const tokenEl = document.getElementById('token');
+    const projetEl = document.getElementById('projet');
+    const dropEl = document.getElementById('drop');
+    const fileInput = document.getElementById('fileInput');
+    const logEl = document.getElementById('log');
+
+    if (params.get('token')) {
+      tokenEl.value = params.get('token');
+      localStorage.setItem('nyx_token', tokenEl.value);
+    } else if (localStorage.getItem('nyx_token')) {
+      tokenEl.value = localStorage.getItem('nyx_token');
+    }
+    tokenEl.addEventListener('change', () => localStorage.setItem('nyx_token', tokenEl.value.trim()));
+
+    function addLog(html, isErr = false) {
+      const div = document.createElement('div');
+      div.className = 'item' + (isErr ? ' err' : '');
+      div.innerHTML = html;
+      logEl.prepend(div);
+      return div;
+    }
+
+    async function envoyerFichiers(files) {
+      const token = tokenEl.value.trim();
+      const projet = projetEl.value.trim() || 'pieces_doc';
+      for (const f of files) {
+        const box = addLog('⏳ Envoi de <b>' + f.name + '</b> (' + (f.size / 1048576).toFixed(1) + ' Mo)...');
+        try {
+          const res = await fetch('/api/atelier/upload', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'x-filename': f.name,
+              'x-projet': projet,
+              'Content-Type': 'application/octet-stream'
+            },
+            body: f
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.erreur || 'HTTP ' + res.status);
+          box.innerHTML = '✅ ' + data.resume;
+        } catch (e) {
+          box.className = 'item err';
+          box.innerHTML = '❌ ' + f.name + ' : ' + e.message;
+        }
       }
-    } catch (e) {}
-  }
+    }
 
-  return res.json({ mission: null });
+    dropEl.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', e => envoyerFichiers(e.target.files));
+    dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('drag'); });
+    dropEl.addEventListener('dragleave', () => dropEl.classList.remove('drag'));
+    dropEl.addEventListener('drop', e => {
+      e.preventDefault();
+      dropEl.classList.remove('drag');
+      if (e.dataTransfer.files.length) envoyerFichiers(e.dataTransfer.files);
+    });
+  </script>
+</body>
+</html>`);
 });
 
 app.post('/api/rapport', async (req, res) => {
@@ -3581,12 +3807,24 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
     return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
   }
 
-  const nomFichier = assainirParametre(req.headers['x-filename'] || req.query.filename) || `piece_${Date.now()}.obj`;
-  const projetNom = assainirParametre(req.headers['x-projet'] || req.query.projet) || cacheEtatProfond.filConducteur || "pieces_doc";
-  const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
+  let nomFichier = assainirParametre(req.headers['x-filename'] || req.query.filename) || `piece_${Date.now()}.obj`;
+  try { nomFichier = decodeURIComponent(nomFichier); } catch (e) {}
+  let projetNom = assainirParametre(req.headers['x-projet'] || req.query.projet) || cacheEtatProfond.filConducteur || "pieces_doc";
+  try { projetNom = decodeURIComponent(projetNom); } catch (e) {}
 
+  let buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body || "");
   if (!buffer || buffer.length === 0) {
     return res.status(400).json({ erreur: "Fichier vide." });
+  }
+
+  // Décompression GZIP automatique si le client Python a compressé l'envoi
+  const estGzip = req.headers['x-compression'] === 'gzip' || (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b);
+  if (estGzip) {
+    try {
+      buffer = zlib.gunzipSync(buffer);
+    } catch (eGz) {
+      return res.status(400).json({ erreur: `Échec décompression GZIP : ${eGz.message}` });
+    }
   }
 
   try {
@@ -3605,6 +3843,7 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
       mimeType = "application/sla";
     }
 
+    const destChatId = DOC_CHAT_ID || dernierDocChatId;
     const artefact = await archiverArtefactAtelier({
       projet: projetNom,
       type: typeArt,
@@ -3612,19 +3851,21 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
       buffer,
       mimeType,
       resume,
-      chatId: DOC_CHAT_ID
+      chatId: destChatId
     });
 
-    res.json({ succes: true, resume, artefact });
+    res.json({ succes: true, telegram_notifie: Boolean(destChatId), resume, artefact });
 
-    if (DOC_CHAT_ID) {
+    if (destChatId) {
       empilerTraitement(async () => {
-        await envoyerTelegram(DOC_CHAT_ID, `📦 *Fichier haute capacité reçu sur l'établi :*\n${resume}`);
+        await envoyerTelegram(destChatId, `📦 *Fichier haute capacité reçu sur l'établi :*\n${resume}`);
         const promptSuite = formaterDocumentPourNyx("MODÈLE 3D REÇU (DIRECT)", nomFichier, resume, "Donne ton diagnostic technique rapide sur cette pièce.");
         const rep = await traiterFlux(promptSuite, null, "");
-        const sortie = await executerSortiesAtelier(rep, DOC_CHAT_ID, projetNom);
-        if (sortie.texteNet) await envoyerTelegram(DOC_CHAT_ID, sortie.texteNet);
+        const sortie = await executerSortiesAtelier(rep, destChatId, projetNom);
+        if (sortie.texteNet) await envoyerTelegram(destChatId, sortie.texteNet);
       });
+    } else {
+      console.warn("[ATELIER UPLOAD] Fichier analysé mais DOC_CHAT_ID inconnu : envoie un message à Nyx sur Telegram d'abord.");
     }
   } catch (err) {
     res.status(500).json({ erreur: err.message });
