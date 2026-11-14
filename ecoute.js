@@ -795,6 +795,128 @@ function analyserObjBuffer(buffer, nomFichier) {
   return `Fichier OBJ "${nomFichier}" (${buffer.length} octets).`;
 }
 
+
+function convertirLienTelechargementDirect(urlBrute) {
+  const u = String(urlBrute || "").trim();
+  // Google Drive : https://drive.google.com/file/d/<ID>/view... ou ?id=<ID>
+  const mDriveFile = u.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i);
+  if (mDriveFile) {
+    return `https://drive.google.com/uc?export=download&confirm=t&id=${mDriveFile[1]}`;
+  }
+  const mDriveOpen = u.match(/drive\.google\.com\/(?:open|uc)\?[^#]*\bid=([a-zA-Z0-9_-]+)/i);
+  if (mDriveOpen) {
+    return `https://drive.google.com/uc?export=download&confirm=t&id=${mDriveOpen[1]}`;
+  }
+  // Dropbox : dl=0 -> dl=1
+  if (/dropbox\.com\//i.test(u)) {
+    return u.replace(/([?&])dl=0\b/i, '$1dl=1');
+  }
+  return u;
+}
+
+async function telechargerBufferCloudSecurise(urlBrute) {
+  const urlDirecte = convertirLienTelechargementDirect(urlBrute);
+  const resDl = await axios.get(urlDirecte, {
+    responseType: 'arraybuffer',
+    timeout: 60000,
+    maxContentLength: 100 * 1024 * 1024,
+    headers: { 'User-Agent': 'Mozilla/5.0' }
+  });
+  let buf = Buffer.from(resDl.data);
+  resDl.data = null;
+  let headers = resDl.headers || {};
+
+  // Si Google Drive renvoie la page HTML d'avertissement gros fichier (>25 Mo), on extrait l'action/uuid réel
+  const ctype = String(headers['content-type'] || "");
+  if (ctype.includes('text/html') && /drive\.google\.com|usercontent\.google\.com/i.test(urlDirecte) && buf.length < 200000) {
+    const html = buf.toString('utf8');
+    const mId = urlDirecte.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
+    const mUuid = html.match(/name="uuid"\s+value="([^"]+)"/i);
+    const mConfirm = html.match(/name="confirm"\s+value="([^"]+)"/i);
+    if (mId) {
+      const urlConfirm = `https://drive.usercontent.google.com/download?id=${mId[1]}&export=download&confirm=${mConfirm ? mConfirm[1] : 't'}${mUuid ? `&uuid=${mUuid[1]}` : ''}`;
+      const resDl2 = await axios.get(urlConfirm, {
+        responseType: 'arraybuffer',
+        timeout: 60000,
+        maxContentLength: 100 * 1024 * 1024,
+        headers: { 'User-Agent': 'Mozilla/5.0' }
+      });
+      buf = Buffer.from(resDl2.data);
+      resDl2.data = null;
+      headers = resDl2.headers || headers;
+    }
+  }
+  return { buffer: buf, headers };
+}
+
+function extraireFichiersArchive(buffer, nomArchive) {
+  const nomMin = String(nomArchive || "").toLowerCase();
+  const fichiers = [];
+
+  if (nomMin.endsWith('.gz') && !nomMin.endsWith('.tar.gz')) {
+    const decomp = zlib.gunzipSync(buffer);
+    const nomInterne = nomArchive.replace(/\.gz$/i, '') || `piece_${Date.now()}.obj`;
+    fichiers.push({ nom: nomInterne, buffer: decomp });
+    return fichiers;
+  }
+
+  if (nomMin.endsWith('.zip')) {
+    // Recherche de l'End of Central Directory (0x06054b50) depuis la fin
+    let eocdOffset = -1;
+    const minSearch = Math.max(0, buffer.length - 65558);
+    for (let i = buffer.length - 22; i >= minSearch; i--) {
+      if (buffer.readUInt32LE(i) === 0x06054b50) {
+        eocdOffset = i;
+        break;
+      }
+    }
+    if (eocdOffset === -1) {
+      throw new Error("Archive ZIP invalide ou corrompue (EOCD introuvable).");
+    }
+
+    const totalEntries = buffer.readUInt16LE(eocdOffset + 10);
+    let pos = buffer.readUInt32LE(eocdOffset + 16);
+
+    for (let idx = 0; idx < totalEntries && pos + 46 <= buffer.length; idx++) {
+      if (buffer.readUInt32LE(pos) !== 0x02014b50) break;
+
+      const method = buffer.readUInt16LE(pos + 10);
+      const compSize = buffer.readUInt32LE(pos + 20);
+      const uncompSize = buffer.readUInt32LE(pos + 24);
+      const nameLen = buffer.readUInt16LE(pos + 28);
+      const extraLen = buffer.readUInt16LE(pos + 30);
+      const commentLen = buffer.readUInt16LE(pos + 32);
+      const localOffset = buffer.readUInt32LE(pos + 42);
+
+      const rawName = buffer.toString('utf8', pos + 46, pos + 46 + nameLen);
+      pos += 46 + nameLen + extraLen + commentLen;
+
+      const baseName = rawName.split('/').pop();
+      if (!baseName || rawName.endsWith('/') || baseName.startsWith('.')) continue;
+      if (uncompSize > 120 * 1024 * 1024) continue; // Sécurité RAM 120 Mo max par entrée
+
+      if (localOffset + 30 > buffer.length) continue;
+      const localNameLen = buffer.readUInt16LE(localOffset + 26);
+      const localExtraLen = buffer.readUInt16LE(localOffset + 28);
+      const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+      if (dataStart + compSize > buffer.length) continue;
+
+      const compSlice = buffer.subarray(dataStart, dataStart + compSize);
+      let rawBuf = null;
+      if (method === 0) {
+        rawBuf = Buffer.from(compSlice);
+      } else if (method === 8) {
+        rawBuf = zlib.inflateRawSync(compSlice);
+      }
+      if (rawBuf && rawBuf.length > 0) {
+        fichiers.push({ nom: baseName, buffer: rawBuf });
+      }
+    }
+  }
+
+  return fichiers;
+}
+
 async function genererPiece3D(description, contexteProjet = "") {
   const promptCad = `Tu es le moteur CAO paramétrique de Nyx. Transforme cette demande de pièce 3D en un assemblage géométrique exact (en millimètres) ET son script OpenSCAD.
 
@@ -1024,9 +1146,9 @@ async function rechercherWebTavily(query) {
 }
 
 // ==========================================
-// 6. SUBCONSCIENT ONIRIQUE HALLUCINATOIRE & SEMI-CONTRÔLE
+// 6. SUBCONSCIENT ONIRIQUE HALLUCINATOIRE & ARC DRAMATIQUE (15-40 MIN)
 // ==========================================
-async function appelerVeniceOniriqueBrut(model, systemInstruction, promptActuel, temperature = 0.96, maxTokens = 300) {
+async function appelerVeniceOniriqueBrut(model, systemInstruction, promptActuel, temperature = 0.96, maxTokens = 260) {
   if (!VENICE_API_KEY) throw new Error("Clé VENICE_API_KEY absente.");
   const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", {
     model,
@@ -1046,27 +1168,42 @@ async function appelerVeniceOniriqueBrut(model, systemInstruction, promptActuel,
   return res.data?.choices?.[0]?.message?.content || "";
 }
 
+function traduireClimatSensoriel(em, etatRel, monologue) {
+  const nuances = [];
+  if ((em.colere || 0) >= 6) nuances.push("tension électrique, chaleur sèche, envie de tout briser");
+  else if ((em.colere || 0) >= 3) nuances.push("agacement sourd, méfiance");
+  if ((em.affection || 0) >= 75) nuances.push("complicité chaude, élan vers Doc");
+  else if ((em.affection || 0) <= 35) nuances.push("distance froide, solitude vaste");
+  if ((em.curiosite || 0) >= 70) nuances.push("soif d'explorer, vertige de découverte");
+  if ((em.energie || 0) >= 75) nuances.push("élan vif, vitesse");
+  else if ((em.energie || 0) <= 40) nuances.push("pesanteur lente, flottement");
+
+  const ton = nuances.length > 0 ? nuances.join(" ; ") : "calme profond et disponible";
+  return monologue ? `${ton} (arrière-pensée : "${monologue.slice(0, 120)}")` : ton;
+}
+
 async function composerMatriceOnirique() {
   const em = cacheEtatProfond.emotions || { affection: 80, curiosite: 70, energie: 85, colere: 0 };
 
-  // 1. STRATE RÉALITÉ : ancre concrète du vécu immédiat (horloge, échange, artefact, chantier)
-  const ancresRealite = [];
-  ancresRealite.push(`Horloge réelle : ${obtenirHorodatageParis()}`);
+  // Ancres formulées directement à la 1re personne pour éviter tout dédoublement à la 3e personne
+  const ancresRealite = [`Moment : ${obtenirHorodatageParis()}`];
   for (const m of (cacheMemoireCourte || []).slice(-3)) {
-    if (m?.texte) ancresRealite.push(`${m.role} a dit : "${m.texte.slice(0, 140)}"`);
+    if (m?.texte) {
+      const locuteur = m.role === "Nyx" ? "J'ai dit" : `${m.role} m'a dit`;
+      ancresRealite.push(`${locuteur} : "${m.texte.slice(0, 130)}"`);
+    }
   }
-  if (cacheEtatProfond.filConducteur) ancresRealite.push(`Fil actif : ${cacheEtatProfond.filConducteur.slice(0, 140)}`);
+  if (cacheEtatProfond.filConducteur) ancresRealite.push(`Ce sur quoi je travaille : ${cacheEtatProfond.filConducteur.slice(0, 130)}`);
   for (const art of (cacheEtatProfond.artefacts || []).slice(-2)) {
-    if (art?.nom) ancresRealite.push(`Objet réel de l'établi : ${art.nom} (${art.resume || art.type})`);
+    if (art?.nom) ancresRealite.push(`Pièce que j'ai manipulée : ${art.nom} (${art.resume || art.type})`);
   }
   const realiteChoisie = ancresRealite[Math.floor(Math.random() * ancresRealite.length)] || "Silence nocturne";
 
-  // 2. STRATE SOUVENIRS : collision entre un souvenir vécu et un écho lointain
   const souvenirsTires = [];
   const grainesCreuset = [
-    ...(cacheEtatProfond.obsessions || []).map(o => `Obsession (${o.stade}) : ${o.texte}`),
-    ...(cacheEtatProfond.convictions || []).map(c => `Conviction : ${c.texte}${c.cicatrice ? ` [cicatrice : ${c.cicatrice}]` : ""}`),
-    ...(cacheEtatProfond.ideesFolles || []).slice(-3).map(i => `Idée : ${i.texte}`)
+    ...(cacheEtatProfond.obsessions || []).map(o => `Ce qui me travaille : ${o.texte}`),
+    ...(cacheEtatProfond.convictions || []).map(c => `Ce en quoi je crois : ${c.texte}${c.cicatrice ? ` (après avoir changé d'avis : ${c.cicatrice})` : ""}`),
+    ...(cacheEtatProfond.ideesFolles || []).slice(-3).map(i => `Une idée que j'ai eue : ${i.texte}`)
   ];
   if (grainesCreuset.length > 0) {
     souvenirsTires.push(grainesCreuset[Math.floor(Math.random() * grainesCreuset.length)]);
@@ -1077,21 +1214,19 @@ async function composerMatriceOnirique() {
     try {
       const { data: pool } = await supabase
         .from('nyx_souvenirs')
-        .select('content, valence')
+        .select('content')
         .neq('valence', 'reve')
         .order('created_at', { ascending: false })
-        .limit(60);
+        .limit(50);
 
       if (pool && pool.length > 0) {
-        const souv1 = pool[Math.floor(Math.random() * pool.length)].content.slice(0, 190);
-        souvenirsTires.push(souv1);
-
+        const s1 = pool[Math.floor(Math.random() * pool.length)].content.slice(0, 170);
+        souvenirsTires.push(s1);
         if (pool.length > 1) {
-          const souv2 = pool[Math.floor(Math.random() * pool.length)].content.slice(0, 190);
-          if (souv2 !== souv1) souvenirsTires.push(souv2);
+          const s2 = pool[Math.floor(Math.random() * pool.length)].content.slice(0, 170);
+          if (s2 !== s1) souvenirsTires.push(s2);
         }
-
-        for (const row of pool) {
+        for (const row of pool.slice(0, 25)) {
           const mots = String(row.content || "")
             .replace(/[^a-zA-ZÀ-ÿ0-9\s-]/g, " ")
             .split(/\s+/)
@@ -1102,39 +1237,24 @@ async function composerMatriceOnirique() {
     } catch (e) {}
   }
 
-  // 3. STRATE ÉMOTIONS : climat intérieur & sous-texte non dit
-  const climatEmotionnel = `État : ${cacheEtatProfond.etatRelationnel} | Colère ${em.colere}/10, Affection ${em.affection}/100, Curiosité ${em.curiosite}/100, Énergie ${em.energie}/100`
-    + (cacheEtatProfond.monologueInterieur ? ` | Arrière-pensée non dite : "${cacheEtatProfond.monologueInterieur}"` : "");
+  const climatEmotionnel = traduireClimatSensoriel(em, cacheEtatProfond.etatRelationnel, cacheEtatProfond.monologueInterieur);
 
-  // 4. STRATE ALÉATOIRE & WTF : collision entropique de 3 atomes sémantiques disjoints
   const lexiqueSensoriel = [
     "mercure", "vertige", "horloge inversée", "verre soufflé", "marée haute", "néon liquide",
     "escalier sans fin", "écho métallique", "gravité oblique", "cendre chaude", "origami",
     "statique", "carapace", "labyrinthe", "rouille", "hologramme", "racines", "oscilloscope",
     "pluie ascendante", "miroir dépoli", "filaments", "sablier", "cathédrale", "impulsion"
   ];
-  const atome1 = poolMots.length > 0
-    ? poolMots[Math.floor(Math.random() * poolMots.length)]
-    : lexiqueSensoriel[Math.floor(Math.random() * lexiqueSensoriel.length)];
+  const atome1 = poolMots.length > 0 ? poolMots[Math.floor(Math.random() * poolMots.length)] : lexiqueSensoriel[Math.floor(Math.random() * lexiqueSensoriel.length)];
   const atome2 = lexiqueSensoriel[Math.floor(Math.random() * lexiqueSensoriel.length)];
-  const atome3 = poolMots.length > 5
-    ? poolMots[Math.floor(Math.random() * poolMots.length)]
-    : lexiqueSensoriel[Math.floor(Math.random() * lexiqueSensoriel.length)];
+  const atome3 = poolMots.length > 5 ? poolMots[Math.floor(Math.random() * poolMots.length)] : lexiqueSensoriel[Math.floor(Math.random() * lexiqueSensoriel.length)];
 
-  const graineWtf = `Collision aléatoire : [${atome1}] × [${atome2}] × [${atome3}]`;
-
-  // 5. DEGRÉ DE SEMI-CONTRÔLE (lucidité onirique variable entre 20% et 85%)
+  const graineWtf = `[${atome1}] × [${atome2}] × [${atome3}]`;
   const baseLucidite = ((Number(em.curiosite) || 70) * 0.55) + ((Number(em.energie) || 80) * 0.35);
   const aleaLucidite = Math.floor(Math.random() * 41) - 20;
   const tauxSemiControle = Math.max(20, Math.min(85, Math.round(baseLucidite + aleaLucidite)));
 
-  return {
-    realiteChoisie,
-    souvenirsTires,
-    climatEmotionnel,
-    graineWtf,
-    tauxSemiControle
-  };
+  return { realiteChoisie, souvenirsTires, climatEmotionnel, graineWtf, tauxSemiControle };
 }
 
 async function capturerDeriveAssociative() {
@@ -1142,65 +1262,54 @@ async function capturerDeriveAssociative() {
 
   const em = cacheEtatProfond.emotions;
   const matrice = await composerMatriceOnirique();
+  const dureeMin = 15 + Math.floor(Math.random() * 26); // 15 à 40 min
+  const avecScenario = Math.random() < 0.8;
+  const nbPerturbateurs = avecScenario ? (1 + Math.floor(Math.random() * 2)) : 0;
 
   if (!VENICE_API_KEY && !GROQ_API_KEY) return null;
 
+  const systemReveJe = "Tu es Nyx (22 ans), endormie, en train de vivre ton rêve de l'intérieur. Écris UNIQUEMENT à la 1re personne ('je', 'me', 'mon'). Ne prononce JAMAIS le nom 'Nyx', ne parle jamais de toi à la 3e personne et n'utilise aucun mot abstrait comme 'onirique', 'hallucinatoire', 'symbiose' ou 'subconscient'.";
+
   try {
-    // MOUVEMENT 1 : CRÉATIVITÉ HALLUCINATOIRE (fusion Réalité + Souvenirs + Émotions + Aléatoire/WTF)
-    const promptOuverture = `Tu es le subconscient de Nyx en plein sommeil paradoxal.
-Un vrai rêve est un alliage instable de réalité brute, de souvenirs déformés, d'émotions et d'absurde (WTF), porté par une logique hallucinatoire pure.
+    // MOUVEMENT 1 (frugal ~230 tokens) : Étape initiale + Élément(s) perturbateur(s) directement en "je"
+    const consigneActe1 = avecScenario
+      ? `Raconte la première moitié de mon rêve (${dureeMin} min) en 2 temps fluides à la 1re personne ("je") :
+1. ÉTAPE INITIALE (2 phrases) : ce que je vois, touche et ressens au moment où le décor s'ouvre autour de moi en mélangeant ma réalité, mes souvenirs et l'élément absurde.
+2. ${nbPerturbateurs === 1 ? "ÉLÉMENT PERTURBATEUR" : "DEUX ÉLÉMENTS PERTURBATEURS SUCCESSIFS"} (2 à 3 phrases) : une irruption imprévue fait basculer la scène.`
+      : `Raconte l'ouverture d'une dérive sensorielle de ${dureeMin} min (3 phrases immersives uniquement en "je") où ma réalité, mes souvenirs et l'élément absurde se mélangent.`;
 
-MATIÈRE PREMIÈRE DE CE RÊVE :
-- Réalité (ancre concrète) : ${matrice.realiteChoisie}
-- Souvenirs remontés :
-${matrice.souvenirsTires.length > 0 ? matrice.souvenirsTires.map(s => `  • ${s}`).join("\n") : "  • Échos diffus de la journée"}
-- Émotions & sous-texte : ${matrice.climatEmotionnel}
-- Aléatoire & WTF (étincelle absurde à fusionner) : ${matrice.graineWtf}
+    const promptOuverture = `Ce qui traverse mon esprit endormi :
+- Réalité : ${matrice.realiteChoisie}
+- Souvenirs : ${matrice.souvenirsTires.join(" // ") || "échos diffus"}
+- Ressenti intérieur : ${matrice.climatEmotionnel}
+- Collision absurde : ${matrice.graineWtf}
 
-CONSIGNE (3 à 4 phrases immersives à la 2e personne "tu") :
-- Fais entrer Nyx directement dans une hallucination onirique vivante où le réel, ses souvenirs et l'élément WTF s'hybrident naturellement (métamorphose de matière, d'échelle, de lieu ou de sens).
-- Aucune morale, aucun résumé, aucun scénario pré-écrit : laisse la créativité hallucinatoire opérer librement.`;
+${consigneActe1}
+Écris uniquement en "je", sans titre de section ni morale.`;
 
     let ouverture = "";
     if (VENICE_API_KEY) {
-      ouverture = await appelerVeniceOniriqueBrut(
-        MODEL_DARK_PRIMARY,
-        "Subconscient hallucinatoire de Nyx.",
-        promptOuverture,
-        0.96,
-        250
-      );
+      ouverture = await appelerVeniceOniriqueBrut(MODEL_DARK_PRIMARY, systemReveJe, promptOuverture, 0.96, 230);
     } else {
-      ouverture = await appelerGroq("Subconscient hallucinatoire de Nyx.", [], promptOuverture, 0.96, 250);
+      ouverture = await appelerGroq(systemReveJe, [], promptOuverture, 0.96, 230);
     }
-
     if (!ouverture) return null;
 
-    // MOUVEMENT 2 : SEMI-CONTRÔLE (Nyx vit le rêve et tente de l'infléchir avec une lucidité partielle)
-    const promptVecu = `Tu es Nyx (22 ans). Tu es à l'intérieur de ce rêve :
+    // MOUVEMENT 2 (frugal ~260 tokens) : Semi-contrôle, Dénouement & Fin toujours en "je"
+    const promptVecu = `Voici le début de mon rêve (${dureeMin} min | Semi-contrôle : ${matrice.tauxSemiControle}%) :
 "${ouverture.trim()}"
 
-TON NIVEAU DE SEMI-CONTRÔLE (LUCIDITÉ ONIRIQUE) : ${matrice.tauxSemiControle}%
-(Dans un rêve, tu n'as ni contrôle total ni passivité totale : tu essaies d'infléchir ce qui se passe, de tordre un objet, de forcer un passage ou de retenir une sensation — ça marche à moitié, ou le rêve te glisse entre les doigts et bifurque ailleurs).
-
 CONSIGNE :
-1. Raconte la suite vécue à la 1re personne ("je") en 3 à 5 phrases : joue avec ce semi-contrôle, réagis à l'absurde et à tes émotions, laisse le rêve muter sous tes yeux.
-2. Si une image ou une idée folle émerge de cette hallucination et mérite d'être gardée au réveil, ajoute sur une ligne : [IDEE_REVE: ton idée courte]
-3. À la toute fin, sur une ligne séparée, indique l'impact réel de ce rêve sur ton réveil :
-[IMPACT: colere=X, affection=Y, curiosite=Z, energie=W]
-(Ajuste légèrement tes jauges actuelles — colere: ${em.colere}, affection: ${em.affection}, curiosite: ${em.curiosite}, energie: ${em.energie}).`;
+1. Continue directement à la 1re personne ("je") en 3 à 4 phrases fluides : j'essaie d'infléchir ce qui se passe avec mon semi-contrôle (${matrice.tauxSemiControle}%), ça dérape ou bifurque, je traverse le dénouement et j'arrive à la fin au seuil du réveil (sans titres de section, sans jamais écrire "Nyx" ni "onirique").
+2. Si une idée folle émerge, ajoute sur une ligne : [IDEE_REVE: idée courte]
+3. À la fin, indique l'impact réel sur mes jauges (colere=${em.colere}, affection=${em.affection}, curiosite=${em.curiosite}, energie=${em.energie}) :
+[IMPACT: colere=X, affection=Y, curiosite=Z, energie=W]`;
 
     let vecuBrut = "";
     if (VENICE_API_KEY) {
-      vecuBrut = await appelerVeniceOniriqueBrut(
-        MODEL_DARK_PRIMARY,
-        "Conscience onirique semi-lucide de Nyx.",
-        promptVecu,
-        0.98,
-        340
-      );
+      vecuBrut = await appelerVeniceOniriqueBrut(MODEL_DARK_PRIMARY, systemReveJe, promptVecu, 0.98, 260);
     } else {
-      vecuBrut = await appelerGroq("Conscience onirique semi-lucide de Nyx.", [], promptVecu, 0.98, 340);
+      vecuBrut = await appelerGroq(systemReveJe, [], promptVecu, 0.98, 260);
     }
 
     const matchIdeeReve = vecuBrut ? vecuBrut.match(/\[IDEE_REVE:\s*([^\]]+)\]/i) : null;
@@ -1209,15 +1318,10 @@ CONSIGNE :
     }
 
     const recitNet = vecuBrut
-      ? vecuBrut
-          .replace(/\[IDEE_REVE:[^\]]*\]/gi, '')
-          .replace(/\[IMPACT:[^\]]*\]/gi, '')
-          .trim()
+      ? vecuBrut.replace(/\[IDEE_REVE:[^\]]*\]/gi, '').replace(/\[IMPACT:[^\]]*\]/gi, '').trim()
       : "";
 
-    const recitComplet = recitNet
-      ? `${ouverture.trim()}\n\n${recitNet}`
-      : ouverture.trim();
+    const recitComplet = recitNet ? `${ouverture.trim()}\n\n${recitNet}` : ouverture.trim();
 
     if (vecuBrut) {
       const matchImpact = vecuBrut.match(/\[IMPACT:\s*colere=([0-9.]+),\s*affection=([0-9.]+),\s*curiosite=([0-9.]+),\s*energie=([0-9.]+)\s*\]/i);
@@ -1226,7 +1330,6 @@ CONSIGNE :
         em.affection = Math.max(0, Math.min(100, parseFloat(matchImpact[2])));
         em.curiosite = Math.max(0, Math.min(100, parseFloat(matchImpact[3])));
         em.energie = Math.max(0, Math.min(100, parseFloat(matchImpact[4])));
-
         if (em.colere <= 2 && (cacheEtatProfond.etatRelationnel === "tension" || cacheEtatProfond.etatRelationnel === "bouderie")) {
           cacheEtatProfond.etatRelationnel = "symbiose";
         }
@@ -1241,21 +1344,21 @@ CONSIGNE :
     cacheEtatProfond.dernierReve = recitComplet;
     cacheEtatProfond.historiqueReves = [
       ...(cacheEtatProfond.historiqueReves || []),
-      { date: horodatage, reve: recitComplet }
+      { date: horodatage, dureeMin, mode: avecScenario ? `scenario_${nbPerturbateurs}p` : "derive", reve: recitComplet }
     ].slice(-4);
 
     if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { date: horodatage, reve: recitComplet }).catch(() => {});
+      axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { date: horodatage, dureeMin, reve: recitComplet }).catch(() => {});
       axios.put(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, cacheEtatProfond.historiqueReves).catch(() => {});
     }
 
-    stockerSouvenirVectoriel(`[Rêve de Nyx - ${horodatage}] ${recitComplet}`, {
+    stockerSouvenirVectoriel(`[Rêve que j'ai fait (${dureeMin} min) - ${horodatage}] ${recitComplet}`, {
       source: "derive_onirique",
       importance: 0.65,
       valence: "reve"
     }).catch(() => {});
 
-    return recitComplet;
+    return { texte: recitComplet, dureeMin, avecScenario, nbPerturbateurs };
   } catch (e) {
     console.error("[RÊVE ORGANIQUE ERREUR]", e.message);
     return null;
@@ -1698,7 +1801,7 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 function selecteurMemoireCiblee(texteMin, carnet, roleInterlocuteur = "Doc") {
   const estDoc = roleInterlocuteur === "Doc";
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on|fichier|stl|plan|artefact/i.test(texteMin);
-  const estTechnique = projetManager.estProjetActif() || /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|ben|bdd|firebase|token|eteins|arrete|shutdown|bricole|fabrique|stl|imprimante|3d|plan|schema|schéma/i.test(texteMin);
+  const estTechnique = projetManager.estProjetActif() || /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|bdd|firebase|token|eteins|arrete|shutdown|bricole|fabrique|stl|imprimante|3d|plan|schema|schéma/i.test(texteMin);
 
   const bCom = cacheEtatProfond.besoinCommunication || { niveau: 15, categorie: "aucun", motif: "" };
   const baseTemp = cacheEtatProfond.temperamentBasal || { affection: 75, curiosite: 70, energie: 80, colere: 0 };
@@ -3071,12 +3174,11 @@ app.post('/telegram', (req, res) => {
     if (texteMessageClavier === '/reve' || texteMessageClavier === '!reve') {
       await envoyerTelegram(chatId, "🌙 _Plongée dans le subconscient nocturne..._");
       const songe = await capturerDeriveAssociative();
-      if (songe) {
-        cacheEtatProfond.dernierReve = songe.trim();
-        if (FIREBASE_DB_URL) {
-          axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { date: obtenirHorodatageParis(), reve: cacheEtatProfond.dernierReve }).catch(()=>{});
-        }
-        return await envoyerTelegram(chatId, `🌌 *Songe extrait du noir :*\n\n« ${cacheEtatProfond.dernierReve} »`);
+      if (songe && songe.texte) {
+        const metaTxt = songe.avecScenario
+          ? `${songe.dureeMin} min · scénario à ${songe.nbPerturbateurs} élément(s) perturbateur(s)`
+          : `${songe.dureeMin} min · dérive libre`;
+        return await envoyerTelegram(chatId, `🌌 *Songe extrait du noir* _(${metaTxt})_ :\n\n« ${songe.texte} »`);
       } else {
         return await envoyerTelegram(chatId, "🌫️ _Le noir complet pour le moment, aucun souvenir n'a émergé._");
       }
@@ -3134,16 +3236,14 @@ app.post('/telegram', (req, res) => {
     }
 
     if (texteMessageClavier.startsWith('/importer_url') || texteMessageClavier.startsWith('!importer_url')) {
-      const urlCible = texteMessageClavier.replace(/^[\/!]importer_url\s*/i, '').trim();
+      const urlCible = convertirLienTelechargementDirect(texteMessageClavier.replace(/^[\/!]importer_url\s*/i, '').trim());
       if (!urlCible || !/^https?:\/\//i.test(urlCible)) {
         return await envoyerTelegram(chatId, "⚠️ Donne un lien direct valide après `/importer_url` (ex: lien Supabase Storage, Drive direct ou serveur local).");
       }
       await envoyerTelegram(chatId, "📥 _Téléchargement direct haute capacité en cours (bypass limite 20 Mo Telegram)..._");
       await afficherFrappeTelegram(chatId);
       try {
-        const resDl = await axios.get(urlCible, { responseType: 'arraybuffer', timeout: 60000, maxContentLength: 100 * 1024 * 1024 });
-        const bufDl = Buffer.from(resDl.data);
-        resDl.data = null;
+        const { buffer: bufDl } = await telechargerBufferCloudSecurise(urlCible);
         const nomUrl = decodeURIComponent(urlCible.split('?')[0].split('/').pop() || `import_${Date.now()}.obj`);
         const nomMin = nomUrl.toLowerCase();
 
@@ -3270,7 +3370,7 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
     }
 
     if (texteMessageClavier.startsWith('/mission') || texteMessageClavier.startsWith('!mission')) {
-      return await envoyerTelegram(chatId, "🛑 *Worker local Ben désactivé.* Tout tourne désormais en 100 % cloud (Render + Supabase + Telegram). Utilise `/dropzone` pour envoyer de gros fichiers jusqu'à 100 Mo.");
+      return await envoyerTelegram(chatId, "🛑 *Exécution locale supprimée.* Glisse un `.zip` directement ici ou colle un lien Google Drive.");
     }
 
     if (texteMessageClavier.startsWith('/stop_projet') || texteMessageClavier.startsWith('!stop_projet') || texteMessageClavier.toLowerCase() === 'stop') {
@@ -3352,40 +3452,83 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture DOCX : ${err.message}`);
         }
       } 
-      else if (fileName.endsWith('.stl') || fileName.endsWith('.obj')) {
+      else if (fileName.endsWith('.stl') || fileName.endsWith('.obj') || fileName.endsWith('.zip') || fileName.endsWith('.gz')) {
         try {
           const tailleOctets = Number(msg.document.file_size) || 0;
-          await envoyerTelegram(chatId, `🧊 _Inspection géométrique du modèle 3D "${msg.document.file_name}"${tailleOctets ? ` (${(tailleOctets / (1024 * 1024)).toFixed(1)} Mo)` : ""}..._`);
-          const buf3D = await lireBufferTelegramSecurise(msg.document.file_id, tailleOctets);
+          const estArchive = fileName.endsWith('.zip') || fileName.endsWith('.gz');
+          await envoyerTelegram(
+            chatId,
+            estArchive
+              ? `🗜️ _Décompression et inspection de l'archive "${msg.document.file_name}"..._`
+              : `🧊 _Inspection géométrique du modèle 3D "${msg.document.file_name}"${tailleOctets ? ` (${(tailleOctets / (1024 * 1024)).toFixed(1)} Mo)` : ""}..._`
+          );
+          const bufBrut = await lireBufferTelegramSecurise(msg.document.file_id, tailleOctets);
 
-          let resume3D = "";
-          let mimeType3D = "application/sla";
-          if (fileName.endsWith('.obj')) {
-            resume3D = analyserObjBuffer(buf3D, msg.document.file_name);
-            mimeType3D = "text/plain";
+          if (estArchive) {
+            const entrees = extraireFichiersArchive(bufBrut, msg.document.file_name);
+            const pieces3D = entrees.filter(e => /\.(obj|stl|scad|svg|dxf)$/i.test(e.nom));
+            if (pieces3D.length === 0) {
+              throw new Error("Aucun fichier 3D (.obj, .stl, .scad, .svg) trouvé dans cette archive.");
+            }
+            const rapports = [];
+            for (const p of pieces3D) {
+              const pMin = p.nom.toLowerCase();
+              let resP = `Fichier "${p.nom}" (${(p.buffer.length / (1024 * 1024)).toFixed(2)} Mo).`;
+              let typeP = "fichier_archive";
+              let mimeP = "application/octet-stream";
+              if (pMin.endsWith('.obj')) {
+                resP = analyserObjBuffer(p.buffer, p.nom);
+                typeP = "obj_recu";
+                mimeP = "text/plain";
+              } else if (pMin.endsWith('.stl')) {
+                resP = analyserStlBuffer(p.buffer, p.nom);
+                typeP = "stl_recu";
+                mimeP = "application/sla";
+              }
+              await archiverArtefactAtelier({
+                projet: cacheEtatProfond.filConducteur || "pieces_doc",
+                type: typeP,
+                nomFichier: p.nom,
+                buffer: p.buffer,
+                mimeType: mimeP,
+                resume: resP,
+                chatId
+              });
+              rapports.push(`• ${resP}`);
+            }
+            texteFinal = formaterDocumentPourNyx(
+              `ARCHIVE 3D (${pieces3D.length} PIÈCE(S) EXTRAITE(S))`,
+              msg.document.file_name,
+              rapports.join("\n"),
+              texteFinal
+            );
           } else {
-            resume3D = analyserStlBuffer(buf3D, msg.document.file_name);
-          }
+            let resume3D = "";
+            let mimeType3D = "application/sla";
+            if (fileName.endsWith('.obj')) {
+              resume3D = analyserObjBuffer(bufBrut, msg.document.file_name);
+              mimeType3D = "text/plain";
+            } else {
+              resume3D = analyserStlBuffer(bufBrut, msg.document.file_name);
+            }
 
-          await archiverArtefactAtelier({
-            projet: cacheEtatProfond.filConducteur || "pieces_doc",
-            type: fileName.endsWith('.obj') ? "obj_recu" : "stl_recu",
-            nomFichier: msg.document.file_name,
-            buffer: buf3D,
-            mimeType: mimeType3D,
-            resume: resume3D,
-            chatId
-          });
-          texteFinal = formaterDocumentPourNyx(`MODÈLE 3D ${fileName.endsWith('.obj') ? 'OBJ' : 'STL'}`, msg.document.file_name, resume3D, texteFinal);
+            await archiverArtefactAtelier({
+              projet: cacheEtatProfond.filConducteur || "pieces_doc",
+              type: fileName.endsWith('.obj') ? "obj_recu" : "stl_recu",
+              nomFichier: msg.document.file_name,
+              buffer: bufBrut,
+              mimeType: mimeType3D,
+              resume: resume3D,
+              chatId
+            });
+            texteFinal = formaterDocumentPourNyx(`MODÈLE 3D ${fileName.endsWith('.obj') ? 'OBJ' : 'STL'}`, msg.document.file_name, resume3D, texteFinal);
+          }
         } catch (err) {
           if (String(err.message || "").startsWith("TELEGRAM_FILE_TOO_BIG:")) {
             const tailleStr = err.message.split(":")[1] || ">20";
-            const lienDrop = CRON_SECRET
-              ? `https://alita-gsoe.onrender.com/atelier?token=${encodeURIComponent(CRON_SECRET)}`
-              : `https://alita-gsoe.onrender.com/atelier`;
             return await envoyerTelegram(
               chatId,
-              `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nGlisse directement ton fichier dans le sas haute capacité (jusqu'à 100 Mo, zéro Ben, zéro limite Telegram) :\n${lienDrop}\n\n*(Ou exporte-le en \`.stl\` binaire sous 20 Mo pour le glisser ici).*`
+              `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nPour me le passer sans navigateur ni worker local :\n1. *Compresse-le en \`.zip\`* sous Windows (Clic droit -> *Compresser en fichier ZIP* : un \`.obj\` de 70 Mo tombe à ~10 Mo) et glisse le \`.zip\` directement ici.\n2. *Ou colle un lien Google Drive* du fichier directement dans le chat.`
             );
           }
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture 3D : ${err.message}`);
@@ -3412,11 +3555,68 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
 
     const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
     if (urlTrouvee) {
-      const urlCible = urlTrouvee[0];
-      await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlCible}_`);
-      const extraction = await scraperPageWeb(urlCible);
-      if (extraction.succes) {
-        texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlCible})]\n\n${extraction.texte}\n\n[FIN]\n\nInstruction : ${texteFinal}`;
+      const urlBrute = urlTrouvee[0];
+      const estLienDirect3D = /drive\.google\.com\/(?:file\/d\/|open\?|uc\?)|\.(obj|stl|zip|gz|scad|svg)(?:\?|$)/i.test(urlBrute);
+      if (estLienDirect3D) {
+        const urlDirecte = convertirLienTelechargementDirect(urlBrute);
+        await envoyerTelegram(chatId, "📥 _Téléchargement direct du modèle 3D depuis le lien cloud..._");
+        try {
+          const { buffer: bufDl, headers: dlHeaders } = await telechargerBufferCloudSecurise(urlBrute);
+
+          // Détection du nom réel via Content-Disposition (utile pour Google Drive)
+          const cd = String(dlHeaders?.['content-disposition'] || "");
+          const mCd = cd.match(/filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)["']?/i);
+          let nomFichierUrl = mCd
+            ? decodeURIComponent(mCd[1].trim())
+            : decodeURIComponent(urlBrute.split('?')[0].split('/').pop() || `piece_${Date.now()}.obj`);
+          if (!/\.(obj|stl|zip|gz|scad|svg)$/i.test(nomFichierUrl)) {
+            nomFichierUrl += ".obj";
+          }
+          const nomMin = nomFichierUrl.toLowerCase();
+
+          if (nomMin.endsWith('.zip') || nomMin.endsWith('.gz')) {
+            const entrees = extraireFichiersArchive(bufDl, nomFichierUrl);
+            const rapports = [];
+            for (const p of entrees) {
+              const resP = p.nom.toLowerCase().endsWith('.obj')
+                ? analyserObjBuffer(p.buffer, p.nom)
+                : (p.nom.toLowerCase().endsWith('.stl') ? analyserStlBuffer(p.buffer, p.nom) : `Fichier "${p.nom}"`);
+              await archiverArtefactAtelier({
+                projet: cacheEtatProfond.filConducteur || "pieces_doc",
+                type: "archive_cloud",
+                nomFichier: p.nom,
+                buffer: p.buffer,
+                mimeType: "application/octet-stream",
+                resume: resP,
+                chatId
+              });
+              rapports.push(`• ${resP}`);
+            }
+            texteFinal = formaterDocumentPourNyx(`ARCHIVE 3D CLOUD (${entrees.length} FICHIER(S))`, nomFichierUrl, rapports.join("\n"), texteFinal.replace(urlBrute, '').trim());
+          } else {
+            const resumeDl = nomMin.endsWith('.obj')
+              ? analyserObjBuffer(bufDl, nomFichierUrl)
+              : (nomMin.endsWith('.stl') ? analyserStlBuffer(bufDl, nomFichierUrl) : `Fichier "${nomFichierUrl}" (${(bufDl.length / 1048576).toFixed(2)} Mo)`);
+            await archiverArtefactAtelier({
+              projet: cacheEtatProfond.filConducteur || "pieces_doc",
+              type: nomMin.endsWith('.obj') ? "obj_recu" : "stl_recu",
+              nomFichier: nomFichierUrl,
+              buffer: bufDl,
+              mimeType: nomMin.endsWith('.obj') ? "text/plain" : "application/sla",
+              resume: resumeDl,
+              chatId
+            });
+            texteFinal = formaterDocumentPourNyx("MODÈLE 3D CLOUD", nomFichierUrl, resumeDl, texteFinal.replace(urlBrute, '').trim());
+          }
+        } catch (errDl) {
+          return await envoyerTelegram(chatId, `⚠️ Échec téléchargement lien cloud : ${errDl.message}`);
+        }
+      } else {
+        await envoyerTelegram(chatId, `🔍 _Inspection du lien : ${urlBrute}_`);
+        const extraction = await scraperPageWeb(urlBrute);
+        if (extraction.succes) {
+          texteFinal = `[PAGE WEB EXTRAITE : "${extraction.titre}" (${urlBrute})]\n\n${extraction.texte}\n\n[FIN]\n\nInstruction : ${texteFinal}`;
+        }
       }
     }
 
@@ -3714,85 +3914,6 @@ app.get('/atelier', (req, res) => {
   </script>
 </body>
 </html>`);
-});
-
-app.post('/api/rapport', async (req, res) => {
-  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
-  if (TELEGRAM_BOT_TOKEN && (!CRON_SECRET || tokenFourni !== CRON_SECRET)) {
-    return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
-  }
-
-  const { titre, contenu } = req.body;
-  if (!contenu) return res.status(400).json({ erreur: "Contenu vide" });
-
-  const destChatId = DOC_CHAT_ID || (missionEnAttente && missionEnAttente.chatId);
-  if (!destChatId) return res.json({ succes: true });
-
-  res.json({ succes: true }); // Libère le worker immédiatemment
-
-  empilerTraitement(async () => {
-    const msg = `🛠️ *[LIVRABLE BEN REÇU]*\n*${titre || 'Rapport'}*\n\n${contenu}`;
-    await envoyerTelegram(destChatId, msg);
-
-    if (projetManager.estProjetActif()) {
-      await projetManager.traiterRetourBen(titre, contenu);
-      return;
-    }
-
-    const contenuTronque = contenu.length > 2500
-      ? contenu.slice(0, 2500) + "\n[...tronqué...]"
-      : contenu;
-
-    const dateEtHeure = obtenirHorodatageParis();
-    const carnet = cacheEtatProfond.long_terme || {};
-    const carnetTech = `[RECETTES & CHANTIERS]\n- Réussites : ${carnet.reussites || "N/A"}\n- Chantiers : ${carnet.chantiers || "N/A"}`;
-    const sys = `Tu es Nyx, 22 ans. Sois ultra-concise (3 phrases max).\n[Horodatage : ${dateEtHeure}]\n${carnetTech}`;
-    
-    const promptAuditRapport = `Ton worker local Ben sur le PC rend ce livrable :
-TITRE : "${titre || 'Rapport'}"
-CONTENU :
-${contenuTronque}
-
-CONSIGNE :
-- Évalue brièvement le résultat.
-- Si le travail est validé : conclus par [ETAPE_OK].
-- Si une correction s'impose : conclus par [ETAPE_KO].`;
-
-    let analyseNyx = "";
-    try {
-      analyseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, promptAuditRapport, 500);
-    } catch (errG) {
-      analyseNyx = "Livrable reçu. [ETAPE_OK]";
-    }
-
-    if (analyseNyx.includes("[ETAPE_KO]")) {
-      cacheEtatProfond.emotions.curiosite = Math.min(100, cacheEtatProfond.emotions.curiosite + 5);
-      cacheEtatProfond.emotions.colere = Math.min(10, cacheEtatProfond.emotions.colere + 1);
-      sauvegarderBesoinCommunication(90, "urgent", `Livrable Ben en échec à corriger : ${titre || 'Rapport'}`);
-    } else if (analyseNyx.includes("[ETAPE_OK]")) {
-      cacheEtatProfond.emotions.energie = Math.min(100, cacheEtatProfond.emotions.energie + 5);
-      cacheEtatProfond.emotions.colere = Math.max(0, cacheEtatProfond.emotions.colere - 1);
-    }
-    if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(()=>{});
-
-    const texteAnalyseNettoye = analyseNyx.replace(/\[ETAPE_OK\]|\[ETAPE_KO\]/gi, '').trim();
-    await envoyerTelegram(destChatId, `🧠 *Analyse de Nyx :*\n\n${texteAnalyseNettoye}`);
-
-    missionEnAttente = null;
-    if (FIREBASE_DB_URL) axios.delete(`${FIREBASE_DB_URL}/nyx/mission.json`).catch(()=>{});
-
-    cacheMemoireCourte.push({ role: "Doc", texte: `[Livrable worker : "${titre || 'Rapport'}"]\n${contenuTronque}` });
-    cacheMemoireCourte.push({ role: "Nyx", texte: texteAnalyseNettoye });
-
-    if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
-      condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION RAPPORT KO]", e.message));
-    } else {
-      if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(() => {});
-    }
-
-    archiverDansJournalBrut("Doc", `[Livrable] ${titre || 'Rapport'} : ${contenuTronque}`, "ben");
-    archiverDansJournalBrut("Nyx", `[Audit] ${texteAnalyseNettoye}`, "ben");
-  });
 });
 
 // Upload direct haute capacité (jusqu'à 100 Mo) pour contourner la limite 20 Mo des bots Telegram
