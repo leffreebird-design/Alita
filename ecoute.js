@@ -2518,8 +2518,10 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
   }
   texteNet = texteNet.replace(/\[FICHIER:\s*([^\]\r\n]+)\]\s*[\s\S]*?\[\/FICHIER\]/gi, (_, nom) => `📎 *Fichier livré :* \`${nom.trim()}\``).trim();
 
+  texteNet = refermerBalisesAtelierTronquees(texteNet);
+
   // 2. Extraction des pièces 3D [3D_STL: description]
-  const matchStl = texteNet.match(/\[3D_STL:\s*([\s\S]*?)\]/i);
+  const matchStl = texteNet.match(/\[3D_STL:\s*([\s\S]*?)(?:\]|$)/i);
   let stlResult = null;
   if (matchStl) {
     const desc3D = matchStl[1].trim();
@@ -2561,7 +2563,7 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
   }
 
   // 3. Extraction des plans techniques [PLAN_SVG: description]
-  const matchPlan = texteNet.match(/\[PLAN_SVG:\s*([\s\S]*?)\]/i);
+  const matchPlan = texteNet.match(/\[PLAN_SVG:\s*([\s\S]*?)(?:\]|$)/i);
   if (matchPlan) {
     const descPlan = matchPlan[1].trim();
     texteNet = texteNet.replace(matchPlan[0], '').trim();
@@ -2586,10 +2588,10 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
     }
   }
 
-  // 4. Extraction des visuels [DESSIN: prompt]
-  const matchDessin = texteNet.match(/\[DESSIN:\s*([\s\S]*?)\]/i)
-    || texteNet.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i)
-    || texteNet.match(/(?:^|\n)DESSIN\s*:\s*([^\n\r]+)/i);
+  // 4. Extraction des visuels [DESSIN: prompt] (tolère une balise coupée en fin de message)
+  const matchDessin = texteNet.match(/\[DESSIN:\s*([\s\S]*?)(?:\]|$)/i)
+    || texteNet.match(/\*{0,2}DESSIN\*{0,2}\s*:\s*["“]([\s\S]*?)["”]/i)
+    || texteNet.match(/(?:^|\n)\*{0,2}DESSIN\*{0,2}\s*:\s*([^\n\r]+)/i);
 
   let imageB64 = null;
   if (matchDessin) {
@@ -2831,6 +2833,24 @@ const projetManager = new ProjectManager({
 // ==========================================
 // OUTILS DE NETTOYAGE & CONTROLE DE SORTIE
 // ==========================================
+function refermerBalisesAtelierTronquees(texte) {
+  if (!texte) return texte;
+  let t = String(texte).trim();
+
+  // Si une balise [DESSIN: ...], [3D_STL: ...] ou [PLAN_SVG: ...] a été coupée par max_tokens sans ']', on la referme proprement
+  const regexBaliseOuverte = /\[(DESSIN|3D_STL|PLAN_SVG):\s*([^\]]*)$/i;
+  if (regexBaliseOuverte.test(t)) {
+    t = t.replace(/[,;:\s-]+$/, '') + ']';
+  }
+
+  // Idem pour [FICHIER: nom.ext]... non refermé
+  if (/\[FICHIER:\s*[^\]\r\n]+\]/i.test(t) && !/\[\/FICHIER\]/i.test(t)) {
+    t = t + '\n[/FICHIER]';
+  }
+
+  return t;
+}
+
 function couperPhraseIncomplete(texte) {
   if (!texte) return texte;
   const t = texte.trim();
@@ -2992,11 +3012,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     ? 350 
     : (estComplexe ? 4000 : (demandeDocApprofondie ? 2200 : 1000));
 
-  // Couplage somatique : tension haute ou fatigue comprime la longueur de sortie
+  // Couplage somatique : tension haute ou fatigue comprime la longueur tout en laissant la place aux balises d'atelier
   if (!estComplexe && (cacheEtatProfond.emotions?.colere || 0) >= 6) {
-    plafondTokens = Math.min(plafondTokens, 450);
+    plafondTokens = Math.min(plafondTokens, 750);
   } else if (!estComplexe && (cacheEtatProfond.emotions?.energie || 80) < 35) {
-    plafondTokens = Math.min(plafondTokens, 350);
+    plafondTokens = Math.min(plafondTokens, 550);
   }
   
   let instructionReveil = "";
@@ -3139,6 +3159,7 @@ ${evaluerSyntonieRythmique()}
     .replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '')
     .trim();
 
+  reponseNyx = refermerBalisesAtelierTronquees(reponseNyx);
   reponseNyx = couperPhraseIncomplete(reponseNyx);
   reponseNyx = securiserSortieCode(reponseNyx);
 
