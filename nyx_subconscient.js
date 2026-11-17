@@ -1110,8 +1110,20 @@ CONTRAINTES SVG STRICTES :
   return { nomFichier, svgBuffer: Buffer.from(matchSvg[0].trim(), "utf8"), resume: description.slice(0, 160) };
 }
 
+function refermerBalisesAtelierTronquees(texte) {
+  if (!texte) return texte;
+  let t = String(texte).trim();
+  if (/\[(DESSIN|3D_STL|PLAN_SVG):\s*([^\]]*)$/i.test(t)) {
+    t = t.replace(/[,;:\s-]+$/, '') + ']';
+  }
+  if (/\[FICHIER:\s*[^\]\r\n]+\]/i.test(t) && !/\[\/FICHIER\]/i.test(t)) {
+    t = t + '\n[/FICHIER]';
+  }
+  return t;
+}
+
 async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "") {
-  let texteNet = String(texteBrutNyx || "");
+  let texteNet = refermerBalisesAtelierTronquees(String(texteBrutNyx || ""));
 
   // 1. Fichiers [FICHIER: nom.ext]...[/FICHIER]
   const regexFichier = /\[FICHIER:\s*([^\]\r\n]+)\]\s*([\s\S]*?)\[\/FICHIER\]/gi;
@@ -1135,7 +1147,7 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
   texteNet = texteNet.replace(/\[FICHIER:\s*([^\]\r\n]+)\]\s*[\s\S]*?\[\/FICHIER\]/gi, (_, nom) => `📎 *Fichier livré :* \`${nom.trim()}\``).trim();
 
   // 2. Pièces 3D [3D_STL: description]
-  const matchStl = texteNet.match(/\[3D_STL:\s*([\s\S]*?)\]/i);
+  const matchStl = texteNet.match(/\[3D_STL:\s*([\s\S]*?)(?:\]|$)/i);
   if (matchStl) {
     const desc3D = matchStl[1].trim();
     texteNet = texteNet.replace(matchStl[0], '').trim();
@@ -1167,7 +1179,7 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
   }
 
   // 3. Plans techniques [PLAN_SVG: description]
-  const matchPlan = texteNet.match(/\[PLAN_SVG:\s*([\s\S]*?)\]/i);
+  const matchPlan = texteNet.match(/\[PLAN_SVG:\s*([\s\S]*?)(?:\]|$)/i);
   if (matchPlan) {
     const descPlan = matchPlan[1].trim();
     texteNet = texteNet.replace(matchPlan[0], '').trim();
@@ -1188,7 +1200,7 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
   }
 
   // 4. Visuels [DESSIN: prompt]
-  const matchDessin = texteNet.match(/\[DESSIN:\s*([\s\S]*?)\]/i) || texteNet.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i);
+  const matchDessin = texteNet.match(/\[DESSIN:\s*([\s\S]*?)(?:\]|$)/i) || texteNet.match(/\*{0,2}DESSIN\*{0,2}\s*:\s*["“]([\s\S]*?)["”]/i);
   let imageB64 = null;
   if (matchDessin) {
     const promptDessin = matchDessin[1].trim();
