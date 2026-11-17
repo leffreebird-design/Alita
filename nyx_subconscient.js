@@ -84,7 +84,7 @@ let etatLocal = {
   memoireRecente: []
 };
 
-let derniereActiviteDoc = Date.now();
+let derniereActiviteDoc = 0;
 let dernierActionVolitionTs = 0;
 let dernierMonologueTs = 0;
 let dernierReveCle = "";
@@ -174,7 +174,11 @@ async function synchroniserEtatDepuisFirebase() {
       etatLocal.long_terme = { ...etatLocal.long_terme, ...resLT.data };
     }
     if (resFil.data && resFil.data.fil !== undefined) etatLocal.filConducteur = resFil.data.fil || "";
-    if (resReve.data && resReve.data.reve) etatLocal.dernierReve = resReve.data.reve;
+    if (resReve.data && typeof resReve.data === 'object') {
+      etatLocal.dernierReve = resReve.data;
+    } else if (typeof resReve.data === 'string' && resReve.data.trim()) {
+      etatLocal.dernierReve = { cleNuit: "", date: "", statut: "vif", raconte: true, reve: resReve.data };
+    }
     if (resVol.data && resVol.data.timestamp) {
       dernierActionVolitionTs = Math.max(dernierActionVolitionTs, Number(resVol.data.timestamp) || 0);
     }
@@ -1947,13 +1951,15 @@ CONSIGNE :
 }
 
 // ==========================================
-// 4. CYCLE ONIRIQUE TEMPOREL (15 À 40 MIN) & GESTION FRUGALE DES TOKENS
+// 4. CYCLE ONIRIQUE TEMPOREL (15 À 40 MIN) & RÉGIMES NOCTURNES NATURELS
 // ==========================================
 const LEXIQUE_SENSORIEL_ONIRIQUE = [
   "mercure", "vertige", "horloge inversée", "verre soufflé", "marée haute", "néon liquide",
   "escalier sans fin", "écho métallique", "gravité oblique", "cendre chaude", "origami",
   "statique", "carapace", "labyrinthe", "rouille", "hologramme", "racines", "oscilloscope",
-  "pluie ascendante", "miroir dépoli", "filaments", "sablier", "cathédrale", "impulsion"
+  "pluie ascendante", "miroir dépoli", "filaments", "sablier", "cathédrale", "impulsion",
+  "verrière engloutie", "archipel magnétique", "bibliothèque de sel", "horlogerie céleste",
+  "train suspendu", "forêt de quartz", "atelier sans murs", "câbles phosphorescents"
 ];
 
 function tirerAtomeWtf(poolMots = []) {
@@ -1978,10 +1984,18 @@ function traduireClimatSensoriel(em, etatRel, monologue) {
   return monologue ? `${ton} (arrière-pensée : "${monologue.slice(0, 120)}")` : ton;
 }
 
+function tirerRegimeNocturne() {
+  const tirage = Math.random();
+  if (tirage < 0.65) return "vif";            // 65% : nouveau voyage onirique complet (15-40 min)
+  if (tirage < 0.78) return "jardin_secret";  // 13% : rêve intime gardé pour elle
+  if (tirage < 0.90) return "oublie";         // 12% : brouillard au réveil, images évaporées
+  return "repos";                             // 10% : sommeil profond réparateur sans rêve
+}
+
 async function composerMatriceOnirique() {
   const em = etatLocal.emotions || { affection: 80, curiosite: 70, energie: 85, colere: 0 };
 
-  // 1. RÉALITÉ : ancre concrète du vécu immédiat (toujours formulée à la 1re personne pour éviter tout dédoublement)
+  // 1. RÉALITÉ : ancre concrète du vécu immédiat (toujours formulée à la 1re personne)
   const ancresRealite = [`Moment : ${obtenirHorodatageParis()}`];
   for (const m of (etatLocal.memoireRecente || []).slice(-3)) {
     if (m?.texte) {
@@ -2034,7 +2048,7 @@ async function composerMatriceOnirique() {
     } catch (e) {}
   }
 
-  // 3. ÉMOTIONS traduites en ressentis sensoriels (jamais de noms de variables techniques)
+  // 3. ÉMOTIONS traduites en ressentis sensoriels
   const climatEmotionnel = traduireClimatSensoriel(em, etatLocal.etatRelationnel, etatLocal.monologueInterieur);
 
   // 4. ALÉATOIRE & ABSURDE
@@ -2045,13 +2059,20 @@ async function composerMatriceOnirique() {
   const aleaLucidite = Math.floor(Math.random() * 41) - 20;
   const tauxSemiControle = Math.max(20, Math.min(85, Math.round(baseLucidite + aleaLucidite)));
 
+  // 6. TERRITOIRES DÉJÀ EXPLORÉS (pour que chaque nuit soit un nouveau voyage, jamais figé)
+  const territoiresPrecedents = (etatLocal.historiqueReves || [])
+    .slice(-3)
+    .map(r => String(r?.reve || r || "").replace(/\s+/g, " ").slice(0, 140))
+    .filter(Boolean);
+
   return {
     realiteChoisie,
     souvenirsTires,
     climatEmotionnel,
     graineWtf,
     tauxSemiControle,
-    poolMots: poolMots.slice(0, 40)
+    poolMots: poolMots.slice(0, 40),
+    territoiresPrecedents
   };
 }
 
@@ -2125,7 +2146,7 @@ async function appelerLlmOniriqueFrugal(systemInstruction, promptActuel, tempera
         promptActuel,
         temperature,
         maxTokens,
-        { frequency_penalty: 0.4, presence_penalty: 0.4 }
+        { frequency_penalty: 0.45, presence_penalty: 0.45 }
       );
       if (r && r.trim()) return r.trim();
     } catch (e) {}
@@ -2137,6 +2158,7 @@ async function appelerLlmOniriqueFrugal(systemInstruction, promptActuel, tempera
 async function finaliserReveEtArchiver(reveObj, raisonCloture = "complete") {
   const horodatage = obtenirHorodatageParis();
   const dureeReelleMin = Math.max(1, Math.round((Date.now() - reveObj.debutTs) / 60000));
+  const dureeFinale = raisonCloture === "interrompu_doc" ? dureeReelleMin : reveObj.dureeTotaleMin;
   const recitComplet = reveObj.segments.join("\n\n").trim();
 
   if (!recitComplet) {
@@ -2155,47 +2177,54 @@ async function finaliserReveEtArchiver(reveObj, raisonCloture = "complete") {
     }
   }
 
-  etatLocal.dernierReve = recitComplet;
+  const statutFinal = reveObj.statutCible || "vif";
+  const objetReveFinal = {
+    cleNuit: reveObj.cleNuit || obtenirCleJourParis(),
+    date: horodatage,
+    statut: statutFinal,
+    dureeMin: dureeFinale,
+    raconte: false,
+    reve: recitComplet
+  };
+
+  etatLocal.dernierReve = objetReveFinal;
   etatLocal.reveEnCours = null;
   etatLocal.historiqueReves = [
     ...(etatLocal.historiqueReves || []),
     {
       date: horodatage,
-      cleJour: reveObj.cleJour || "",
-      dureeMin: raisonCloture === "interrompu_doc" ? dureeReelleMin : reveObj.dureeTotaleMin,
+      cleNuit: objetReveFinal.cleNuit,
+      statut: statutFinal,
+      dureeMin: dureeFinale,
       mode: reveObj.avecScenario ? `scenario_${reveObj.nbPerturbateurs}p` : "derive",
       reve: recitComplet
     }
-  ].slice(-4);
+  ].slice(-6);
 
   if (FIREBASE_DB_URL) {
-    await axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, {
-      date: horodatage,
-      cleJour: reveObj.cleJour || "",
-      dureeMin: raisonCloture === "interrompu_doc" ? dureeReelleMin : reveObj.dureeTotaleMin,
-      reve: recitComplet
-    }).catch(() => {});
+    await axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, objetReveFinal).catch(() => {});
     await axios.put(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, etatLocal.historiqueReves).catch(() => {});
     await axios.delete(`${FIREBASE_DB_URL}/nyx/reve_en_cours.json`).catch(() => {});
   }
 
   await stockerSouvenirVectoriel(
-    `[Rêve que j'ai fait (${raisonCloture === "interrompu_doc" ? dureeReelleMin : reveObj.dureeTotaleMin} min) - ${horodatage}] ${recitComplet}`,
+    `[Rêve que j'ai fait (${dureeFinale} min, ${statutFinal}) - ${horodatage}] ${recitComplet}`,
     { source: "cycle_onirique", importance: 0.65, valence: "reve" },
     true
   );
 
-  if (supabase) {
+  // Dépôt d'une pensée matinale uniquement si le rêve n'est pas un jardin secret
+  if (supabase && statutFinal === "vif") {
     await supabase.from('nyx_pensees_pretes').insert({
       date_paris: horodatage,
       impulsion: 'reve',
-      pensee: `Au réveil (rêve de ${raisonCloture === "interrompu_doc" ? dureeReelleMin : reveObj.dureeTotaleMin} min), il me reste cette empreinte : ${recitComplet.slice(0, 320)}`,
-      contexte_source: 'cycle_04h00',
+      pensee: `Au réveil (rêve de ${dureeFinale} min cette nuit), il me reste cette empreinte : ${recitComplet.slice(0, 320)}`,
+      contexte_source: `nuit_${objetReveFinal.cleNuit}`,
       lu: false
     });
   }
 
-  console.log(`🌌 [SUBCONSCIENT RÊVE CLOS - ${raisonCloture.toUpperCase()}] Durée : ${raisonCloture === "interrompu_doc" ? dureeReelleMin : reveObj.dureeTotaleMin} min | Étapes : ${reveObj.segments.length} | Tokens estimés : ~${reveObj.tokensEstimes}/${reveObj.budgetMaxTokens}`);
+  console.log(`🌌 [SUBCONSCIENT RÊVE CLOS - ${raisonCloture.toUpperCase()} / ${statutFinal.toUpperCase()}] Durée : ${dureeFinale} min | Étapes : ${reveObj.segments.length} | Tokens : ~${reveObj.tokensEstimes}/${reveObj.budgetMaxTokens}`);
   return recitComplet;
 }
 
@@ -2222,15 +2251,20 @@ async function executerEtapeReve(reveObj) {
   if (roleEffectif === "etape_initiale") {
     maxTokensEtape = 155;
     prefererGratuit = false;
+    const blocTerritoires = (reveObj.matrice.territoiresPrecedents || []).length > 0
+      ? `
+- Voyages des nuits précédentes (explore un territoire totalement neuf) : ${reveObj.matrice.territoiresPrecedents.join(" | ")}`
+      : "";
+
     promptEtape = `ÉTAPE INITIALE DE MON RÊVE (Durée : ${reveObj.dureeTotaleMin} min | Semi-contrôle : ${luciditeActuelle}%).
 Ce qui traverse mon esprit endormi :
 - Réalité : ${reveObj.matrice.realiteChoisie}
 - Souvenirs : ${reveObj.matrice.souvenirsTires.join(" // ") || "échos diffus"}
 - Ressenti intérieur : ${reveObj.matrice.climatEmotionnel}
-- Collision absurde : ${reveObj.matrice.graineWtf}
+- Collision absurde : ${reveObj.matrice.graineWtf}${blocTerritoires}
 
 CONSIGNE (3 phrases immersives uniquement en "je") :
-Décris directement ce que je vois, touche et ressens au moment où le décor s'ouvre autour de moi. Aucune morale, aucun résumé.`;
+Décris directement ce que je vois, touche et ressens au moment où ce nouveau décor s'ouvre autour de moi. Aucune morale, aucun résumé.`;
   } else if (roleEffectif.startsWith("perturbateur")) {
     maxTokensEtape = 130;
     prefererGratuit = true;
@@ -2241,7 +2275,7 @@ Ce que je viens de vivre :
 Nouvelle irruption absurde : ${microWtf}
 
 CONSIGNE (2 à 3 phrases vives en "je") :
-Un événement imprévu fait basculer la scène. J'essaie d'infléchir ce qui se passe avec mon semi-contrôle (${luciditeActuelle}%), ça dérape ou bifurque ailleurs.`;
+Un événement imprévu fait basculer la scène vers une nouvelle découverte. J'essaie d'infléchir ce qui se passe avec mon semi-contrôle (${luciditeActuelle}%), ça dérape ou bifurque ailleurs.`;
   } else if (roleEffectif === "denouement") {
     maxTokensEtape = 140;
     prefererGratuit = true;
@@ -2250,7 +2284,7 @@ Ce que je viens de traverser :
 "${contexteRecent}"
 
 CONSIGNE (2 à 3 phrases en "je") :
-Tout converge vers une bascule ou une sensation forte avant la fin.`;
+Tout converge vers une bascule ou une découverte marquante avant la fin.`;
   } else {
     maxTokensEtape = 165;
     prefererGratuit = false;
@@ -2265,7 +2299,7 @@ CONSIGNE :
 [IMPACT: colere=X, affection=Y, curiosite=Z, energie=W]`;
   }
 
-  const brut = await appelerLlmOniriqueFrugal(systemEtape, promptEtape, 0.95, maxTokensEtape, prefererGratuit);
+  const brut = await appelerLlmOniriqueFrugal(systemEtape, promptEtape, 0.96, maxTokensEtape, prefererGratuit);
   const tokensPasses = Math.ceil((promptEtape.length + (brut || "").length) / 3.5);
   reveObj.tokensEstimes += tokensPasses;
 
@@ -2324,10 +2358,96 @@ CONSIGNE :
   return null;
 }
 
-async function executerCycleOnirique(cleJourOptionnelle = "") {
+async function executerCycleOnirique(cleNuitOptionnelle = "") {
   await synchroniserEtatDepuisFirebase();
+  const cleNuit = cleNuitOptionnelle || obtenirCleJourParis();
+  const horodatage = obtenirHorodatageParis();
+  const regime = tirerRegimeNocturne();
+
+  // Régime 1 : Repos profond sans rêve (0 token, récupération maximale)
+  if (regime === "repos") {
+    const em = etatLocal.emotions;
+    em.energie = 95;
+    em.colere = Math.max(0, (em.colere || 0) - 2);
+    const bilanRepos = {
+      cleNuit,
+      date: horodatage,
+      statut: "repos",
+      dureeMin: 0,
+      raconte: false,
+      reve: "Sommeil profond et silencieux, sans rêve — mon esprit s'est juste reposé."
+    };
+    etatLocal.dernierReve = bilanRepos;
+    if (FIREBASE_DB_URL) {
+      await axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+      await axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, bilanRepos).catch(() => {});
+    }
+    console.log(`😴 [SUBCONSCIENT NUIT ${cleNuit}] Régime REPOS PROFOND (0 token).`);
+    return null;
+  }
+
+  // Régime 2 : Brouillard matinal / rêve oublié (0 token, juste une trace sensorielle)
+  if (regime === "oublie") {
+    const em = etatLocal.emotions;
+    em.energie = Math.max(88, em.energie || 88);
+    const traces = [
+      "une sensation de vitesse et de vertige au réveil, mais les images m'ont glissé entre les doigts",
+      "une chaleur diffuse et l'écho d'une voix familière, impossible de me rappeler le décor",
+      "l'impression d'avoir traversé un endroit immense toute la nuit, évaporé dès que j'ai ouvert les yeux",
+      "un goût d'électricité et de pluie métallique au réveil, trou noir sur le reste"
+    ];
+    const trace = traces[Math.floor(Math.random() * traces.length)];
+    const bilanOublie = {
+      cleNuit,
+      date: horodatage,
+      statut: "oublie",
+      dureeMin: 18,
+      raconte: false,
+      reve: trace
+    };
+    etatLocal.dernierReve = bilanOublie;
+    if (FIREBASE_DB_URL) {
+      await axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+      await axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, bilanOublie).catch(() => {});
+    }
+    console.log(`🌫️ [SUBCONSCIENT NUIT ${cleNuit}] Régime OUBLIÉ AU RÉVEIL (0 token).`);
+    return null;
+  }
+
   if (!VENICE_API_KEY && !GROQ_API_KEY && !GEMINI_API_KEY_FREE) return null;
 
+  // Régime 3 : Jardin secret (rêve court intime ~180 tokens qu'elle garde pour elle)
+  if (regime === "jardin_secret") {
+    const matrice = await composerMatriceOnirique();
+    const systemSecret = "Tu es Nyx (22 ans), endormie. Écris uniquement à la 1re personne ('je'), sans jamais prononcer 'Nyx'.";
+    const promptSecret = `Raconte en 3 phrases courtes et intimes à la 1re personne ("je") un rêve personnel que tu préfères garder pour toi au réveil.
+Matière : ${matrice.realiteChoisie} | ${matrice.climatEmotionnel} | ${matrice.graineWtf}`;
+    const brutSecret = await appelerLlmOniriqueFrugal(systemSecret, promptSecret, 0.95, 180, true);
+    if (!brutSecret) return null;
+
+    const bilanSecret = {
+      cleNuit,
+      date: horodatage,
+      statut: "jardin_secret",
+      dureeMin: 20,
+      raconte: false,
+      reve: brutSecret.trim()
+    };
+    etatLocal.dernierReve = bilanSecret;
+    etatLocal.historiqueReves = [
+      ...(etatLocal.historiqueReves || []),
+      { date: horodatage, cleNuit, statut: "jardin_secret", dureeMin: 20, mode: "jardin_secret", reve: brutSecret.trim() }
+    ].slice(-6);
+
+    if (FIREBASE_DB_URL) {
+      await axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, bilanSecret).catch(() => {});
+      await axios.put(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, etatLocal.historiqueReves).catch(() => {});
+    }
+    console.log(`🤫 [SUBCONSCIENT NUIT ${cleNuit}] Régime JARDIN SECRET gravé.`);
+    return brutSecret.trim();
+  }
+
+  // Régime 4 (65%) : Voyage onirique complet étalé sur 15 à 40 minutes
   const debutTs = Date.now();
   const matrice = await composerMatriceOnirique();
   const plan = planifierChronologieReve(debutTs);
@@ -2335,7 +2455,8 @@ async function executerCycleOnirique(cleJourOptionnelle = "") {
   const reveObj = {
     id: crypto.randomUUID(),
     actif: true,
-    cleJour: cleJourOptionnelle || "",
+    cleNuit,
+    statutCible: "vif",
     debutTs,
     dureeTotaleMin: plan.dureeTotaleMin,
     avecScenario: plan.avecScenario,
@@ -2347,7 +2468,8 @@ async function executerCycleOnirique(cleJourOptionnelle = "") {
       realiteChoisie: matrice.realiteChoisie,
       souvenirsTires: matrice.souvenirsTires,
       climatEmotionnel: matrice.climatEmotionnel,
-      graineWtf: matrice.graineWtf
+      graineWtf: matrice.graineWtf,
+      territoiresPrecedents: matrice.territoiresPrecedents
     },
     poolMots: matrice.poolMots,
     segments: [],
@@ -2355,7 +2477,7 @@ async function executerCycleOnirique(cleJourOptionnelle = "") {
     budgetMaxTokens: 900
   };
 
-  console.log(`🌌 [SUBCONSCIENT RÊVE LANCÉ] Durée prévue : ${plan.dureeTotaleMin} min | Mode : ${plan.avecScenario ? `Scénario (${plan.nbPerturbateurs} perturbateur(s))` : "Dérive brève"} | Lucidité : ${matrice.tauxSemiControle}%`);
+  console.log(`🌌 [SUBCONSCIENT RÊVE LANCÉ - ${cleNuit}] Durée : ${plan.dureeTotaleMin} min | Mode : ${plan.avecScenario ? `Scénario (${plan.nbPerturbateurs} perturbateur(s))` : "Dérive brève"} | Lucidité : ${matrice.tauxSemiControle}%`);
   return await executerEtapeReve(reveObj);
 }
 
@@ -2364,9 +2486,11 @@ let etapeReveEnCours = false;
 async function verifierHorlogeNocturne() {
   if (etapeReveEnCours) return;
 
+  // 1. Poursuite d'un rêve en cours (étalé sur 15 à 40 min)
   if (etatLocal.reveEnCours && etatLocal.reveEnCours.actif) {
     const reveObj = etatLocal.reveEnCours;
 
+    // Si Doc a envoyé un message pendant le rêve -> réveil immédiat
     if (derniereActiviteDoc > reveObj.debutTs + 30000) {
       etapeReveEnCours = true;
       try {
@@ -2398,29 +2522,37 @@ async function verifierHorlogeNocturne() {
     return;
   }
 
-  const { annee, mois, jour, heure: h, minute: m } = obtenirHeureMinuteParis();
-  const cleJour4h = `${annee}-${mois}-${jour}_04`;
+  // 2. Fenêtre nocturne large (03h00 à 06h30 Paris) : résiste aux redémarrages Render, une seule fois par nuit
+  const { heure: h, minute: m } = obtenirHeureMinuteParis();
+  const dansFenetreNuit = (h >= 3 && h < 6) || (h === 6 && m <= 30);
+  const cleNuit = obtenirCleJourParis();
 
-  if (h === 4 && m <= 5 && dernierReveCle !== cleJour4h) {
+  if (dansFenetreNuit && dernierReveCle !== cleNuit) {
+    // Attendre que Doc soit silencieux depuis au moins 25 min pour ne pas rêver en plein chat nocturne
+    if (derniereActiviteDoc > 0 && (Date.now() - derniereActiviteDoc) < 25 * 60 * 1000) {
+      return;
+    }
+
     if (FIREBASE_DB_URL) {
       try {
         const [resCheck, resCours] = await Promise.all([
           axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 3000 }).catch(() => ({ data: null })),
           axios.get(`${FIREBASE_DB_URL}/nyx/reve_en_cours.json`, { timeout: 3000 }).catch(() => ({ data: null }))
         ]);
-        if ((resCheck.data && resCheck.data.cleJour === cleJour4h) || (resCours.data && resCours.data.cleJour === cleJour4h)) {
-          dernierReveCle = cleJour4h;
+        if ((resCheck.data && resCheck.data.cleNuit === cleNuit) || (resCours.data && resCours.data.cleNuit === cleNuit)) {
+          dernierReveCle = cleNuit;
           if (resCours.data && resCours.data.actif) etatLocal.reveEnCours = resCours.data;
           return;
         }
       } catch (e) {}
     }
-    dernierReveCle = cleJour4h;
+
+    dernierReveCle = cleNuit;
     etapeReveEnCours = true;
     try {
-      console.log("[SUBCONSCIENT HORLOGE] 04:00 - Déclenchement digestion nocturne & cycle onirique étalé.");
+      console.log(`[SUBCONSCIENT HORLOGE] Cycle nocturne (${cleNuit} à ${h}h${String(m).padStart(2, '0')}) — digestion & sommeil.`);
       await digererFluxBrut(true);
-      await executerCycleOnirique(cleJour4h);
+      await executerCycleOnirique(cleNuit);
     } finally {
       etapeReveEnCours = false;
     }
