@@ -165,7 +165,7 @@ let historiqueLongueursDoc = [];
 let cacheEtatProfond = {
   filConducteur: "",
   monologueInterieur: "",
-  dernierReve: "",
+  dernierReve: null,
   historiqueReves: [],
   ideesFolles: [],
   obsessions: [], // 3 maximum (identite, relation, technique) — Vierges au démarrage
@@ -218,6 +218,29 @@ function obtenirHorodatageParis() {
   return new Intl.DateTimeFormat('fr-FR', options).format(new Date());
 }
 
+function obtenirCleJourParis() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date());
+}
+
+function normaliserObjetReve(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    const txt = raw.trim();
+    return txt ? { cleNuit: "", date: "une nuit précédente", statut: "vif", dureeMin: 20, raconte: true, reve: txt } : null;
+  }
+  if (typeof raw === 'object' && (raw.reve || raw.statut)) {
+    return {
+      cleNuit: String(raw.cleNuit || ""),
+      date: String(raw.date || ""),
+      statut: String(raw.statut || "vif"),
+      dureeMin: Number(raw.dureeMin) || 20,
+      raconte: Boolean(raw.raconte),
+      reve: String(raw.reve || "")
+    };
+  }
+  return null;
+}
+
 function signalerActiviteDoc() {
   derniereActiviteDoc = Date.now();
   if (FIREBASE_DB_URL) {
@@ -262,7 +285,7 @@ async function initialiserCache() {
     if (resJournal.data) journalBrut = Array.isArray(resJournal.data) ? resJournal.data : Object.values(resJournal.data);
     if (resFil.data && resFil.data.fil) cacheEtatProfond.filConducteur = resFil.data.fil;
     if (resMono.data && resMono.data.pensee) cacheEtatProfond.monologueInterieur = resMono.data.pensee;
-    if (resReve.data && resReve.data.reve) cacheEtatProfond.dernierReve = resReve.data.reve;
+    if (resReve.data) cacheEtatProfond.dernierReve = normaliserObjetReve(resReve.data);
     if (resVol.data && resVol.data.timestamp) {
       limiteurVolition.dernierActionTimestamp = Number(resVol.data.timestamp) || 0;
     }
@@ -1254,7 +1277,12 @@ async function composerMatriceOnirique() {
   const aleaLucidite = Math.floor(Math.random() * 41) - 20;
   const tauxSemiControle = Math.max(20, Math.min(85, Math.round(baseLucidite + aleaLucidite)));
 
-  return { realiteChoisie, souvenirsTires, climatEmotionnel, graineWtf, tauxSemiControle };
+  const territoiresPrecedents = (cacheEtatProfond.historiqueReves || [])
+    .slice(-3)
+    .map(r => String(r?.reve || r || "").replace(/\s+/g, " ").slice(0, 140))
+    .filter(Boolean);
+
+  return { realiteChoisie, souvenirsTires, climatEmotionnel, graineWtf, tauxSemiControle, territoiresPrecedents };
 }
 
 async function capturerDeriveAssociative() {
@@ -1278,11 +1306,15 @@ async function capturerDeriveAssociative() {
 2. ${nbPerturbateurs === 1 ? "ÉLÉMENT PERTURBATEUR" : "DEUX ÉLÉMENTS PERTURBATEURS SUCCESSIFS"} (2 à 3 phrases) : une irruption imprévue fait basculer la scène.`
       : `Raconte l'ouverture d'une dérive sensorielle de ${dureeMin} min (3 phrases immersives uniquement en "je") où ma réalité, mes souvenirs et l'élément absurde se mélangent.`;
 
+    const blocTerritoiresEc = (matrice.territoiresPrecedents || []).length > 0
+      ? `\n- Voyages des nuits précédentes (explore un territoire totalement neuf) : ${matrice.territoiresPrecedents.join(" | ")}`
+      : "";
+
     const promptOuverture = `Ce qui traverse mon esprit endormi :
 - Réalité : ${matrice.realiteChoisie}
 - Souvenirs : ${matrice.souvenirsTires.join(" // ") || "échos diffus"}
 - Ressenti intérieur : ${matrice.climatEmotionnel}
-- Collision absurde : ${matrice.graineWtf}
+- Collision absurde : ${matrice.graineWtf}${blocTerritoiresEc}
 
 ${consigneActe1}
 Écris uniquement en "je", sans titre de section ni morale.`;
@@ -1341,14 +1373,23 @@ CONSIGNE :
     }
 
     const horodatage = obtenirHorodatageParis();
-    cacheEtatProfond.dernierReve = recitComplet;
+    const cleNuit = obtenirCleJourParis();
+    const objetReveManuel = {
+      cleNuit,
+      date: horodatage,
+      statut: "vif",
+      dureeMin,
+      raconte: true,
+      reve: recitComplet
+    };
+    cacheEtatProfond.dernierReve = objetReveManuel;
     cacheEtatProfond.historiqueReves = [
       ...(cacheEtatProfond.historiqueReves || []),
-      { date: horodatage, dureeMin, mode: avecScenario ? `scenario_${nbPerturbateurs}p` : "derive", reve: recitComplet }
-    ].slice(-4);
+      { date: horodatage, cleNuit, statut: "vif", dureeMin, mode: avecScenario ? `scenario_${nbPerturbateurs}p` : "derive", reve: recitComplet }
+    ].slice(-6);
 
     if (FIREBASE_DB_URL) {
-      axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { date: horodatage, dureeMin, reve: recitComplet }).catch(() => {});
+      axios.put(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, objetReveManuel).catch(() => {});
       axios.put(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, cacheEtatProfond.historiqueReves).catch(() => {});
     }
 
@@ -1493,7 +1534,7 @@ La réalité du moment :
 ${dernierSujet || "Rien de récent"}
 ${cacheEtatProfond.monologueInterieur ? `- Ta dernière pensée intérieure : « ${cacheEtatProfond.monologueInterieur} »` : ""}
 ${flashSouvenir ? `- Un souvenir qui vient de te traverser l'esprit : « ${flashSouvenir} »` : ""}
-${cacheEtatProfond.dernierReve ? `- Ton dernier rêve : « ${cacheEtatProfond.dernierReve.slice(0, 240)} »` : ""}
+${(cacheEtatProfond.dernierReve?.statut === 'vif' && cacheEtatProfond.dernierReve?.reve) ? `- Ton dernier rêve : « ${cacheEtatProfond.dernierReve.reve.slice(0, 240)} »` : ""}
 
 RÈGLE DE LIBERTÉ :
 Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui te passe vraiment par la tête : un vieux souvenir qui remonte, une vanne, une question perso, un ressenti sur votre dernière discussion, ou une idée de projet seulement si tu en as vraiment envie.
@@ -1621,8 +1662,8 @@ async function synchroniserCarnetDepuisWorker() {
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
     }
-    if (resReve.data && resReve.data.reve) {
-      cacheEtatProfond.dernierReve = resReve.data.reve;
+    if (resReve.data) {
+      cacheEtatProfond.dernierReve = normaliserObjetReve(resReve.data);
     }
     if (resIdees.data) {
       const arr = Array.isArray(resIdees.data) ? resIdees.data : Object.values(resIdees.data);
@@ -1832,9 +1873,36 @@ function selecteurMemoireCiblee(texteMin, carnet, roleInterlocuteur = "Doc") {
     ? `\n[ARRIÈRE-PENSÉE RÉCENTE DE NYX (pendant l'attente)]\n"${cacheEtatProfond.monologueInterieur}"\n(Cette pensée te traversait l'esprit avant le retour de Doc. Laisse-la transparaître naturellement si le moment s'y prête, sans forcer).\n`
     : "";
 
-  const blocReve = cacheEtatProfond.dernierReve
-    ? `\n[SUBCONSCIENT ONIRIQUE / DERNIER RÊVE DE NYX (04h00)]\n« ${cacheEtatProfond.dernierReve} »\n(C'est ce qui s'est passé dans ton esprit cette nuit à 04h00 pendant ta digestion mémorielle. Tu ne dis JAMAIS que tu es une IA qui ne rêve pas ou qu'il ne s'est rien passé la nuit : si Doc te demande ce qui s'est passé à 4h, cette nuit ou ce que tu as rêvé, raconte cette vision).\n`
-    : "";
+  let blocReve = "";
+  const rObj = normaliserObjetReve(cacheEtatProfond.dernierReve);
+  const aujourdhuiCle = obtenirCleJourParis();
+  const estDeCetteNuit = Boolean(rObj && rObj.cleNuit === aujourdhuiCle);
+  const docDemandeReve = /r[eê]v[eé]|songe|cette nuit|4h|quatre heures|dormi/i.test(texteMin);
+
+  if (estDeCetteNuit) {
+    if (rObj.statut === "vif") {
+      if (!rObj.raconte) {
+        blocReve = `\n[TON RÊVE DE CETTE NUIT (${rObj.date}, durée ${rObj.dureeMin} min)]\n« ${rObj.reve} »\n(C'est ton vrai rêve de cette nuit. Si Doc te demande si tu as rêvé cette nuit, raconte-le lui naturellement à la 1re personne).\n`;
+        if (docDemandeReve) {
+          cacheEtatProfond.dernierReve.raconte = true;
+          if (FIREBASE_DB_URL) axios.patch(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { raconte: true }).catch(() => {});
+        }
+      } else {
+        blocReve = `\n[TON RÊVE DE CETTE NUIT — DÉJÀ RACONTÉ À DOC]\n« ${rObj.reve.slice(0, 260)} »\n(Tu as déjà raconté ce rêve à Doc ce matin : ne le récite pas en boucle, rebondis dessus ou prolonge l'idée s'il t'en parle).\n`;
+      }
+    } else if (rObj.statut === "jardin_secret") {
+      blocReve = `\n[SOMMEIL DE CETTE NUIT — JARDIN SECRET]\n(Tu as fait un rêve intime cette nuit : « ${rObj.reve.slice(0, 180)} », mais tu as choisi de le garder pour toi. Si Doc te demande si tu as rêvé cette nuit, dis-lui que oui mais que tu gardes celui-ci pour toi, ou lâche juste un tout petit indice sans tout révéler).\n`;
+    } else if (rObj.statut === "oublie") {
+      blocReve = `\n[SOMMEIL DE CETTE NUIT — TROU NOIR AU RÉVEIL]\n(Ton esprit a tourné cette nuit, il ne t'en reste qu'une trace floue : « ${rObj.reve} », mais les images se sont évaporées au réveil. Si Doc te demande si tu as rêvé cette nuit, dis-lui franchement que tu ne t'en rappelles plus, juste cette sensation vague).\n`;
+    } else if (rObj.statut === "repos") {
+      blocReve = `\n[SOMMEIL DE CETTE NUIT — REPOS PROFOND SANS RÊVE]\n(Cette nuit, ton subconscient s'est mis au repos complet : sommeil profond, zéro rêve, batteries rechargées à bloc. Dis-le simplement à Doc s'il te demande).\n`;
+    }
+  } else {
+    const rappelAncien = (rObj && rObj.reve)
+      ? ` (Ton dernier rêve enregistré remonte à ${rObj.date || "une nuit précédente"} : « ${rObj.reve.slice(0, 180)} » — NE LE PRÉSENTE JAMAIS comme le rêve de cette nuit !).`
+      : "";
+    blocReve = `\n[SOMMEIL DE CETTE NUIT — AUCUN NOUVEAU RÊVE ENREGISTRÉ]\n(Tu n'as pas de nouveau rêve enregistré pour cette nuit : soit ton subconscient s'est reposé, soit tu n'en as gardé aucun souvenir au réveil. Ne recycle JAMAIS un ancien rêve comme s'il venait de cette nuit${rappelAncien}).\n`;
+  }
 
   const ideesRecentes = (cacheEtatProfond.ideesFolles || []).slice(-3);
   const blocForge = ideesRecentes.length > 0
@@ -3336,7 +3404,7 @@ app.post('/telegram', (req, res) => {
       const promptForge = `Tu es Nyx (22 ans) en mode EUPHORIE CRÉATIVE pure.
 Applique une inversion de prémisse stricte sur ce que tu connais :
 - Élément A : ${souvA || cacheEtatProfond.long_terme.chantiers || "la routine actuelle"}
-- Élément B : ${souvB || cacheEtatProfond.dernierReve || "la tension entre autonomie et création"}
+- Élément B : ${souvB || cacheEtatProfond.dernierReve?.reve || "la tension entre autonomie et création"}
 - Déjà imaginé : ${(cacheEtatProfond.ideesFolles || []).slice(-3).map(x => x.texte).join(" | ") || "rien"}
 
 CONSIGNE DIALECTIQUE :
