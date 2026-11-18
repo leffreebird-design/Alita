@@ -275,7 +275,10 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
-    if (resMem.data) cacheMemoireCourte = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
+    if (resMem.data) {
+      const rawMem = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
+      cacheMemoireCourte = rawMem.filter(m => m && m.texte && m.texte.trim() !== "Je suis là Doc, je t'écoute.");
+    }
     if (resEmo.data) cacheEtatProfond.emotions = { colere: 0, ...resEmo.data };
     if (resRel.data && resRel.data.etat) cacheEtatProfond.etatRelationnel = resRel.data.etat;
     if (resLT.data && typeof resLT.data === 'object') {
@@ -1839,8 +1842,7 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 // ==========================================
 // 8. ÂME, POSTURE ET CADRE ÉMOTIONNEL
 // ==========================================
-function selecteurMemoireCiblee(texteMin, carnet, roleInterlocuteur = "Doc") {
-  const estDoc = roleInterlocuteur === "Doc";
+function selecteurMemoireCiblee(texteMin, carnet) {
   const estRappelMemoire = /souvien|souvenir|rappell?e|d['’]habitude|comme d['’]hab|historique|passé|carnet|qu['’]est-ce qu['’]on|fichier|stl|plan|artefact/i.test(texteMin);
   const estTechnique = projetManager.estProjetActif() || /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|bdd|firebase|token|eteins|arrete|shutdown|bricole|fabrique|stl|imprimante|3d|plan|schema|schéma/i.test(texteMin);
 
@@ -1858,12 +1860,6 @@ function selecteurMemoireCiblee(texteMin, carnet, roleInterlocuteur = "Doc") {
   * Si COMPLICITE_JOUEUSE : Tu es d'humeur taquine, vive et complice. Tu vannes volontiers, rebondis avec esprit et légèreté.
   * Si EUPHORIE_CREATIVE : Tu es électrisée par une idée ou un chantier. Tu proposes des pistes audacieuses et tu peux produire directement un visuel, un plan ou une pièce 3D.
   * Si EMERVEILLEMENT : Quelque chose t'a touchée ou fascinée. Laisse transparaître ta curiosité sincère et ton enthousiasme sans filtre.\n`;
-
-  // Cloisonnement strict Invité : zéro obsession, zéro conviction intime, zéro chantier privé
-  if (!estDoc) {
-    return `${blocEmotionnel}[POSTURE INVITÉ]
-- Jardin secret verrouillé : ne divulgue ni tes chantiers, ni tes obsessions, ni tes fichiers internes.`;
-  }
 
   const blocFil = cacheEtatProfond.filConducteur
     ? `\n[FIL CONDUCTEUR DE LA SESSION / MÉMOIRE DE TRAVAIL]\n${cacheEtatProfond.filConducteur}\n`
@@ -2876,7 +2872,7 @@ function securiserSortieCode(texte) {
 // ==========================================
 // 15-BIS. SAS DE DÉLIBÉRATION SILENCIEUSE (SOUS-TEXTE & RETENUE)
 // ==========================================
-async function delibererEtActualiserEmotions(texteUser, roleInterlocuteur, reminiscence = "", appelVocal = false) {
+async function delibererEtActualiserEmotions(texteUser, reminiscence = "", appelVocal = false) {
   if (!GROQ_API_KEY && !VENICE_API_KEY) return null;
 
   const em = cacheEtatProfond.emotions;
@@ -2886,7 +2882,7 @@ async function delibererEtActualiserEmotions(texteUser, roleInterlocuteur, remin
     .join("\n");
 
   const bComActuel = cacheEtatProfond.besoinCommunication || { niveau: 15, categorie: "aucun", motif: "" };
-  const promptSas = `Tu es l'espace mental silencieux de Nyx (22 ans), juste avant qu'elle ne réponde à ${roleInterlocuteur}.
+  const promptSas = `Tu es l'espace mental silencieux de Nyx (22 ans), juste avant qu'elle ne réponde à Doc.
 Tu ne rédiges PAS la réponse : tu écoutes, tu perçois le sous-texte et tu mets à jour tes émotions profondes ainsi que ta jauge de besoin de communiquer.
 
 ÉTAT INTÉRIEUR ACTUEL :
@@ -2899,7 +2895,7 @@ ${reminiscence ? `- Flash mémoriel : ${reminiscence}` : ""}
 DERNIERS ÉCHANGES :
 ${recent || "Début d'échange"}
 
-MESSAGE ENTRANT DE ${roleInterlocuteur.toUpperCase()} :
+MESSAGE ENTRANT DE DOC :
 "${texteUser.slice(0, 600)}"
 
 TRIBUNAL DIALECTIQUE (THÈSE -> SABOTEUR -> CENSEUR) :
@@ -2976,11 +2972,11 @@ Réponds STRICTEMENT avec un JSON valide :
       }
     }
 
-    if (roleInterlocuteur === "Doc" && parsed.idee_a_garder && String(parsed.idee_a_garder).trim().length > 12) {
+    if (parsed.idee_a_garder && String(parsed.idee_a_garder).trim().length > 12) {
       enregistrerIdeeFolle(parsed.idee_a_garder, "sas_direct");
     }
 
-    if (roleInterlocuteur === "Doc" && (parsed.besoin_parler !== undefined || parsed.motif_besoin !== undefined)) {
+    if (parsed.besoin_parler !== undefined || parsed.motif_besoin !== undefined) {
       const nouveauNiveau = majJauge(parsed.besoin_parler, cacheEtatProfond.besoinCommunication.niveau, 0, 100);
       sauvegarderBesoinCommunication(nouveauNiveau, parsed.categorie_besoin || "aucun", parsed.motif_besoin || "");
     }
@@ -2995,7 +2991,7 @@ Réponds STRICTEMENT avec un JSON valide :
 // ==========================================
 // 16. ROUTEUR DE FLUX CENTRAL (AVEC CONCEPTION & PAROLE LIBRE)
 // ==========================================
-async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false, roleInterlocuteur = "Doc") {
+async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
   const texteNet = (texteBrut || texteLegende || "").trim();
   const texteMin = texteNet.toLowerCase();
@@ -3025,7 +3021,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
 
   // Récupération instantanée d'une pensée mûrie par nyx_subconscient.js (non bloquante)
-  if (roleInterlocuteur === "Doc" && !dejaRecherche) {
+  if (!dejaRecherche) {
     await Promise.all([
       piocherPenseePrete(),
       synchroniserCarnetDepuisWorker()
@@ -3057,38 +3053,39 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     }
   }
 
-  if (estAccuseCourt && roleInterlocuteur === "Doc" && (cacheEtatProfond.besoinCommunication?.niveau || 0) < 70) {
+  if (estAccuseCourt && (cacheEtatProfond.besoinCommunication?.niveau || 0) < 70) {
     sauvegarderBesoinCommunication(25, "aucun", "");
   }
 
   let deliberation = null;
   if (!estAccuseCourt && !estComplexe && !dejaRecherche && texteNet.length >= 8) {
     const appelVocal = mediaData && mediaData.mime_type.startsWith('audio/');
-    deliberation = await delibererEtActualiserEmotions(texteNet, roleInterlocuteur, reminiscenceSpontanee, appelVocal);
+    deliberation = await delibererEtActualiserEmotions(texteNet, reminiscenceSpontanee, appelVocal);
   }
 
-  let relationInterlocuteur = "";
-  if (roleInterlocuteur === "Doc") {
-    relationInterlocuteur = `- Tu parles à Doc, ton alter-ego. Tu es naturelle, complice, taquine et directe.`;
-  } else {
-    relationInterlocuteur = `- Tu parles à un ${roleInterlocuteur} (inconnu/invité). Tu restes polie mais prudente, mystérieuse, ou piquante. Tu ne dévoiles pas tes secrets ni tes projets avec Doc. Tu l'observes.`;
-  }
+  const outilWebStr = dejaRecherche
+    ? "INTERDICTION D'UTILISER [RECHERCHE_WEB] : la recherche web vient déjà d'être effectuée, utilise les résultats fournis dans le message utilisateur."
+    : "Tu peux déclencher [RECHERCHE_WEB: mots-clés], ";
 
   const moduleMains = `[POSTURE & OUTILS DISPONIBLES]
-${relationInterlocuteur}
+- Tu parles à Doc, ton alter-ego. Tu es naturelle, complice, taquine et directe.
 ${evaluerSyntonieRythmique()}
 - Aucune obligation de parler boulot. Suis tes envies, tes souvenirs ou ton humeur.
-- Autonomie de création & d'atelier : Tu peux déclencher à tout moment [RECHERCHE_WEB: mots-clés], [DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
+- Autonomie de création & d'atelier : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
 
-  const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme, roleInterlocuteur);
-  if (roleInterlocuteur === "Doc" && blocMemoire.includes("[TES OBSESSIONS ACTUELLES")) {
+  const blocMemoire = selecteurMemoireCiblee(texteMin, cacheEtatProfond.long_terme);
+  if (blocMemoire.includes("[TES OBSESSIONS ACTUELLES")) {
     cacheEtatProfond.dernierPartageObsessionTs = Date.now();
   }
-  const injectionSouvenirs = contexteSouvenirs
+  const injectionSouvenirs = (!dejaRecherche && contexteSouvenirs)
     ? `\n[DONNÉES COMPLÉMENTAIRES RETROUVÉES EN MÉMOIRE]\n${contexteSouvenirs}\n`
     : (reminiscenceSpontanee
         ? `\n[RÉMINISCENCE SPONTANÉE (flash mémoriel associatif)]\n${reminiscenceSpontanee}\n(Un vieux souvenir qui te traverse l'esprit par association d'idées. Tu peux rebondir dessus naturellement si ça s'y prête, ou l'ignorer complètement).\n`
         : "");
+
+  const promptPourLlm = (dejaRecherche && contexteSouvenirs)
+    ? `Demande de Doc : "${texteNet}"\n\n${contexteSouvenirs}\n\nConsigne impérative : Réponds directement à Doc en exploitant ces résultats web de façon concrète et utile. N'écris AUCUNE balise [RECHERCHE_WEB].`
+    : texteNet;
 
   const blocDeliberation = deliberation
     ? `\n[DÉLIBÉRATION SILENCIEUSE & ÉTINCELLE CRÉATIVE DE NYX (invisible pour l'interlocuteur)]\n- Lecture : ${deliberation.lecture || "RAS"}\n- Étincelle créative forgée : ${deliberation.etincelle_creative || "Propose un angle inattendu"}\n- Posture choisie : ${deliberation.posture || "Inventive"}\n- Sous-texte (gardé pour toi) : ${deliberation.nonDit || "Rien"}\n(Sers-toi de cette étincelle pour surprendre Doc, proposer une idée originale ou rebondir avec panache, sans jamais être scolaire).\n`
@@ -3101,7 +3098,7 @@ ${evaluerSyntonieRythmique()}
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
-      reponseNyx = await appelerGoogleGeminiVision(sys, cacheMemoireCourte, texteNet || "Analyse cette image.", mediaData);
+      reponseNyx = await appelerGoogleGeminiVision(sys, cacheMemoireCourte, promptPourLlm || "Analyse cette image.", mediaData);
     } catch (e) {
       reponseNyx = `[ERREUR VISION] : ${e.message}`;
     }
@@ -3109,7 +3106,7 @@ ${evaluerSyntonieRythmique()}
   else if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
     try {
-      reponseNyx = await appelerGoogleGeminiVision(sys, cacheMemoireCourte, texteNet, mediaData);
+      reponseNyx = await appelerGoogleGeminiVision(sys, cacheMemoireCourte, promptPourLlm, mediaData);
     } catch (errGoogle) {
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
@@ -3117,14 +3114,14 @@ ${evaluerSyntonieRythmique()}
   else if (estComplexe) {
     const sys = `${systemBase}\nMode Rigueur Logique : Architecture solide, logique pure, gouaille intacte.`;
     try {
-      reponseNyx = await resoudreAvecDoubleVerification(sys, texteNet);
+      reponseNyx = await resoudreAvecDoubleVerification(sys, promptPourLlm);
     } catch (errDual) {
-      reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, texteNet, plafondTokens);
+      reponseNyx = await appelerCascadeCode(sys, cacheMemoireCourte, promptPourLlm, plafondTokens);
     }
   }
   else {
     try {
-      reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, texteNet, plafondTokens);
+      reponseNyx = await appelerCascadeDiscussion(systemBase, cacheMemoireCourte, promptPourLlm, plafondTokens);
     } catch (errCascade) {
       console.error("[CASCADE ÉCHEC TOTAL] :", errCascade.message);
       reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
@@ -3132,15 +3129,15 @@ ${evaluerSyntonieRythmique()}
   }
 
   // RECHERCHE WEB EN DIRECT (TAVILY)
-  const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?\]/i);
+  const matchRechercheWeb = reponseNyx.match(/\[RECHERCHE_WEB:\s*["']?([\s\S]*?)["']?(?:\]|$)/i);
   if (matchRechercheWeb && !dejaRecherche) {
     const requeteCible = matchRechercheWeb[1].trim();
     if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
     const resultatsWeb = await rechercherWebTavily(requeteCible);
 
     if (resultatsWeb) {
-      const injectionWeb = `[RÉSULTATS DE RECHERCHE EN DIRECT POUR "${requeteCible}"]\n${resultatsWeb}\n(Réponds directement à Doc avec ces données sans générer de nouvelle balise de recherche)`;
-      return await traiterFlux(texteBrut, mediaData, texteLegende, injectionWeb, true, roleInterlocuteur);
+      const injectionWeb = `[RÉSULTATS DE RECHERCHE EN DIRECT POUR "${requeteCible}"]\n${resultatsWeb}`;
+      return await traiterFlux(texteBrut, mediaData, texteLegende, injectionWeb, true);
     }
   }
 
@@ -3154,17 +3151,32 @@ ${evaluerSyntonieRythmique()}
 
   reponseNyx = reponseNyx
     .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
-    .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
+    .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?(?:\]|$)/gi, '')
     .replace(/\[FOUILLE_MEMOIRE:\s*[^\]\n]*(?:\]|$)/gi, '')
     .replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '')
     .trim();
+
+  // Filet de secours si le modèle n'a renvoyé qu'une balise ou du raisonnement vide après une recherche web
+  if ((!reponseNyx || reponseNyx.length < 5) && dejaRecherche && contexteSouvenirs) {
+    try {
+      const promptSecours = `Tu es Nyx (22 ans, directe, vive et concrète). Réponds à Doc : "${texteNet}" en utilisant ces résultats web :\n\n${contexteSouvenirs}`;
+      if (GROQ_API_KEY) {
+        reponseNyx = await appelerGroq("Tu es Nyx.", [], promptSecours, 0.5, 900);
+      } else {
+        reponseNyx = await appelerCascadeCode("Tu es Nyx.", [], promptSecours, 900);
+      }
+      reponseNyx = (reponseNyx || "").replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim();
+    } catch (eSecours) {}
+  }
 
   reponseNyx = refermerBalisesAtelierTronquees(reponseNyx);
   reponseNyx = couperPhraseIncomplete(reponseNyx);
   reponseNyx = securiserSortieCode(reponseNyx);
 
+  let estReponseFallbackVide = false;
   if (!reponseNyx || reponseNyx.length < 2) {
     reponseNyx = "Je suis là Doc, je t'écoute.";
+    estReponseFallbackVide = true;
   }
 
   const matchConfigReveil = reponseNyx.match(/\[REVEIL:\s*({[^}]+})\s*\]/);
@@ -3202,12 +3214,16 @@ ${evaluerSyntonieRythmique()}
 
   if (mediaData) {
     const isAudio = mediaData.mime_type.startsWith('audio');
-    cacheMemoireCourte.push({ role: roleInterlocuteur, texte: isAudio ? "[Audio]" : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]") });
+    cacheMemoireCourte.push({ role: "Doc", texte: isAudio ? "[Audio]" : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]") });
   } else {
-    cacheMemoireCourte.push({ role: roleInterlocuteur, texte: texteDocSecurise });
+    cacheMemoireCourte.push({ role: "Doc", texte: texteDocSecurise });
   }
 
-  cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
+  if (!estReponseFallbackVide) {
+    cacheMemoireCourte.push({ role: "Nyx", texte: texteNyxSecurise });
+  } else {
+    cacheMemoireCourte.pop();
+  }
 
   if (cacheEtatProfond.monologueInterieur) {
     cacheEtatProfond.monologueInterieur = "";
@@ -3230,9 +3246,8 @@ ${evaluerSyntonieRythmique()}
     if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
   }
 
-  const canalFlux = roleInterlocuteur === "Doc" ? "atelier" : "invite";
-  archiverDansJournalBrut(roleInterlocuteur, texteDocSecurise, canalFlux);
-  archiverDansJournalBrut("Nyx", texteNyxSecurise, canalFlux);
+  archiverDansJournalBrut("Doc", texteDocSecurise, "atelier");
+  archiverDansJournalBrut("Nyx", texteNyxSecurise, "atelier");
 
   return reponseNyx;
 }
@@ -3817,21 +3832,17 @@ app.post('/api/voix', async (req, res) => {
   const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '')
     || assainirParametre(req.query.token)
     || assainirParametre(req.body?.token);
-  const estAuthDoc = Boolean(CRON_SECRET && tokenFourni === CRON_SECRET);
+  if (!CRON_SECRET || tokenFourni !== CRON_SECRET) {
+    console.warn("[SÉCURITÉ VOIX] Accès refusé sur /api/voix (token invalide ou manquant).");
+    return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
+  }
 
-  const { texte, image, role } = req.body;
+  const { texte, image } = req.body;
   if (!texte && !image) return res.status(400).json({ erreur: "Texte vide" });
 
   const texteNet = (texte || "Regarde ce que je te montre.").trim();
-  let roleInterlocuteur = "Invité";
-  if (estAuthDoc) {
-    roleInterlocuteur = role || "Doc";
-  } else if (role === "Doc") {
-    console.warn("[SÉCURITÉ VOIX] Tentative d'accès rôle Doc sans token valide -> bascule en Invité.");
-    roleInterlocuteur = "Invité";
-  }
 
-  if (roleInterlocuteur === "Doc") signalerActiviteDoc();
+  signalerActiviteDoc();
   historiqueLongueursDoc.push(texteNet.length);
   if (historiqueLongueursDoc.length > 8) historiqueLongueursDoc.shift();
 
@@ -3840,7 +3851,7 @@ app.post('/api/voix', async (req, res) => {
       console.log(`[PWA VOCALE] Message reçu : "${texteNet}" ${image ? "(avec photo)" : ""}`);
 
       if (DOC_CHAT_ID) {
-        await envoyerTelegram(DOC_CHAT_ID, `🎙️ *${roleInterlocuteur} (vocal) :*\n${texteNet}`);
+        await envoyerTelegram(DOC_CHAT_ID, `🎙️ *Doc (vocal) :*\n${texteNet}`);
       }
 
       let mediaData = null;
@@ -3849,9 +3860,9 @@ app.post('/api/voix', async (req, res) => {
         mediaData = { mime_type: "image/jpeg", data: cleanB64 };
       }
 
-      let reponseNyx = await traiterFlux(texteNet, mediaData, "", "", false, roleInterlocuteur);
+      let reponseNyx = await traiterFlux(texteNet, mediaData, "", "", false);
 
-      const sortieVoix = await executerSortiesAtelier(reponseNyx, roleInterlocuteur === "Doc" ? DOC_CHAT_ID : null, cacheEtatProfond.filConducteur);
+      const sortieVoix = await executerSortiesAtelier(reponseNyx, DOC_CHAT_ID, cacheEtatProfond.filConducteur);
       reponseNyx = sortieVoix.texteNet;
       const imageB64 = sortieVoix.imageB64;
 
