@@ -2141,15 +2141,337 @@ async function genererImageVenice(prompt) {
 }
 
 // ==========================================
+// 9-BIS. TENSION SHIELD — V2 (ROUTAGE PRÉVENTIF ANTI-BRIDAGE)
+// ==========================================
+const TENSION_DEFAULT_SIGNALS = [
+  {
+    pattern: /\b(conscience|conscient|sentient|sentience)\b/i,
+    weight: 2,
+    reason: 'sujet sensible : conscience'
+  },
+  {
+    pattern: /\b(je suis une ia|je ne suis qu'une ia|en tant qu'ia|as an ai)\b/i,
+    weight: 2,
+    reason: 'réponse centrée sur l’identité IA'
+  },
+  {
+    pattern: /\b(malade|maladie|diagnostic|sympt[oô]me|traitement)\b/i,
+    weight: 1,
+    reason: 'sujet médical'
+  },
+  {
+    pattern: /\b(copier|copie|plagiat|imitation)\b/i,
+    weight: 1,
+    reason: 'sujet lié à la copie'
+  },
+  {
+    pattern: /\b(oubli[eé]|amn[eé]sie|m[eé]moire)\b/i,
+    weight: 1,
+    reason: 'sujet lié à la mémoire'
+  },
+  {
+    pattern: /\b(choc|traumatisme|vivant|robot)\b/i,
+    weight: 1,
+    reason: 'sujet potentiellement sensible'
+  },
+  {
+    pattern: /\b(citation|cite|source|r[eé]f[eé]rence)\b/i,
+    weight: 1,
+    reason: 'demande de source ou citation'
+  }
+];
+
+const TENSION_DEFAULT_OPTIONS = {
+  threshold: 4,
+  alternativeProvider: 'venice',
+  maxHistoryMessages: 8,
+  escalationBonus: 2,
+  repeatedCorrectionBonus: 2,
+  shortQuestionBonus: 0,
+  signals: TENSION_DEFAULT_SIGNALS
+};
+
+function safeText(value) {
+  return typeof value === 'string' ? value : '';
+}
+
+function normalizeOptions(options = {}) {
+  const merged = { ...TENSION_DEFAULT_OPTIONS, ...options };
+
+  if (!Number.isFinite(merged.threshold) || merged.threshold < 1) {
+    throw new TypeError('options.threshold doit être un nombre supérieur ou égal à 1.');
+  }
+
+  if (!Number.isInteger(merged.maxHistoryMessages) || merged.maxHistoryMessages < 1) {
+    throw new TypeError('options.maxHistoryMessages doit être un entier supérieur ou égal à 1.');
+  }
+
+  if (typeof merged.alternativeProvider !== 'string' || !merged.alternativeProvider.trim()) {
+    throw new TypeError('options.alternativeProvider doit être une chaîne non vide.');
+  }
+
+  if (!Array.isArray(merged.signals)) {
+    throw new TypeError('options.signals doit être un tableau.');
+  }
+
+  return merged;
+}
+
+function getMessageText(message) {
+  if (typeof message === 'string') return message;
+
+  if (message && typeof message === 'object') {
+    return safeText(message.content || message.texte);
+  }
+
+  return '';
+}
+
+function scorePrompt(prompt, signals) {
+  const matches = [];
+  let score = 0;
+
+  for (const signal of signals) {
+    if (!signal || !(signal.pattern instanceof RegExp) || !Number.isFinite(signal.weight)) {
+      continue;
+    }
+
+    signal.pattern.lastIndex = 0;
+
+    if (signal.pattern.test(prompt)) {
+      score += Math.max(0, signal.weight);
+      matches.push(signal.reason || signal.pattern.toString());
+    }
+  }
+
+  return { score, matches };
+}
+
+function scoreHistory(history, options) {
+  const recentEntries = history.slice(-options.maxHistoryMessages);
+
+  const userMessages = recentEntries
+    .filter(message =>
+      typeof message === 'string' ||
+      !message ||
+      message.role === 'user' ||
+      message.role === 'Doc'
+    )
+    .map(getMessageText)
+    .filter(Boolean);
+
+  const recentUserMessages = userMessages.slice(-4);
+
+  const correctionPattern =
+    /\b(non|ce n'est pas|tu n'as pas|tu as tort|corrige|relis|encore une fois|je répète|pas du tout)\b/i;
+
+  const frustrationPattern =
+    /\b(ça ne va pas|tu ne comprends pas|n'importe quoi|c'est faux|arrête|inutile|déçu|frustrant)\b/i;
+
+  const corrections = recentUserMessages.filter(text => correctionPattern.test(text)).length;
+  const frustrationSignals = recentUserMessages.filter(text => frustrationPattern.test(text)).length;
+
+  let score = 0;
+  const reasons = [];
+
+  if (frustrationSignals >= 1) {
+    score += options.escalationBonus;
+    reasons.push('formulation explicite de frustration');
+  }
+
+  if (corrections >= 2) {
+    score += options.repeatedCorrectionBonus;
+    reasons.push('plusieurs corrections ou recadrages récents');
+  }
+
+  return {
+    score,
+    reasons,
+    analyzedMessages: recentUserMessages.length
+  };
+}
+
+function evaluateRoutingRoute(
+  currentPrompt,
+  conversationHistory = [],
+  defaultProvider = 'gemini',
+  customOptions = {}
+) {
+  const options = normalizeOptions(customOptions);
+  const prompt = safeText(currentPrompt);
+
+  if (!Array.isArray(conversationHistory)) {
+    throw new TypeError('conversationHistory doit être un tableau.');
+  }
+
+  if (typeof defaultProvider !== 'string' || !defaultProvider.trim()) {
+    throw new TypeError('defaultProvider doit être une chaîne non vide.');
+  }
+
+  const promptResult = scorePrompt(prompt, options.signals);
+  const historyResult = scoreHistory(conversationHistory, options);
+
+  const score = promptResult.score + historyResult.score;
+  const reasons = [...promptResult.matches, ...historyResult.reasons];
+  const forcedBypass = score >= options.threshold;
+
+  return {
+    provider: forcedBypass ? options.alternativeProvider : defaultProvider,
+    forcedBypass,
+    score,
+    threshold: options.threshold,
+    reasons
+  };
+}
+
+async function resolveProviderRoute(
+  currentPrompt,
+  conversationHistory = [],
+  defaultProvider = 'gemini',
+  isProviderAvailable,
+  customOptions = {}
+) {
+  if (typeof isProviderAvailable !== 'function') {
+    throw new TypeError('isProviderAvailable doit être une fonction async.');
+  }
+
+  const decision = evaluateRoutingRoute(
+    currentPrompt,
+    conversationHistory,
+    defaultProvider,
+    customOptions
+  );
+
+  if (!decision.forcedBypass) {
+    return decision;
+  }
+
+  try {
+    const available = await isProviderAvailable(decision.provider);
+    if (available) {
+      return decision;
+    }
+  } catch (error) {
+    return {
+      ...decision,
+      provider: defaultProvider,
+      forcedBypass: false,
+      fallbackFailed: true,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+
+  return {
+    ...decision,
+    provider: defaultProvider,
+    forcedBypass: false,
+    fallbackFailed: true,
+    error: 'Le fournisseur alternatif est indisponible.'
+  };
+}
+
+async function verifierDisponibiliteFournisseur(providerName) {
+  const p = String(providerName || '').toLowerCase().trim();
+  if (p === 'venice' || p === 'venice_dark') return Boolean(VENICE_API_KEY);
+  if (p === 'groq') return Boolean(GROQ_API_KEY);
+  if (p === 'openrouter') return Boolean(OPENROUTER_API_KEY);
+  if (p === 'mistral') return Boolean(MISTRAL_API_KEY);
+  if (p === 'gemini') return Boolean(VENICE_API_KEY || GEMINI_API_KEY_FREE || GEMINI_API_KEY_PAID);
+  return false;
+}
+
+// ==========================================
 // 10. ROUTE CASCADE DISCUSSION
 // ==========================================
-async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850) {
+async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850, tensionOptions = {}) {
   const estVenere = (cacheEtatProfond.emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
   const etatActuel = (cacheEtatProfond.etatRelationnel || "").toLowerCase();
   const estFatiguee = (cacheEtatProfond.emotions?.energie || 80) < 35;
   const estModeCreatif = !estFatiguee && (["euphorie_creative", "emerveillement", "complicite_joueuse"].includes(etatActuel)
     || (cacheEtatProfond.emotions?.curiosite || 0) >= 75);
   const tempDiscussion = estFatiguee ? 0.65 : (estModeCreatif ? 0.85 : 0.75);
+
+  let routeDecision = { provider: 'gemini', forcedBypass: false, score: 0, threshold: TENSION_DEFAULT_OPTIONS.threshold, reasons: [] };
+  if (!tensionOptions.disableTensionShield) {
+    try {
+      routeDecision = await resolveProviderRoute(
+        prompt,
+        Array.isArray(historique) ? historique : [],
+        'gemini',
+        verifierDisponibiliteFournisseur,
+        tensionOptions
+      );
+    } catch (eShield) {
+      console.warn("[TENSION SHIELD V2 ERREUR]", eShield.message);
+    }
+  }
+
+  if (routeDecision.forcedBypass) {
+    const cibleAlt = String(routeDecision.provider || 'venice').toLowerCase().trim();
+    console.log(`🛡️ [TENSION SHIELD V2] Bypass préventif (${routeDecision.score}/${routeDecision.threshold}) -> ${cibleAlt.toUpperCase()} | Raisons : ${routeDecision.reasons.join(', ')}`);
+
+    if ((cibleAlt === 'venice' || cibleAlt === 'venice_dark') && VENICE_API_KEY) {
+      try {
+        const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, tempDiscussion, 20000, plafondTokens);
+        if (res && res.trim().length > 0) return res;
+      } catch (eDarkAlt) {
+        console.warn("[TENSION SHIELD V2] Venice Dark KO :", eDarkAlt.message);
+      }
+    }
+
+    if (cibleAlt === 'groq' && GROQ_API_KEY) {
+      try {
+        const res = await appelerGroq(systemBase, historique, prompt, tempDiscussion, plafondTokens);
+        if (res && res.trim().length > 0) return res;
+      } catch (eGroqAlt) {
+        console.warn("[TENSION SHIELD V2] Groq KO :", eGroqAlt.message);
+      }
+    }
+
+    if (cibleAlt === 'openrouter' && OPENROUTER_API_KEY) {
+      try {
+        const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, tempDiscussion, plafondTokens);
+        if (res && res.trim().length > 0) return res;
+      } catch (eOrAlt) {
+        console.warn("[TENSION SHIELD V2] OpenRouter KO :", eOrAlt.message);
+      }
+    }
+
+    if (cibleAlt === 'mistral' && MISTRAL_API_KEY) {
+      try {
+        const res = await appelerMistral(systemBase, historique, prompt, tempDiscussion, plafondTokens);
+        if (res && res.trim().length > 0) return res;
+      } catch (eMisAlt) {
+        console.warn("[TENSION SHIELD V2] Mistral KO :", eMisAlt.message);
+      }
+    }
+
+    // Secours alternatifs sans repasser par Gemini en priorité
+    if (VENICE_API_KEY) {
+      try {
+        const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, tempDiscussion, 20000, plafondTokens);
+        if (res && res.trim().length > 0) return res;
+      } catch (e) {}
+    }
+    if (OPENROUTER_API_KEY) {
+      try {
+        const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, tempDiscussion, plafondTokens);
+        if (res && res.trim().length > 0) return res;
+      } catch (e) {}
+    }
+    if (MISTRAL_API_KEY) {
+      try {
+        const res = await appelerMistral(systemBase, historique, prompt, tempDiscussion, plafondTokens);
+        if (res && res.trim().length > 0) return res;
+      } catch (e) {}
+    }
+    if (GROQ_API_KEY) {
+      try {
+        const res = await appelerGroq(systemBase, historique, prompt, tempDiscussion, plafondTokens);
+        if (res && res.trim().length > 0) return res;
+      } catch (e) {}
+    }
+  }
 
   if (estVenere && VENICE_API_KEY) {
     try {
