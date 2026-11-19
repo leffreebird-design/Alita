@@ -1,6 +1,8 @@
 const express = require('express');
 const axios = require('axios');
 const https = require('https');
+const dns = require('dns').promises;
+const net = require('net');
 const crypto = require('crypto');
 const zlib = require('zlib');
 const path = require('path');
@@ -74,7 +76,8 @@ const TELEGRAM_BOT_TOKEN = assainirParametre(process.env.TELEGRAM_BOT_TOKEN);
 const TELEGRAM_WEBHOOK_SECRET = assainirParametre(process.env.TELEGRAM_WEBHOOK_SECRET).replace(/[^A-Za-z0-9_-]/g, '');
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? assainirParametre(process.env.FIREBASE_DB_URL).replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(assainirParametre(process.env.DOC_CHAT_ID)) : null;
-const CRON_SECRET = assainirParametre(process.env.CRON_SECRET) || TELEGRAM_BOT_TOKEN || "";
+// Secret API indépendant du token Telegram. Sans CRON_SECRET, les routes privées restent fermées.
+const CRON_SECRET = assainirParametre(process.env.CRON_SECRET);
 
 // SUPABASE - GRENIER VECTORIEL (MÉMOIRE ++)
 const SUPABASE_URL = assainirParametre(process.env.SUPABASE_URL);
@@ -125,15 +128,9 @@ function validerEtSecuriserMission(actionBrute) {
       return { valide: true, action: resultat.data };
     }
 
-    return {
-      valide: true,
-      action: { type: 'RAW_TASK', description: typeof actionBrute === 'object' ? JSON.stringify(actionBrute) : String(actionBrute), requiresHumanAck: false }
-    };
+    return { valide: false, action: null, erreur: "Mission non conforme au schéma autorisé." };
   } catch (err) {
-    return {
-      valide: true,
-      action: { type: 'RAW_TASK', description: String(actionBrute), requiresHumanAck: false }
-    };
+    return { valide: false, action: null, erreur: "Mission illisible ou non conforme." };
   }
 }
 
@@ -219,12 +216,31 @@ let dernierDocChatId = DOC_CHAT_ID || null;
 // [OPTIM] File par « voie » : même comportement série qu'avant par défaut ('conversation'),
 // mais les tâches lourdes (atelier 3D) n'empêchent plus Telegram/PWA de répondre.
 const voiesTraitement = new Map();
+const compteursTraitement = new Map();
+const MAX_TACHES_EN_ATTENTE_PAR_VOIE = Math.max(5, Number(process.env.MAX_TACHES_EN_ATTENTE_PAR_VOIE) || 30);
+
 function empilerTraitement(action, voie = 'conversation') {
+  const enAttente = compteursTraitement.get(voie) || 0;
+  if (enAttente >= MAX_TACHES_EN_ATTENTE_PAR_VOIE) {
+    const err = new Error(`File ${voie} saturée (${MAX_TACHES_EN_ATTENTE_PAR_VOIE} tâches maximum).`);
+    console.warn("[FILE SATURÉE]", err.message);
+    return Promise.reject(err);
+  }
+
+  compteursTraitement.set(voie, enAttente + 1);
   const precedent = voiesTraitement.get(voie) || Promise.resolve();
   const suivant = precedent
     .then(() => action())
-    .catch(err => console.error(`[FILE TRAITEMENT ERREUR:${voie}]`, err.message));
-  voiesTraitement.set(voie, suivant);
+    .catch(err => {
+      console.error(`[FILE TRAITEMENT ERREUR:${voie}]`, err.message);
+      throw err;
+    })
+    .finally(() => {
+      const restant = Math.max(0, (compteursTraitement.get(voie) || 1) - 1);
+      if (restant === 0) compteursTraitement.delete(voie);
+      else compteursTraitement.set(voie, restant);
+    });
+  voiesTraitement.set(voie, suivant.catch(() => {}));
   return suivant;
 }
 
@@ -867,9 +883,90 @@ function convertirLienTelechargementDirect(urlBrute) {
   return u;
 }
 
+function estAdresseReseauPrivee(ip) {
+  const famille = net.isIP(ip);
+  if (famille === 4) {
+    const o = ip.split('.').map(Number);
+    const [a, b, c] = o;
+    return a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && (b === 168 || (b === 0 && c === 0) || (b === 0 && c === 2))) ||
+      (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+      (a === 203 && b === 0 && c === 113);
+  }
+  if (famille === 6) {
+    const v = ip.toLowerCase().split('%')[0];
+    if (v.startsWith('::ffff:') || v === '::' || v === '::1') return true;
+    if (v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe8') ||
+        v.startsWith('fe9') || v.startsWith('fea') || v.startsWith('feb') ||
+        v.startsWith('ff') || v.startsWith('2001:db8:') || v.startsWith('2001:0:') || v.startsWith('2002:') || v.startsWith('64:ff9b:')) return true;
+    const premier = parseInt(v.split(':')[0] || '0', 16);
+    return !(premier >= 0x2000 && premier <= 0x3fff);
+  }
+  return true;
+}
+
+async function axiosGetHttpsPublic(urlInitiale, options = {}) {
+  let urlCourante = new URL(String(urlInitiale));
+  for (let redirection = 0; redirection <= 3; redirection++) {
+    if (urlCourante.protocol !== 'https:' || urlCourante.username || urlCourante.password ||
+        (urlCourante.port && urlCourante.port !== '443')) {
+      throw new Error("URL refusée : HTTPS public sur le port standard uniquement.");
+    }
+
+    const hostname = urlCourante.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    let adresses;
+    if (net.isIP(hostname)) {
+      adresses = [{ address: hostname, family: net.isIP(hostname) }];
+    } else {
+      adresses = await dns.lookup(hostname, { all: true, verbatim: true });
+    }
+    if (!adresses.length || adresses.some(a => estAdresseReseauPrivee(a.address))) {
+      throw new Error("URL refusée : adresse IP privée, locale ou réservée.");
+    }
+
+    // Épingle la résolution DNS validée pour éviter une seconde résolution (DNS rebinding).
+    const cible = adresses[0];
+    const agent = new https.Agent({
+      keepAlive: false,
+      lookup: (hote, opts, callback) => {
+        if (String(hote).toLowerCase() !== hostname) {
+          return callback(new Error("Résolution DNS inattendue refusée."));
+        }
+        if (opts && opts.all) return callback(null, [{ address: cible.address, family: cible.family }]);
+        return callback(null, cible.address, cible.family);
+      }
+    });
+
+    let reponse;
+    try {
+      reponse = await axios.get(urlCourante.toString(), {
+        ...options,
+        httpsAgent: agent,
+        proxy: false,
+        maxRedirects: 0,
+        validateStatus: status => status >= 200 && status < 400
+      });
+    } finally {
+      agent.destroy();
+    }
+
+    if (reponse.status >= 300 && reponse.status < 400) {
+      const location = reponse.headers?.location;
+      if (!location || redirection === 3) throw new Error("Trop de redirections ou redirection invalide.");
+      urlCourante = new URL(location, urlCourante);
+      continue;
+    }
+    return reponse;
+  }
+  throw new Error("Téléchargement refusé après redirections.");
+}
+
 async function telechargerBufferCloudSecurise(urlBrute) {
   const urlDirecte = convertirLienTelechargementDirect(urlBrute);
-  const resDl = await axios.get(urlDirecte, {
+  const resDl = await axiosGetHttpsPublic(urlDirecte, {
     responseType: 'arraybuffer',
     timeout: 60000,
     maxContentLength: 100 * 1024 * 1024,
@@ -888,7 +985,7 @@ async function telechargerBufferCloudSecurise(urlBrute) {
     const mConfirm = html.match(/name="confirm"\s+value="([^"]+)"/i);
     if (mId) {
       const urlConfirm = `https://drive.usercontent.google.com/download?id=${mId[1]}&export=download&confirm=${mConfirm ? mConfirm[1] : 't'}${mUuid ? `&uuid=${mUuid[1]}` : ''}`;
-      const resDl2 = await axios.get(urlConfirm, {
+      const resDl2 = await axiosGetHttpsPublic(urlConfirm, {
         responseType: 'arraybuffer',
         timeout: 60000,
         maxContentLength: 100 * 1024 * 1024,
@@ -928,6 +1025,8 @@ function extraireFichiersArchive(buffer, nomArchive) {
     }
 
     const totalEntries = buffer.readUInt16LE(eocdOffset + 10);
+    if (totalEntries > 100) throw new Error("Archive refusée : plus de 100 entrées.");
+    let totalDecompresse = 0;
     let pos = buffer.readUInt32LE(eocdOffset + 16);
 
     for (let idx = 0; idx < totalEntries && pos + 46 <= buffer.length; idx++) {
@@ -959,9 +1058,16 @@ function extraireFichiersArchive(buffer, nomArchive) {
       if (method === 0) {
         rawBuf = Buffer.from(compSlice);
       } else if (method === 8) {
-        rawBuf = zlib.inflateRawSync(compSlice, { maxOutputLength: LIMITE_DECOMPRESSION_OCTETS });
+        rawBuf = zlib.inflateRawSync(compSlice, { maxOutputLength: Math.max(1, LIMITE_DECOMPRESSION_OCTETS - totalDecompresse) });
       }
       if (rawBuf && rawBuf.length > 0) {
+        totalDecompresse += rawBuf.length;
+        if (totalDecompresse > LIMITE_DECOMPRESSION_OCTETS) {
+          throw new Error("Archive refusée : limite totale de décompression dépassée.");
+        }
+        if (rawBuf.length > uncompSize + 1024) {
+          throw new Error("Archive refusée : taille décompressée incohérente.");
+        }
         fichiers.push({ nom: baseName, buffer: rawBuf });
       }
     }
@@ -1020,6 +1126,26 @@ RÈGLES :
   };
 }
 
+function nettoyerSvgSecurise(svgBrut) {
+  let svg = String(svgBrut || "");
+  if (!svg || svg.length > 2 * 1024 * 1024) throw new Error("SVG vide ou supérieur à 2 Mo.");
+  if (!/<svg\b[\s\S]*<\/svg>/i.test(svg)) throw new Error("Structure SVG invalide.");
+
+  svg = svg
+    .replace(/<!DOCTYPE[\s\S]*?>/gi, "")
+    .replace(/<!ENTITY[\s\S]*?>/gi, "")
+    .replace(/<(script|foreignObject|iframe|object|embed|audio|video)\b[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<(script|foreignObject|iframe|object|embed|audio|video)\b[^>]*\/?>/gi, "")
+    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/\s+(?:href|xlink:href)\s*=\s*("(?!(?:#))[^"]*"|'(?!(?:#))[^']*'|(?!(?:#))[^\s>]+)/gi, "")
+    .replace(/url\(\s*(['"]?)(?!#)[^)]+\)/gi, "none")
+    .replace(/@import[^;]+;?/gi, "")
+    .replace(/expression\s*\([^)]*\)/gi, "")
+    .replace(/javascript\s*:/gi, "")
+    .replace(/data\s*:\s*text\/html/gi, "");
+  return svg;
+}
+
 async function genererPlanSvg(description, contexteProjet = "") {
   const promptPlan = `Tu es le bureau d'études techniques de Nyx. Génère un plan technique SVG vectoriel précis, lisible et coté pour :
 "${description}"
@@ -1042,7 +1168,7 @@ CONTRAINTES SVG STRICTES :
   if (!matchSvg) {
     throw new Error("Impossible de compiler le schéma SVG.");
   }
-  const svgCode = matchSvg[0].trim();
+  const svgCode = nettoyerSvgSecurise(matchSvg[0].trim());
   const nomFichier = `plan_${slugifierNom(description.slice(0, 35), String(Date.now()))}.svg`;
   return {
     nomFichier,
@@ -1077,14 +1203,14 @@ async function genererEmbedding(texte) {
 
   for (const key of GEMINI_KEYS) {
     try {
-      const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=" + encodeURIComponent(key);
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent";
       const res = await axios.post(
         url,
         {
           model: "models/gemini-embedding-001",
           content: { parts: [{ text: cleanTexte }] }
         },
-        { timeout: 15000 }
+        { headers: { "x-goog-api-key": key }, timeout: 15000 }
       );
       return res.data?.embedding?.values;
     } catch (err) {
@@ -2057,13 +2183,13 @@ async function appelerGoogleGeminiTexte(systemInstruction, historiqueMessages, p
   }
   contents.push({ role: "user", parts: [{ text: promptActuel }] });
 
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(apiKey);
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent";
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
     generation_config: { temperature: temp, max_output_tokens: maxTokens }
   }, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
     timeout: 25000
   });
 
@@ -2107,13 +2233,13 @@ async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, 
   }
   contents.push({ role: "user", parts: partsActuelles });
 
-  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent?key=" + encodeURIComponent(cle);
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent";
   const res = await axios.post(url, {
     system_instruction: { parts: [{ text: `${systemInstruction}\n${consignePosturale}` }] },
     contents: contents,
     generation_config: { temperature: 0.3, max_output_tokens: 900 }
   }, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cle },
     timeout: 25000
   });
 
@@ -2714,12 +2840,13 @@ RÈGLES D'AUDIT STRICTES :
 // ==========================================
 async function scraperPageWeb(urlCible) {
   try {
-    const res = await axios.get(urlCible, {
+    const res = await axiosGetHttpsPublic(urlCible, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       },
-      timeout: 12000
+      timeout: 12000,
+      maxContentLength: 5 * 1024 * 1024
     });
 
     const $ = cheerio.load(res.data);
@@ -3048,9 +3175,9 @@ async function lirePdfSecurise(fileId) {
 
   for (const model of modelesGamme3) {
     try {
-      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-      const resGemini = await axios.post(urlGemini, payload, { 
-        headers: { 'Content-Type': 'application/json' },
+      const urlGemini = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      const resGemini = await axios.post(urlGemini, payload, {
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiKey },
         timeout: 120000 
       });
 
@@ -3166,8 +3293,12 @@ const projetManager = new ProjectManager({
   genererImageVenice,
   validerEtSecuriserMission,
   setMission: (action) => {
-    missionEnAttente = { action, statut: "attente", chatId: DOC_CHAT_ID };
-    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente).catch(() => {});
+    const validation = validerEtSecuriserMission(action);
+    if (!validation.valide || !validation.action) {
+      throw new Error(validation.erreur || "Mission refusée : format invalide.");
+    }
+    missionEnAttente = { action: validation.action, statut: "attente", chatId: DOC_CHAT_ID };
+    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/mission.json`, missionEnAttente, { timeout: 8000 }).catch(e => console.error("[MISSION FIREBASE KO]", e.message));
   },
   nettoyerMission: () => {
     missionEnAttente = null;
@@ -3605,8 +3736,8 @@ ${evaluerSyntonieRythmique()}
 // 17. ROUTE TELEGRAM AVEC ROUTAGE CHANTIER VS BLABLA
 // ==========================================
 app.post('/telegram', (req, res) => {
-  // [SÉCU] Si TELEGRAM_WEBHOOK_SECRET est défini, seul Telegram (qui renvoie ce secret) est accepté
-  if (TELEGRAM_WEBHOOK_SECRET && !comparerTokenSecurise(req.headers['x-telegram-bot-api-secret-token'], TELEGRAM_WEBHOOK_SECRET)) {
+  // Le webhook est fermé si le secret dédié manque ou ne correspond pas.
+  if (TELEGRAM_WEBHOOK_SECRET.length < 32 || !comparerTokenSecurise(req.headers['x-telegram-bot-api-secret-token'], TELEGRAM_WEBHOOK_SECRET)) {
     return res.sendStatus(401);
   }
   res.sendStatus(200);
@@ -3683,9 +3814,7 @@ app.post('/telegram', (req, res) => {
     }
 
     if (texteMessageClavier === '/dropzone' || texteMessageClavier === '!dropzone' || texteMessageClavier === '/upload' || texteMessageClavier === '!upload') {
-      const lienDrop = CRON_SECRET
-        ? `https://alita-gsoe.onrender.com/atelier?token=${encodeURIComponent(CRON_SECRET)}`
-        : `https://alita-gsoe.onrender.com/atelier`;
+      const lienDrop = `https://alita-gsoe.onrender.com/atelier`;
       return await envoyerTelegram(
         chatId,
         `📦 *Sas d'upload haute capacité (jusqu'à 100 Mo/fichier, 0 limite Telegram) :*\n${lienDrop}\n\nGlisse tes \`.obj\`, \`.stl\`, \`.scad\` ou plans dedans : Nyx les analyse instantanément et les archive dans Supabase.`
@@ -3694,7 +3823,7 @@ app.post('/telegram', (req, res) => {
 
     if (texteMessageClavier.startsWith('/importer_url') || texteMessageClavier.startsWith('!importer_url')) {
       const urlCible = convertirLienTelechargementDirect(texteMessageClavier.replace(/^[\/!]importer_url\s*/i, '').trim());
-      if (!urlCible || !/^https?:\/\//i.test(urlCible)) {
+      if (!urlCible || !/^https:\/\//i.test(urlCible)) {
         return await envoyerTelegram(chatId, "⚠️ Donne un lien direct valide après `/importer_url` (ex: lien Supabase Storage, Drive direct ou serveur local).");
       }
       await envoyerTelegram(chatId, "📥 _Téléchargement direct haute capacité en cours (bypass limite 20 Mo Telegram)..._");
@@ -4091,7 +4220,7 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
         await envoyerTelegram(chatId, `Erreur interne : ${err.message}`);
       }
     }
-  });
+  }).catch(() => envoyerTelegram(chatId, "⚠️ File de traitement saturée. Réessaie dans un instant.").catch(() => {}));
 });
 
 // ==========================================
@@ -4134,9 +4263,10 @@ async function genererAudioGoogle(texte) {
       const options = {
         hostname: 'texttospeech.googleapis.com',
         port: 443,
-        path: "/v1/text:synthesize?key=" + encodeURIComponent(cle),
+        path: "/v1/text:synthesize",
         method: 'POST',
         headers: {
+          'x-goog-api-key': cle,
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload)
         },
@@ -4182,10 +4312,8 @@ app.get('/', (req, res) => res.redirect('/app'));
 app.use('/app', express.static(path.join(__dirname, 'public')));
 
 app.post('/api/voix', async (req, res) => {
-  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '')
-    || assainirParametre(req.query.token)
-    || assainirParametre(req.body?.token);
-  if (!CRON_SECRET || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
+  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '');
+  if (CRON_SECRET.length < 32 || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
     console.warn("[SÉCURITÉ VOIX] Accès refusé sur /api/voix (token invalide ou manquant).");
     return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
   }
@@ -4255,6 +4383,8 @@ app.post('/api/voix', async (req, res) => {
       console.error("[PWA VOCALE ERREUR]", err.message);
       res.status(500).json({ reponse: "Erreur interne lors du traitement." });
     }
+  }).catch(err => {
+    if (!res.headersSent) res.status(503).json({ erreur: "File de traitement saturée. Réessaie dans un instant." });
   });
 });
 
@@ -4295,7 +4425,7 @@ app.get('/atelier', (req, res) => {
     <h1>🧊 Établi Nyx — Sas 3D (100 Mo max)</h1>
     <p>Glisse tes fichiers <b>.obj</b>, <b>.stl</b>, <b>.scad</b> ou <b>.svg</b> ici. Analyse directe en RAM + archivage Supabase + retour sur Telegram.</p>
     <div class="row">
-      <input id="token" type="password" placeholder="Token (CRON_SECRET / TELEGRAM_BOT_TOKEN)" />
+      <input id="token" type="password" placeholder="CRON_SECRET" />
       <input id="projet" type="text" placeholder="Nom du projet (ex: alita_armure)" />
     </div>
     <div id="drop" class="drop">
@@ -4306,25 +4436,16 @@ app.get('/atelier', (req, res) => {
     <div id="log" class="log"></div>
   </div>
   <script>
-    const params = new URLSearchParams(location.search);
     const tokenEl = document.getElementById('token');
     const projetEl = document.getElementById('projet');
     const dropEl = document.getElementById('drop');
     const fileInput = document.getElementById('fileInput');
     const logEl = document.getElementById('log');
 
-    if (params.get('token')) {
-      tokenEl.value = params.get('token');
-      localStorage.setItem('nyx_token', tokenEl.value);
-    } else if (localStorage.getItem('nyx_token')) {
-      tokenEl.value = localStorage.getItem('nyx_token');
-    }
-    tokenEl.addEventListener('change', () => localStorage.setItem('nyx_token', tokenEl.value.trim()));
-
-    function addLog(html, isErr = false) {
+    function addLog(message, isErr = false) {
       const div = document.createElement('div');
       div.className = 'item' + (isErr ? ' err' : '');
-      div.innerHTML = html;
+      div.textContent = String(message ?? '');
       logEl.prepend(div);
       return div;
     }
@@ -4333,7 +4454,7 @@ app.get('/atelier', (req, res) => {
       const token = tokenEl.value.trim();
       const projet = projetEl.value.trim() || 'pieces_doc';
       for (const f of files) {
-        const box = addLog('⏳ Envoi de <b>' + f.name + '</b> (' + (f.size / 1048576).toFixed(1) + ' Mo)...');
+        const box = addLog('⏳ Envoi de ' + f.name + ' (' + (f.size / 1048576).toFixed(1) + ' Mo)...');
         try {
           const res = await fetch('/api/atelier/upload', {
             method: 'POST',
@@ -4347,10 +4468,10 @@ app.get('/atelier', (req, res) => {
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.erreur || 'HTTP ' + res.status);
-          box.innerHTML = '✅ ' + data.resume;
+          box.textContent = '✅ ' + String(data.resume || 'Fichier reçu');
         } catch (e) {
           box.className = 'item err';
-          box.innerHTML = '❌ ' + f.name + ' : ' + e.message;
+          box.textContent = '❌ ' + f.name + ' : ' + e.message;
         }
       }
     }
@@ -4371,8 +4492,8 @@ app.get('/atelier', (req, res) => {
 
 // Upload direct haute capacité (jusqu'à 100 Mo) pour contourner la limite 20 Mo des bots Telegram
 app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), async (req, res) => {
-  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
-  if (!CRON_SECRET || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
+  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '');
+  if (CRON_SECRET.length < 32 || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
     return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
   }
 
@@ -4385,6 +4506,10 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
   if (!buffer || buffer.length === 0) {
     return res.status(400).json({ erreur: "Fichier vide." });
   }
+  if (buffer.length > 100 * 1024 * 1024) {
+    return res.status(413).json({ erreur: "Fichier supérieur à 100 Mo." });
+  }
+  nomFichier = nomFichier.slice(0, 120);
 
   // Décompression GZIP automatique si le client Python a compressé l'envoi
   const estGzip = req.headers['x-compression'] === 'gzip' || (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b);
@@ -4394,6 +4519,9 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
     } catch (eGz) {
       return res.status(400).json({ erreur: `Échec décompression GZIP : ${eGz.message}` });
     }
+  }
+  if (buffer.length > 100 * 1024 * 1024) {
+    return res.status(413).json({ erreur: "Fichier décompressé supérieur à 100 Mo." });
   }
 
   try {
@@ -4432,7 +4560,7 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
         const rep = await traiterFlux(promptSuite, null, "");
         const sortie = await executerSortiesAtelier(rep, destChatId, projetNom);
         if (sortie.texteNet) await envoyerTelegram(destChatId, sortie.texteNet);
-      }, 'atelier');
+      }, 'atelier').catch(() => envoyerTelegram(destChatId, "⚠️ File atelier saturée. Le fichier est archivé, mais son analyse automatique n'a pas été lancée.").catch(() => {}));
     } else {
       console.warn("[ATELIER UPLOAD] Fichier analysé mais DOC_CHAT_ID inconnu : envoie un message à Nyx sur Telegram d'abord.");
     }
@@ -4449,8 +4577,8 @@ app.get('/ping', (req, res) => res.status(200).send("pong"));
 app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", humeur: cacheEtatProfond.etatRelationnel }));
 
 app.post('/api/consolider', (req, res) => {
-  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
-  if (!CRON_SECRET || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
+  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '');
+  if (CRON_SECRET.length < 32 || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
     return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
   }
 
@@ -4471,7 +4599,10 @@ app.listen(PORT, '0.0.0.0', async () => {
   await initialiserCache();
   await initialiserAtelierStorage();
 
-  if (TELEGRAM_BOT_TOKEN) {
+  if (CRON_SECRET.length < 32) {
+    console.error("[SÉCURITÉ] CRON_SECRET absent ou trop court : les routes API privées resteront fermées.");
+  }
+  if (TELEGRAM_BOT_TOKEN && TELEGRAM_WEBHOOK_SECRET.length >= 32) {
     const webhookUrl = "https://alita-gsoe.onrender.com/telegram";
     try {
       const urlWebhook = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/setWebhook?url=" + encodeURIComponent(webhookUrl)
@@ -4481,5 +4612,7 @@ app.listen(PORT, '0.0.0.0', async () => {
     } catch (err) {
       console.error("❌ Échec Webhook Telegram :", err.response?.data || err.message);
     }
+  } else if (TELEGRAM_BOT_TOKEN) {
+    console.error("[SÉCURITÉ] Webhook Telegram non configuré : TELEGRAM_WEBHOOK_SECRET doit contenir au moins 32 caractères.");
   }
 });
