@@ -23,6 +23,17 @@ function assainirParametre(val) {
   return String(val).trim().replace(/^["'`\[\(\{]+|["'`\]\)\}]+$/g, '').trim();
 }
 
+// [SÉCU] Comparaison de secrets en temps constant (évite les attaques par timing)
+function comparerTokenSecurise(fourni, attendu) {
+  const a = crypto.createHash('sha256').update(String(fourni || '')).digest();
+  const b = crypto.createHash('sha256').update(String(attendu || '')).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+// [SÉCU] Plafond de taille APRÈS décompression (anti zip-bomb). Réglable via MAX_DECOMPRESSION_MO.
+const LIMITE_DECOMPRESSION_OCTETS = (parseInt(process.env.MAX_DECOMPRESSION_MO, 10) || 150) * 1024 * 1024;
+const gunzipAsync = (buf, opts) => new Promise((ok, ko) => zlib.gunzip(buf, opts, (e, r) => e ? ko(e) : ok(r)));
+
 // VENICE AI - GEMINI EN PRIORITÉ N°1 CHAT + IMAGES + PARACHUTES
 const VENICE_API_KEY = assainirParametre(process.env.VENICE_API_KEY);
 const MODEL_VENICE_CHAT = assainirParametre(process.env.VENICE_MODEL_CHAT) || "gemini-3-5-flash-lite";
@@ -60,6 +71,7 @@ const GOOGLE_TTS_API_KEY = assainirParametre(process.env.GOOGLE_TTS_API_KEY);
 
 // CANAUX & PERSISTANCE
 const TELEGRAM_BOT_TOKEN = assainirParametre(process.env.TELEGRAM_BOT_TOKEN);
+const TELEGRAM_WEBHOOK_SECRET = assainirParametre(process.env.TELEGRAM_WEBHOOK_SECRET).replace(/[^A-Za-z0-9_-]/g, '');
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL ? assainirParametre(process.env.FIREBASE_DB_URL).replace(/\/$/, '') : null;
 const DOC_CHAT_ID = process.env.DOC_CHAT_ID ? parseInt(assainirParametre(process.env.DOC_CHAT_ID)) : null;
 const CRON_SECRET = assainirParametre(process.env.CRON_SECRET) || TELEGRAM_BOT_TOKEN || "";
@@ -157,6 +169,17 @@ let journalBrut = [];
 let consolidationEnCours = false;
 let condensationTravailEnCours = false;
 
+// [OPTIM] Une seule écriture Firebase de la mémoire par rafale de messages (debounce 1,5 s)
+let timerSauvegardeMemoire = null;
+function sauvegarderMemoireFirebase() {
+  if (!FIREBASE_DB_URL) return;
+  clearTimeout(timerSauvegardeMemoire);
+  timerSauvegardeMemoire = setTimeout(() => {
+    axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte, { timeout: 8000 })
+      .catch(e => console.warn("[FIREBASE MÉMOIRE KO]", e.message));
+  }, 1500);
+}
+
 let derniereActiviteDoc = Date.now();
 let dernierMonologueTimestamp = 0;
 let historiqueLongueursDoc = [];
@@ -193,12 +216,16 @@ let cacheEtatProfond = {
 let missionEnAttente = null;
 let dernierDocChatId = DOC_CHAT_ID || null;
 
-let fileAttenteTraitement = Promise.resolve();
-function empilerTraitement(action) {
-  fileAttenteTraitement = fileAttenteTraitement
+// [OPTIM] File par « voie » : même comportement série qu'avant par défaut ('conversation'),
+// mais les tâches lourdes (atelier 3D) n'empêchent plus Telegram/PWA de répondre.
+const voiesTraitement = new Map();
+function empilerTraitement(action, voie = 'conversation') {
+  const precedent = voiesTraitement.get(voie) || Promise.resolve();
+  const suivant = precedent
     .then(() => action())
-    .catch(err => console.error("[FILE TRAITEMENT ERREUR]", err.message));
-  return fileAttenteTraitement;
+    .catch(err => console.error(`[FILE TRAITEMENT ERREUR:${voie}]`, err.message));
+  voiesTraitement.set(voie, suivant);
+  return suivant;
 }
 
 const app = express();
@@ -880,7 +907,7 @@ function extraireFichiersArchive(buffer, nomArchive) {
   const fichiers = [];
 
   if (nomMin.endsWith('.gz') && !nomMin.endsWith('.tar.gz')) {
-    const decomp = zlib.gunzipSync(buffer);
+    const decomp = zlib.gunzipSync(buffer, { maxOutputLength: LIMITE_DECOMPRESSION_OCTETS });
     const nomInterne = nomArchive.replace(/\.gz$/i, '') || `piece_${Date.now()}.obj`;
     fichiers.push({ nom: nomInterne, buffer: decomp });
     return fichiers;
@@ -932,7 +959,7 @@ function extraireFichiersArchive(buffer, nomArchive) {
       if (method === 0) {
         rawBuf = Buffer.from(compSlice);
       } else if (method === 8) {
-        rawBuf = zlib.inflateRawSync(compSlice);
+        rawBuf = zlib.inflateRawSync(compSlice, { maxOutputLength: LIMITE_DECOMPRESSION_OCTETS });
       }
       if (rawBuf && rawBuf.length > 0) {
         fichiers.push({ nom: baseName, buffer: rawBuf });
@@ -1724,7 +1751,7 @@ Style télégraphique, brut, zéro blabla.`;
 
       if (FIREBASE_DB_URL) {
         axios.put(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { fil: cacheEtatProfond.filConducteur }).catch(()=>{});
-        axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
+        sauvegarderMemoireFirebase();
       }
       console.log("[MÉMOIRE DE TRAVAIL] Fil conducteur mis à jour, mémoire vive allégée.");
     }
@@ -3565,7 +3592,7 @@ ${evaluerSyntonieRythmique()}
   if (cacheMemoireCourte.length >= TAILLE_MAX_MEMOIRE) {
     condenserMemoireDeTravail().catch(e => console.error("[CONDENSATION AUTO KO]", e.message));
   } else {
-    if (FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, cacheMemoireCourte).catch(()=>{});
+    sauvegarderMemoireFirebase();
   }
 
   archiverDansJournalBrut("Doc", texteDocSecurise, "atelier");
@@ -3578,6 +3605,10 @@ ${evaluerSyntonieRythmique()}
 // 17. ROUTE TELEGRAM AVEC ROUTAGE CHANTIER VS BLABLA
 // ==========================================
 app.post('/telegram', (req, res) => {
+  // [SÉCU] Si TELEGRAM_WEBHOOK_SECRET est défini, seul Telegram (qui renvoie ce secret) est accepté
+  if (TELEGRAM_WEBHOOK_SECRET && !comparerTokenSecurise(req.headers['x-telegram-bot-api-secret-token'], TELEGRAM_WEBHOOK_SECRET)) {
+    return res.sendStatus(401);
+  }
   res.sendStatus(200);
 
   const msg = req.body?.message;
@@ -4154,7 +4185,7 @@ app.post('/api/voix', async (req, res) => {
   const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '')
     || assainirParametre(req.query.token)
     || assainirParametre(req.body?.token);
-  if (!CRON_SECRET || tokenFourni !== CRON_SECRET) {
+  if (!CRON_SECRET || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
     console.warn("[SÉCURITÉ VOIX] Accès refusé sur /api/voix (token invalide ou manquant).");
     return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
   }
@@ -4341,7 +4372,7 @@ app.get('/atelier', (req, res) => {
 // Upload direct haute capacité (jusqu'à 100 Mo) pour contourner la limite 20 Mo des bots Telegram
 app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), async (req, res) => {
   const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
-  if (TELEGRAM_BOT_TOKEN && (!CRON_SECRET || tokenFourni !== CRON_SECRET)) {
+  if (!CRON_SECRET || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
     return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
   }
 
@@ -4359,7 +4390,7 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
   const estGzip = req.headers['x-compression'] === 'gzip' || (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b);
   if (estGzip) {
     try {
-      buffer = zlib.gunzipSync(buffer);
+      buffer = await gunzipAsync(buffer, { maxOutputLength: LIMITE_DECOMPRESSION_OCTETS });
     } catch (eGz) {
       return res.status(400).json({ erreur: `Échec décompression GZIP : ${eGz.message}` });
     }
@@ -4401,7 +4432,7 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
         const rep = await traiterFlux(promptSuite, null, "");
         const sortie = await executerSortiesAtelier(rep, destChatId, projetNom);
         if (sortie.texteNet) await envoyerTelegram(destChatId, sortie.texteNet);
-      });
+      }, 'atelier');
     } else {
       console.warn("[ATELIER UPLOAD] Fichier analysé mais DOC_CHAT_ID inconnu : envoie un message à Nyx sur Telegram d'abord.");
     }
@@ -4419,7 +4450,7 @@ app.all('/pensee', (req, res) => res.json({ status: "VIVANTE", humeur: cacheEtat
 
 app.post('/api/consolider', (req, res) => {
   const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '') || assainirParametre(req.query.token);
-  if (!CRON_SECRET || tokenFourni !== CRON_SECRET) {
+  if (!CRON_SECRET || !comparerTokenSecurise(tokenFourni, CRON_SECRET)) {
     return res.status(401).json({ erreur: "Accès refusé. Token invalide." });
   }
 
@@ -4443,7 +4474,8 @@ app.listen(PORT, '0.0.0.0', async () => {
   if (TELEGRAM_BOT_TOKEN) {
     const webhookUrl = "https://alita-gsoe.onrender.com/telegram";
     try {
-      const urlWebhook = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/setWebhook?url=" + encodeURIComponent(webhookUrl);
+      const urlWebhook = "https://api.telegram.org/bot" + encodeURIComponent(TELEGRAM_BOT_TOKEN) + "/setWebhook?url=" + encodeURIComponent(webhookUrl)
+        + (TELEGRAM_WEBHOOK_SECRET ? "&secret_token=" + encodeURIComponent(TELEGRAM_WEBHOOK_SECRET) : "");
       const res = await axios.get(urlWebhook);
       console.log("🔗 Webhook Telegram configuré :", res.data);
     } catch (err) {
