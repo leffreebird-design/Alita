@@ -1522,6 +1522,7 @@ CONSIGNE :
           cacheEtatProfond.etatRelationnel = "symbiose";
         }
         if (FIREBASE_DB_URL) {
+          derniereEcritureEmotionsLocaleTs = Date.now();
           axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
           axios.patch(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
         }
@@ -1802,10 +1803,20 @@ async function piocherPenseePrete() {
   } catch (e) {}
 }
 
+// [SYNC ÉMOTIONS] Horodatage de la dernière écriture locale des émotions : sert à ne pas écraser
+// un changement tout juste fait par le noyau avec une lecture Firebase encore ancienne.
+let derniereEcritureEmotionsLocaleTs = 0;
+function persisterEmotionsLocales() {
+  derniereEcritureEmotionsLocaleTs = Date.now();
+  if (FIREBASE_DB_URL) {
+    axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(() => {});
+  }
+}
+
 async function synchroniserCarnetDepuisWorker() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves] = await Promise.all([
+    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resEmo, resRel, resBesoin] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 2500 }).catch(() => ({ data: null })),
@@ -1813,7 +1824,10 @@ async function synchroniserCarnetDepuisWorker() {
       axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 2500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 2500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, { timeout: 2500 }).catch(() => ({ data: null }))
     ]);
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
@@ -1836,6 +1850,30 @@ async function synchroniserCarnetDepuisWorker() {
     }
     if (resArt?.data) {
       cacheEtatProfond.artefacts = (Array.isArray(resArt.data) ? resArt.data : Object.values(resArt.data)).filter(Boolean).slice(-30);
+    }
+    if (resHistReves?.data) {
+      cacheEtatProfond.historiqueReves = (Array.isArray(resHistReves.data) ? resHistReves.data : Object.values(resHistReves.data)).filter(Boolean).slice(-6);
+    }
+
+    // [SYNC ÉMOTIONS] Le worker régule les émotions toutes les 10 min (colère qui retombe, énergie,
+    // affection...) : sans cette relecture, le noyau parlait avec des jauges périmées et les réécrivait.
+    // On ne reprend la valeur Firebase que si le noyau n'a pas écrit lui-même depuis moins de 4 s.
+    const ecritureLocaleRecente = (Date.now() - derniereEcritureEmotionsLocaleTs) < 4000;
+    if (!ecritureLocaleRecente) {
+      if (resEmo?.data && typeof resEmo.data === 'object') {
+        cacheEtatProfond.emotions = { colere: 0, ...cacheEtatProfond.emotions, ...resEmo.data };
+      }
+      if (resRel?.data?.etat) {
+        cacheEtatProfond.etatRelationnel = resRel.data.etat;
+      }
+    }
+    // Jauge de besoin de communiquer : la version la plus récente (updatedAt) l'emporte
+    if (resBesoin?.data && typeof resBesoin.data === 'object') {
+      const localTs = Number(cacheEtatProfond.besoinCommunication?.updatedAt) || 0;
+      const distantTs = Number(resBesoin.data.updatedAt) || 0;
+      if (distantTs >= localTs) {
+        cacheEtatProfond.besoinCommunication = { ...cacheEtatProfond.besoinCommunication, ...resBesoin.data };
+      }
     }
   } catch (e) {}
 }
@@ -3287,10 +3325,32 @@ function estOrdreExpliciteDoc(texteDoc) {
 // ==========================================
 const projetManager = new ProjectManager({
   envoyerTelegram: (texte) => envoyerTelegram(DOC_CHAT_ID, texte),
-  appelLLM: async (sys, prompt) => {
-    return await appelerCascadeCode(sys, [], prompt, 1000);
+  appelLLM: async (sys, prompt, plafond = 1000) => {
+    return await appelerCascadeCode(sys, [], prompt, plafond);
   },
   genererImageVenice,
+  // Ben étant retiré, Nyx livre elle-même les images et les fichiers sur Telegram
+  livrerImage: async (b64, nomFichier, legende) => {
+    if (!DOC_CHAT_ID) throw new Error("DOC_CHAT_ID inconnu : impossible de livrer l'image.");
+    await envoyerPhotoTelegram(DOC_CHAT_ID, b64);
+    try {
+      await archiverArtefactAtelier({
+        projet: cacheEtatProfond.filConducteur || "projet_nyx",
+        type: "image_projet",
+        nomFichier,
+        buffer: Buffer.from(b64, 'base64'),
+        mimeType: "image/png",
+        resume: legende,
+        chatId: DOC_CHAT_ID
+      });
+    } catch (eArch) {
+      console.warn("[PROJET] Archivage de l'image échoué :", eArch.message);
+    }
+  },
+  livrerFichier: async (nomFichier, texte, legende) => {
+    if (!DOC_CHAT_ID) throw new Error("DOC_CHAT_ID inconnu : impossible de livrer le fichier.");
+    await envoyerDocumentTelegram(DOC_CHAT_ID, Buffer.from(texte, 'utf8'), nomFichier, "text/markdown", legende);
+  },
   validerEtSecuriserMission,
   setMission: (action) => {
     const validation = validerEtSecuriserMission(action);
@@ -3444,7 +3504,7 @@ Réponds STRICTEMENT avec un JSON valide :
       }
 
       if (FIREBASE_DB_URL) {
-        axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(() => {});
+        persisterEmotionsLocales();
         if (cacheEtatProfond.etatRelationnel !== etatPrecedent) {
           axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: cacheEtatProfond.etatRelationnel, date: obtenirHorodatageParis() }).catch(() => {});
           console.log(`[CYCLE ÉMOTIONNEL] Bascule vers : ${cacheEtatProfond.etatRelationnel.toUpperCase()}`);
@@ -3937,7 +3997,7 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
         cacheEtatProfond.etatRelationnel = "euphorie_creative";
         cacheEtatProfond.emotions.curiosite = Math.min(100, (cacheEtatProfond.emotions.curiosite || 70) + 10);
         if (FIREBASE_DB_URL) {
-          axios.patch(`${FIREBASE_DB_URL}/emotions.json`, cacheEtatProfond.emotions).catch(() => {});
+          persisterEmotionsLocales();
           axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: "euphorie_creative", date: obtenirHorodatageParis() }).catch(() => {});
         }
         if (sortieForge.texteNet) await envoyerTelegram(chatId, sortieForge.texteNet);
