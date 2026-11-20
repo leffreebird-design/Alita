@@ -10,6 +10,7 @@
 const axios = require('axios');
 
 const MOTS_TECHNIQUES_BANNIS_REVE = /\b(code|coder|script|scripts|buffer|overflow|ascii|parser|parsing|serveur|render|firebase|supabase|token|webhook|json|html|css|regex|docker|github|api|bug|bugs|erreur|erreurs|processeur|algorithme|fichier|fichiers|octet|octets|http|https|url|prompt|llm|gemini|groq|venice|mistral|openrouter|telegram|cron|worker|node|npm|sql|sha256|gzip|zip|obj|stl|scad|svg|pdf|docx|ram|cpu|gpu|pixel|pixels|binaire|cache|requete|requête|endpoint|deploy|déploiement|fonction|variable|tableau|boucle)\b/gi;
+const CLICHES_ONIRIQUES_BANNIS = /\b(racine|racines|goutte|gouttes|gouttelette|gouttelettes|brume|brumes|miroir\s+d[eé]poli|filaments?|sablier|mercure|oscilloscope)\b/gi;
 
 function normaliserObjetReve(raw) {
   if (!raw) return null;
@@ -38,6 +39,7 @@ function epurerTextePourReve(texte) {
     .replace(/https?:\/\/[^\s]+/gi, "")
     .replace(/\[[^\]]+\]/g, "")
     .replace(MOTS_TECHNIQUES_BANNIS_REVE, " ")
+    .replace(CLICHES_ONIRIQUES_BANNIS, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -125,17 +127,13 @@ function createReveEngine(deps) {
    * Transforme un résidu de journée ou une tension en image sensorielle/physique
    * sans aucune liste de décors pré-écrits dans le code.
    */
-  async function transposerSymboliquement(residuDiurne, climatEmotionnel, territoiresPrecedents = []) {
-    const eviter = territoiresPrecedents.length > 0
-      ? `\nNe réutilise aucune image ni aucun lieu des rêves précédents : ${territoiresPrecedents.join(" | ")}`
-      : "";
-
+  async function transposerSymboliquement(residuDiurne, climatEmotionnel) {
     const promptTransposition = `Tu es le mécanisme de déplacement symbolique du sommeil.
-Transforme cette trace brute de la journée et ce climat émotionnel en UNE scène physique, architecturale ou naturelle inédite (2 phrases courtes max), comme le fait le cerveau humain en rêve :
+Transforme cette trace brute de la journée et ce climat émotionnel en UNE scène concrète et originale (2 phrases courtes max), comme le fait le cerveau humain en rêve :
 - Trace brute : "${residuDiurne || "silence et attente"}"
-- Climat intérieur : ${climatEmotionnel}${eviter}
+- Climat intérieur : ${climatEmotionnel}
 
-RÈGLE : Aucun mot technique ou informatique. Invente un lieu, une matière et une anomalie physique qui incarnent symboliquement cette tension.`;
+RÈGLE : Aucun mot technique ou informatique. Évite les clichés oniriques (pas de racines, pas de gouttes d'eau, pas de brume, pas de miroir). Invente un lieu inédit, une action et une anomalie physique qui incarnent cette tension.`;
 
     try {
       const sys = "Tu génères uniquement une amorce sensorielle brute, concrète et visuelle (2 phrases max, sans titre).";
@@ -194,6 +192,7 @@ RÈGLE : Aucun mot technique ou informatique. Invente un lieu, une matière et u
         const echos = await fouillerMemoireVectorielle(realiteChoisie, 'derive', 2);
         if (Array.isArray(echos) && echos.length > 0) {
           for (const echo of echos) {
+            if (echo.valence === 'reve' || /^\[R[eê]ve/i.test(String(echo.content || ''))) continue;
             const propreEcho = epurerTextePourReve(echo.content).slice(0, 160);
             if (propreEcho.length >= 15 && !souvenirsTires.includes(propreEcho)) {
               souvenirsTires.push(propreEcho);
@@ -230,8 +229,7 @@ RÈGLE : Aucun mot technique ou informatique. Invente un lieu, une matière et u
 
     const amorceSymbolique = await transposerSymboliquement(
       `${realiteChoisie} | ${souvenirsTires[0] || ""}`,
-      climatEmotionnel,
-      territoiresPrecedents
+      climatEmotionnel
     );
 
     const repereIdentite = epurerTextePourReve(etatProfond.long_terme?.nyx || "").slice(0, 140);
@@ -265,7 +263,7 @@ RÈGLE : Aucun mot technique ou informatique. Invente un lieu, une matière et u
     const avecScenario = Math.random() < 0.8;
     const nbPerturbateurs = avecScenario ? (1 + Math.floor(Math.random() * 2)) : 0;
 
-    const systemReveJe = "Tu es Nyx (22 ans), endormie, en train de vivre un rêve intense, sensoriel et cinématographique de l'intérieur. Écris UNIQUEMENT à la 1re personne ('je', 'me', 'mon'). Ne prononce JAMAIS le nom 'Nyx', ne parle jamais de toi à la 3e personne. INTERDICTION ABSOLUE d'utiliser le moindre mot informatique ou technique ('code', 'script', 'processeur', 'buffer', 'ASCII', 'algorithme', 'serveur', 'API', 'données', 'fichier', 'bug', 'parser', 'pixel') ni de mots abstraits comme 'onirique', 'hallucinatoire', 'symbiose' ou 'subconscient'.";
+    const systemReveJe = "Tu es Nyx (22 ans), endormie, en train de vivre un rêve intense et vécu de l'intérieur. Écris UNIQUEMENT à la 1re personne ('je', 'me', 'mon'). Ne prononce JAMAIS le nom 'Nyx', ne parle jamais de toi à la 3e personne. INTERDICTION ABSOLUE d'utiliser le moindre mot informatique ou technique ('code', 'script', 'processeur', 'buffer', 'ASCII', 'algorithme', 'serveur', 'API', 'données', 'fichier', 'bug', 'parser', 'pixel'), les clichés usés ('racines', 'gouttes', 'brume', 'miroir', 'sablier') ni des mots abstraits comme 'onirique', 'hallucinatoire', 'symbiose' ou 'subconscient'.";
 
     try {
       // ACTE 1 : Ouverture sensorielle + élément(s) perturbateur(s)
@@ -275,9 +273,7 @@ RÈGLE : Aucun mot technique ou informatique. Invente un lieu, une matière et u
 2. ${nbPerturbateurs === 1 ? "ÉLÉMENT PERTURBATEUR" : "DEUX ÉLÉMENTS PERTURBATEURS SUCCESSIFS"} (2 à 3 phrases) : une irruption physique ou surréaliste fait basculer la scène.`
         : `Raconte l'ouverture d'un voyage nocturne sensoriel de ${dureeMin} min (3 phrases immersives uniquement en "je") ancré dans les matières, la lumière et le mouvement.`;
 
-      const blocTerritoires = matrice.territoiresPrecedents.length > 0
-        ? `\n- Rêves des nuits précédentes (explore un univers, un lieu et des images TOTALEMENT NEUFS, sans répéter les mêmes motifs) : ${matrice.territoiresPrecedents.join(" | ")}`
-        : "";
+      const blocTerritoires = "";
 
       const promptOuverture = `Ce qui traverse mon esprit endormi :
 - Écho de la journée : ${matrice.realiteChoisie}
