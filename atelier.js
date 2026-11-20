@@ -852,6 +852,11 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
   return { texteNet, imageB64, artefactsProduits };
 }
 
+  return {
+    executerSortiesAtelier
+  };
+}
+
 const LIMITE_TELEGRAM_BOT_BYTES = 20 * 1024 * 1024; // Plafond strict de l'API Bot Telegram (20 Mo)
 
 async function lireBufferTelegramSecurise(fileId, fileSize = 0) {
@@ -979,11 +984,6 @@ async function lireTexteSecurise(fileId, fileSize = 0) {
   const buf = await lireBufferTelegramSecurise(fileId, fileSize);
   const texte = buf.toString('utf-8');
   return plafonnerTexteDocument(texte, 22000);
-}
-
-  return {
-    executerSortiesAtelier
-  };
 }
 
 module.exports = {
