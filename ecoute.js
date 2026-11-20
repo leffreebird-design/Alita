@@ -1237,6 +1237,24 @@ app.post('/telegram', (req, res) => {
       }
     }
 
+    if (texteMessageClavier === '/purge_reves' || texteMessageClavier === '!purge_reves') {
+      const etat = getEtatProfond();
+      etat.dernierReve = null;
+      etat.historiqueReves = [];
+      if (FIREBASE_DB_URL) {
+        await Promise.all([
+          axios.delete(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`).catch(() => {}),
+          axios.delete(`${FIREBASE_DB_URL}/nyx/historique_reves.json`).catch(() => {}),
+          axios.delete(`${FIREBASE_DB_URL}/nyx/reve_en_cours.json`).catch(() => {})
+        ]);
+      }
+      if (supabase) {
+        await supabase.from('nyx_souvenirs').delete().eq('valence', 'reve').catch(() => {});
+        await supabase.from('nyx_pensees_pretes').delete().eq('impulsion', 'reve').catch(() => {});
+      }
+      return await envoyerTelegram(chatId, "🧹 *Archives oniriques purgées (RAM, Firebase & Supabase).* Le prochain `/reve` ou cycle de 04h00 repartira d'une page blanche.");
+    }
+
     if (texteMessageClavier === '/envie' || texteMessageClavier === '!envie') {
       await envoyerTelegram(chatId, "🧠 _Évaluation de l'initiative..._");
       await evaluerVolition(true);
