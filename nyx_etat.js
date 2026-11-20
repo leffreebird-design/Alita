@@ -359,7 +359,9 @@ async function fouillerMemoireVectorielle(requete, mode = 'factuel', limite = 3)
     if (error) throw error;
 
     if (mode === 'derive' && data) {
-      return data.filter(s => s.similarity < 0.65).slice(0, limite);
+      return data
+        .filter(s => s.similarity < 0.65 && s.valence !== 'reve' && !/^\[R[eê]ve/i.test(String(s.content || '')))
+        .slice(0, limite);
     }
 
     return data || [];
