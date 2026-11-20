@@ -470,6 +470,7 @@ module.exports = {
   VolitionLimiter,
   limiteurVolition,
   TAILLE_MAX_MEMOIRE,
+  empilerTraitement,
   getEtatProfond,
   getMemoireCourte,
   setMemoireCourte,
