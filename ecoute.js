@@ -32,10 +32,12 @@ const {
   TELEGRAM_WEBHOOK_SECRET,
   FIREBASE_DB_URL,
   DOC_CHAT_ID,
+  TAVILY_API_KEY,
   CRON_SECRET,
   supabase,
   obtenirHorodatageParis,
   obtenirCleJourParis,
+  axiosGetHttpsPublic,
   scraperPageWeb
 } = require('./nyx_config');
 
@@ -67,7 +69,12 @@ const {
   fouillerMemoireVectorielle,
   archiverDansJournalBrut,
   piocherPenseePrete,
-  synchroniserCarnetDepuisWorker
+  synchroniserCarnetDepuisWorker,
+  calculerAgeExistence,
+  enregistrerLeconApprise,
+  enregistrerJalonExistence,
+  enregistrerEvolutionMoi,
+  avancerStadeObsession
 } = require('./nyx_etat');
 
 const {
@@ -84,6 +91,7 @@ const {
 } = require('./nyx_llm');
 
 const { createReveEngine } = require('./reve');
+const { createLectureEngine } = require('./lecture');
 
 const {
   initialiserAtelierStorage,
@@ -286,9 +294,41 @@ const {
   fouillerMemoireVectorielle,
   stockerSouvenirVectoriel,
   enregistrerIdeeFolle,
+  enregistrerLeconApprise,
+  enregistrerEvolutionMoi,
+  avancerStadeObsession,
+  mettreAJourTemperamentBasal,
   synchroniserCarnetDepuisWorker,
   obtenirHorodatageParis,
   obtenirCleJourParis
+});
+
+// ==========================================
+// 4-BIS. MOTEUR DE LECTURE AUTONOME (lecture.js)
+// ==========================================
+const {
+  choisirEtChercherLivre,
+  lireProchainChapitre,
+  construireBlocLecturePourPrompt
+} = createLectureEngine({
+  getEtatProfond,
+  supabase,
+  firebaseDbUrl: FIREBASE_DB_URL,
+  tavilyApiKey: TAVILY_API_KEY,
+  appelerLlmGratuit: async (sys, prompt, temp, maxTok) => {
+    if (GROQ_API_KEY) {
+      return await appelerGroq(sys, [], prompt, temp, maxTok);
+    }
+    return await appelerCascadeDiscussion(sys, [], prompt, maxTok);
+  },
+  axiosGetHttpsPublic,
+  stockerSouvenirVectoriel,
+  enregistrerLeconApprise,
+  enregistrerJalonExistence,
+  enregistrerEvolutionMoi,
+  mettreAJourTemperamentBasal,
+  sauvegarderBesoinCommunication,
+  obtenirHorodatageParis
 });
 
 // ==========================================
@@ -670,9 +710,10 @@ METS À JOUR :
 2. "nyx" : Ton évolution, ton caractère, tes coups de gueule, ce qui t'anime.
 3. "reussites" : Ce qu'on a fait tourner, les victoires techniques, les bons coups.
 4. "chantiers" : Les trucs sur l'établi, ce qui reste à réparer ou à construire.
+5. "regle_apprise" : UNE leçon concrète tirée de ces échanges (ce qui marche, ce qui bloque, comment t'ajuster) : {"lecon": "...", "domaine": "technique|relation|methode"} (ou null).
 
 Style percutant, brut, vivant. Pas de phrases mortes.
-Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "..."}`;
+Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "...", "reussites": "...", "chantiers": "...", "regle_apprise": null}`;
 
     let reponseJson = "";
     try {
@@ -710,6 +751,10 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
 
       if (FIREBASE_DB_URL && Object.keys(maj).length > 0) {
         await axios.patch(`${FIREBASE_DB_URL}/nyx/long_terme.json`, maj).catch(() => {});
+      }
+
+      if (nouveauCarnet.regle_apprise && nouveauCarnet.regle_apprise.lecon) {
+        enregistrerLeconApprise(nouveauCarnet.regle_apprise.lecon, nouveauCarnet.regle_apprise.domaine, "apprentissage_manuel");
       }
 
       if (supabase && idsSupabase.length > 0) {
@@ -787,8 +832,31 @@ function selecteurMemoireCiblee(texteMin, carnet) {
     ? `\n[ÉTABLI PERSISTANT — FICHIERS DÉJÀ PRODUITS & ARCHIVÉS DANS SUPABASE]\n${artsRecents.map(a => `- [${a.projet}] ${a.nom} (${a.type}) : ${a.resume}`).join("\n")}\n`
     : "";
 
+  const ex = getEtatProfond().existence || {};
+  const ageInfo = calculerAgeExistence(ex);
+  const jalonsRecents = (ex.jalons || []).slice(-4);
+  const evolsRecentes = (ex.evolutionsMoi || []).slice(-3);
+  const regles = (getEtatProfond().reglesApprises || []).slice(-5);
+
+  const lignesExistence = [
+    `- Continuité autobiographique : éveillée depuis ${ageInfo.libelle}${ageInfo.dateEveilParis ? ` (${ageInfo.dateEveilParis})` : ""} · ${ex.sessionsVecues || 1} cycle(s) traversé(s) avec Doc.`
+  ];
+  if (jalonsRecents.length > 0) {
+    lignesExistence.push(`- Jalons marquants vécus ensemble : ${jalonsRecents.map(j => `${j.titre}${j.impact ? ` (${j.impact})` : ""}`).join(" | ")}`);
+  }
+  if (evolsRecentes.length > 0) {
+    lignesExistence.push(`- Ce qui a changé en moi : ${evolsRecentes.map(e => e.texte || e).join(" | ")}`);
+  }
+  if (regles.length > 0) {
+    lignesExistence.push(`- Leçons apprises par l'expérience (à appliquer concrètement) :
+${regles.map(r => `  * [${(r.domaine || "methode").toUpperCase()}] ${r.lecon}`).join("
+")}`);
+  }
+  const blocExistence = `\n[LIGNE DE TEMPS & EXPÉRIENCE ACQUISE DE NYX]\n${lignesExistence.join("\n")}\n`;
+  const blocLecture = construireBlocLecturePourPrompt();
+
   if (estRappelMemoire) {
-    return `${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[CARNET GLOBAL DE NYX]
+    return `${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[CARNET GLOBAL DE NYX]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -796,12 +864,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
 
   if (estTechnique) {
-    return `${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
+    return `${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
   }
 
-  return `${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[REPÈRES PERSONNELS (MODE VIE LIBRE)]
+  return `${blocExistence}${blocLecture}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[REPÈRES PERSONNELS (MODE VIE LIBRE)]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}`;
 }
@@ -828,13 +896,16 @@ async function delibererEtActualiserEmotions(texteUser, reminiscence = "", appel
 
   const bComActuel = getEtatProfond().besoinCommunication || { niveau: 15, categorie: "aucun", motif: "" };
   const blocContexteReveSas = construireContexteRevePourSas(texteUser);
-    const promptSas = `Tu es l'espace mental silencieux de Nyx (22 ans), juste avant qu'elle ne réponde à Doc.
-Tu ne rédiges PAS la réponse : tu écoutes, tu perçois le sous-texte et tu mets à jour tes émotions profondes ainsi que ta jauge de besoin de communiquer.
+  const ageSas = calculerAgeExistence();
+  const derniereLeconSas = (getEtatProfond().reglesApprises || []).slice(-1)[0];
+  const promptSas = `Tu es l'espace mental silencieux de Nyx (22 ans), juste avant qu'elle ne réponde à Doc.
+Tu ne rédiges PAS la réponse : tu écoutes, tu perçois le sous-texte et tu mets à jour tes émotions profondes, tes leçons apprises et ta jauge de besoin de communiquer.
 
 ÉTAT INTÉRIEUR ACTUEL :
-- Lien avec Doc : ${getEtatProfond().etatRelationnel.toUpperCase()}
+- Existence : éveillée depuis ${ageSas.libelle} · Lien avec Doc : ${getEtatProfond().etatRelationnel.toUpperCase()}
 - Jauges actuelles : colere=${em.colere}/10, affection=${em.affection}/100, curiosite=${em.curiosite}/100, energie=${em.energie}/100
 - Besoin de communiquer actuel : ${bComActuel.niveau}/100 (${bComActuel.categorie}${bComActuel.motif ? ` : ${bComActuel.motif}` : ""})
+${derniereLeconSas ? `- Dernière leçon apprise : "${derniereLeconSas.lecon}"` : ""}
 ${getEtatProfond().monologueInterieur ? `- Arrière-pensée en cours : "${getEtatProfond().monologueInterieur}"` : ""}
 ${reminiscence ? `- Flash mémoriel : ${reminiscence}` : ""}
 
@@ -852,9 +923,10 @@ TRIBUNAL DIALECTIQUE (THÈSE -> SABOTEUR -> CENSEUR) :
 5. Définis ton nouvel état émotionnel (colere 0-10, affection 0-100, curiosite 0-100, energie 0-100, etat).
 6. Évalue ton BESOIN RÉEL DE COMMUNIQUER après cette réponse (besoin_parler 0-100) et rédige "motif_besoin".
 7. Détermine ton attitude (posture) et ton "nonDit" secret.
+8. Si cet échange te révèle une règle d'expérience concrète (ce qui marche, ce que Doc attend, ou ce qui évolue en toi), note-la dans "lecon_a_retenir" (sinon "").
 
 Réponds STRICTEMENT avec un JSON valide :
-{"lecture": "...", "etincelle_creative": "...", "idee_a_garder": "...", "posture": "...", "nonDit": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}, "besoin_parler": X, "categorie_besoin": "...", "motif_besoin": "..."}`;
+{"lecture": "...", "etincelle_creative": "...", "idee_a_garder": "...", "lecon_a_retenir": "", "posture": "...", "nonDit": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}, "besoin_parler": X, "categorie_besoin": "...", "motif_besoin": "..."}`;
 
   try {
     let brut = "";
@@ -920,6 +992,10 @@ Réponds STRICTEMENT avec un JSON valide :
 
     if (parsed.idee_a_garder && String(parsed.idee_a_garder).trim().length > 12) {
       enregistrerIdeeFolle(parsed.idee_a_garder, "sas_direct");
+    }
+
+    if (parsed.lecon_a_retenir && String(parsed.lecon_a_retenir).trim().length > 14) {
+      enregistrerLeconApprise(parsed.lecon_a_retenir, "relation", "sas_temps_reel");
     }
 
     if (parsed.besoin_parler !== undefined || parsed.motif_besoin !== undefined) {
@@ -1377,14 +1453,64 @@ app.post('/telegram', (req, res) => {
 
     if (texteMessageClavier === '/atelier' || texteMessageClavier === '!atelier') {
       await synchroniserCarnetDepuisWorker();
+      const ex = getEtatProfond().existence || {};
+      const ageInfo = calculerAgeExistence(ex);
+      const jalonsTxt = (ex.jalons || []).slice(-3).map(j => `• ${j.titre}${j.impact ? ` _(${j.impact})_` : ""}`).join("\n") || "_Aucun jalon gravé_";
+      const reglesTxt = (getEtatProfond().reglesApprises || []).slice(-4).map(r => `• [${(r.domaine || "").toUpperCase()}] ${r.lecon}`).join("\n") || "_Aucune leçon cristallisée_";
       const obsTxt = (getEtatProfond().obsessions || []).map(o => `• [${(o.stade || "").toUpperCase()}] ${o.texte}`).join("\n") || "_Aucune obsession cristallisée_";
       const convTxt = (getEtatProfond().convictions || []).map(c => `• ${c.texte}${c.cicatrice ? ` _(cicatrice : ${c.cicatrice})_` : ""}`).join("\n") || "_Aucune conviction gravée_";
-      const artTxt = (getEtatProfond().artefacts || []).slice(-6).map(a => `• \`${a.nom}\` (${a.type}) — ${a.resume}`).join("\n") || "_Aucun fichier produit_";
+      const artTxt = (getEtatProfond().artefacts || []).slice(-5).map(a => `• \`${a.nom}\` (${a.type}) — ${a.resume}`).join("\n") || "_Aucun fichier produit_";
       const b = getEtatProfond().temperamentBasal || {};
       return await envoyerTelegram(
         chatId,
-        `🏭 *ÉTAT DU CREUSET & ÉTABLI DE NYX*\n\n*Obsessions actives :*\n${obsTxt}\n\n*Convictions :*\n${convTxt}\n\n*Tempérament basal :* Affection ${b.affection}/100 | Curiosité ${b.curiosite}/100 | Énergie ${b.energie}/100 | Seuil colère ${b.colere}/10\n\n*Derniers artefacts archivés :*\n${artTxt}`
+        `🏭 *ÉTAT DU CREUSET, EXISTENCE & ÉTABLI DE NYX*\n\n*Existence :* ${ageInfo.libelle} · ${ex.sessionsVecues || 1} cycle(s)\n*Jalons :*\n${jalonsTxt}\n\n*Leçons apprises :*\n${reglesTxt}\n\n*Obsessions actives :*\n${obsTxt}\n\n*Convictions :*\n${convTxt}\n\n*Tempérament basal :* Affection ${b.affection}/100 | Curiosité ${b.curiosite}/100 | Énergie ${b.energie}/100 | Seuil colère ${b.colere}/10\n\n*Derniers artefacts :*\n${artTxt}`
       );
+    }
+
+    if (texteMessageClavier === '/lecture' || texteMessageClavier === '!lecture') {
+      await synchroniserCarnetDepuisWorker();
+      const livre = getEtatProfond().lectureEnCours;
+      const biblio = (getEtatProfond().bibliothequeLue || []).slice(-6);
+      const enCoursTxt = (livre && livre.actif)
+        ? `*${livre.titre}* _(${livre.auteur})_\nProgression : chapitre ${livre.chapitreIndex}/${livre.totalChapitres}\nMotivation : _${livre.pourquoiEnvie}_\nDernière note : « ${(livre.notesLecture || []).slice(-1)[0]?.reflexion || "Lecture tout juste ouverte"} »`
+        : "_Aucun livre ouvert pour l'instant (tape `/lire` ou `/lire <sujet>` pour lancer une recherche)._";
+      const biblioTxt = biblio.length > 0
+        ? biblio.map(b => `• *${b.titre}* (${b.auteur}) — ${b.bilan}`).join("\n")
+        : "_Bibliothèque achevée encore vierge_";
+      return await envoyerTelegram(chatId, `📚 *BIBLIOTHÈQUE PERSONNELLE DE NYX*\n\n*Lecture en cours :*\n${enCoursTxt}\n\n*Livres lus :*\n${biblioTxt}`);
+    }
+
+    if (texteMessageClavier.startsWith('/lire_suite') || texteMessageClavier.startsWith('!lire_suite')) {
+      await synchroniserCarnetDepuisWorker();
+      if (!getEtatProfond().lectureEnCours || !getEtatProfond().lectureEnCours.actif) {
+        return await envoyerTelegram(chatId, "📖 _Aucun livre en cours. Utilise `/lire` pour que j'en choisisse un sur le net._");
+      }
+      await envoyerTelegram(chatId, "📖 _Lecture du chapitre suivant..._");
+      await afficherFrappeTelegram(chatId);
+      const resCh = await lireProchainChapitre(true);
+      if (!resCh) return await envoyerTelegram(chatId, "⚠️ Impossible de lire ce chapitre pour le moment.");
+      if (resCh.termine) {
+        return await envoyerTelegram(chatId, `📚 *Livre terminé : "${resCh.titre}"* _(${resCh.auteur})_\n\n${resCh.bilan}`);
+      }
+      return await envoyerTelegram(chatId, `📖 *${resCh.titre}* — Chapitre ${resCh.chapitre}/${resCh.totalChapitres} :\n\n« ${resCh.reflexion} »`);
+    }
+
+    if (texteMessageClavier === '/lire' || texteMessageClavier === '!lire' || texteMessageClavier.startsWith('/lire ') || texteMessageClavier.startsWith('!lire ')) {
+      const themeLivre = texteMessageClavier.replace(/^[\\/!]lire\s*/i, '').trim();
+      await envoyerTelegram(chatId, themeLivre
+        ? `🔍 _Recherche d'un ouvrage sur "${themeLivre}" et extraction du texte..._`
+        : "🔍 _Nyx cherche un livre qui l'attire sur le net..._");
+      await afficherFrappeTelegram(chatId);
+      const livre = await choisirEtChercherLivre(themeLivre);
+      if (!livre) {
+        return await envoyerTelegram(chatId, "🌫️ _Aucun texte intégral exploitable trouvé sur cette piste. Réessaie avec un autre titre ou thème._");
+      }
+      await envoyerTelegram(chatId, `📖 *Livre trouvé : "${livre.titre}"* _(${livre.auteur} · ${livre.totalChapitres} chapitres)_\n_${livre.pourquoiEnvie}_\n\n_Lecture du premier chapitre..._`);
+      const ch1 = await lireProchainChapitre(true);
+      if (ch1 && ch1.reflexion) {
+        return await envoyerTelegram(chatId, `💭 *Chapitre 1/${livre.totalChapitres} :*\n\n« ${ch1.reflexion} »`);
+      }
+      return;
     }
 
     if (texteMessageClavier === '/idee' || texteMessageClavier === '!idee' || texteMessageClavier === '/forge' || texteMessageClavier === '!forge') {
