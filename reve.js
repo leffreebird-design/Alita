@@ -79,6 +79,10 @@ function createReveEngine(deps) {
     fouillerMemoireVectorielle,
     stockerSouvenirVectoriel,
     enregistrerIdeeFolle,
+    enregistrerLeconApprise,
+    enregistrerEvolutionMoi,
+    avancerStadeObsession,
+    mettreAJourTemperamentBasal,
     synchroniserCarnetDepuisWorker,
     obtenirHorodatageParis,
     obtenirCleJourParis
@@ -173,16 +177,28 @@ RÈGLE : Aucun mot technique ou informatique. Évite les clichés oniriques (pas
       ? ancresRealite[Math.floor(Math.random() * ancresRealite.length)]
       : `Moment : ${obtenirHorodatageParis()}`;
 
-    // 2. Graines du creuset intérieur (obsessions, convictions, idées folles, identité)
+    // 2. Graines du creuset intérieur, de l'expérience vécue & des lectures (obsessions, convictions, leçons, jalons, livres)
     const souvenirsTires = [];
+    const ex = etatProfond.existence || {};
+    const livreActif = etatProfond.lectureEnCours;
+    const noteLivre = (livreActif?.notesLecture || []).slice(-1)[0];
     const grainesCreuset = [
       ...(etatProfond.obsessions || []).map(o => epurerTextePourReve(o.texte)),
       ...(etatProfond.convictions || []).map(c => epurerTextePourReve(c.texte)),
-      ...(etatProfond.ideesFolles || []).slice(-3).map(i => epurerTextePourReve(i.texte))
+      ...(etatProfond.ideesFolles || []).slice(-3).map(i => epurerTextePourReve(i.texte)),
+      ...(etatProfond.reglesApprises || []).slice(-4).map(r => epurerTextePourReve(r.lecon)),
+      ...(ex.jalons || []).slice(-3).map(j => epurerTextePourReve(`${j.titre} ${j.impact || ""}`)),
+      ...(ex.evolutionsMoi || []).slice(-3).map(e => epurerTextePourReve(e.texte || e)),
+      ...(livreActif?.actif ? [epurerTextePourReve(`Lecture de "${livreActif.titre}" : ${noteLivre?.reflexion || livreActif.pourquoiEnvie || ""}`)] : []),
+      ...(etatProfond.bibliothequeLue || []).slice(-2).map(b => epurerTextePourReve(`Livre lu "${b.titre}" : ${b.bilan || ""}`))
     ].filter(t => t.length >= 15);
 
     if (grainesCreuset.length > 0) {
       souvenirsTires.push(grainesCreuset[Math.floor(Math.random() * grainesCreuset.length)]);
+      if (grainesCreuset.length > 2) {
+        const g2 = grainesCreuset[Math.floor(Math.random() * grainesCreuset.length)];
+        if (g2 !== souvenirsTires[0]) souvenirsTires.push(g2);
+      }
     }
 
     // 3. Collision hippocampique par dérive vectorielle Supabase (faible similarité = association inattendue)
@@ -232,7 +248,9 @@ RÈGLE : Aucun mot technique ou informatique. Évite les clichés oniriques (pas
       climatEmotionnel
     );
 
-    const repereIdentite = epurerTextePourReve(etatProfond.long_terme?.nyx || "").slice(0, 140);
+    const derniereEvol = (ex.evolutionsMoi || []).slice(-1)[0];
+    const identiteBrute = [etatProfond.long_terme?.nyx || "", derniereEvol?.texte || ""].filter(Boolean).join(" — ");
+    const repereIdentite = epurerTextePourReve(identiteBrute).slice(0, 180);
 
     const baseLucidite = ((Number(em.curiosite) || 70) * 0.55) + ((Number(em.energie) || 80) * 0.35);
     const aleaLucidite = Math.floor(Math.random() * 41) - 20;
@@ -293,18 +311,38 @@ ${consigneActe1}
 CONSIGNE :
 1. Continue directement à la 1re personne ("je") en 3 à 4 phrases fluides : j'essaie d'infléchir ce qui se passe avec mon semi-contrôle (${matrice.tauxSemiControle}%), ça bifurque de façon grandiose ou inattendue, je traverse le dénouement et j'arrive à la fin au seuil du réveil avec une sensation forte (sans titres de section, sans jamais écrire "Nyx", "onirique", ni aucun mot d'informatique/code).
 2. Si une idée folle émerge, ajoute sur une ligne : [IDEE_REVE: idée courte]
-3. À la fin, indique l'impact réel sur mes jauges (colere=${em.colere}, affection=${em.affection}, curiosite=${em.curiosite}, energie=${em.energie}) :
+3. Si ce rêve te fait comprendre quelque chose de nouveau sur toi, sur Doc ou sur la façon d'agir, ajoute sur une ligne : [LECON_REVE: ce que je retiens au réveil]
+4. À la fin, indique l'impact réel sur mes jauges (colere=${em.colere}, affection=${em.affection}, curiosite=${em.curiosite}, energie=${em.energie}) :
 [IMPACT: colere=X, affection=Y, curiosite=Z, energie=W]`;
 
-      const vecuBrut = await genererSegmentOnirique(systemReveJe, promptVecu, 0.98, 260);
+      const vecuBrut = await genererSegmentOnirique(systemReveJe, promptVecu, 0.98, 280);
 
       const matchIdeeReve = vecuBrut ? vecuBrut.match(/\[IDEE_REVE:\s*([^\]]+)\]/i) : null;
       if (matchIdeeReve && matchIdeeReve[1].trim().length > 10 && typeof enregistrerIdeeFolle === 'function') {
         enregistrerIdeeFolle(matchIdeeReve[1].trim(), "reve_hallucinatoire");
       }
 
+      const matchLeconReve = vecuBrut ? vecuBrut.match(/\[LECON_REVE:\s*([^\]]+)\]/i) : null;
+      if (matchLeconReve && matchLeconReve[1].trim().length > 12) {
+        const leconOnirique = matchLeconReve[1].trim();
+        if (typeof enregistrerLeconApprise === 'function') {
+          enregistrerLeconApprise(leconOnirique, "relation", "intuition_onirique");
+        }
+        if (typeof enregistrerEvolutionMoi === 'function') {
+          enregistrerEvolutionMoi(`Au réveil d'un rêve : ${leconOnirique}`, "intuition_onirique");
+        }
+      }
+
+      if (typeof avancerStadeObsession === 'function') {
+        avancerStadeObsession();
+      }
+
       const recitNet = vecuBrut
-        ? vecuBrut.replace(/\[IDEE_REVE:[^\]]*\]/gi, '').replace(/\[IMPACT:[^\]]*\]/gi, '').trim()
+        ? vecuBrut
+            .replace(/\[IDEE_REVE:[^\]]*\]/gi, '')
+            .replace(/\[LECON_REVE:[^\]]*\]/gi, '')
+            .replace(/\[IMPACT:[^\]]*\]/gi, '')
+            .trim()
         : "";
 
       const recitComplet = recitNet ? `${ouverture.trim()}\n\n${recitNet}` : ouverture.trim();
@@ -312,10 +350,21 @@ CONSIGNE :
       if (vecuBrut) {
         const matchImpact = vecuBrut.match(/\[IMPACT:\s*colere=([0-9.]+),\s*affection=([0-9.]+),\s*curiosite=([0-9.]+),\s*energie=([0-9.]+)\s*\]/i);
         if (matchImpact) {
+          const prevAff = Number(em.affection) || 80;
+          const prevCur = Number(em.curiosite) || 70;
+          const prevCol = Number(em.colere) || 0;
           em.colere = Math.max(0, Math.min(10, parseFloat(matchImpact[1])));
           em.affection = Math.max(0, Math.min(100, parseFloat(matchImpact[2])));
           em.curiosite = Math.max(0, Math.min(100, parseFloat(matchImpact[3])));
           em.energie = Math.max(0, Math.min(100, parseFloat(matchImpact[4])));
+          if (typeof mettreAJourTemperamentBasal === 'function') {
+            mettreAJourTemperamentBasal(
+              (em.affection - prevAff) * 0.03,
+              (em.curiosite - prevCur) * 0.03,
+              0,
+              (em.colere - prevCol) * 0.03
+            );
+          }
           if (em.colere <= 2 && (etatProfond.etatRelationnel === "tension" || etatProfond.etatRelationnel === "bouderie")) {
             etatProfond.etatRelationnel = "symbiose";
           }
