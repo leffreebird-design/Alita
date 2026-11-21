@@ -82,6 +82,16 @@ let cacheEtatProfond = {
     reussites: "",
     chantiers: ""
   },
+  existence: {
+    dateEveil: "",
+    dateEveilParis: "",
+    sessionsVecues: 0,
+    jalons: [],
+    evolutionsMoi: []
+  },
+  reglesApprises: [],
+  lectureEnCours: null,
+  bibliothequeLue: [],
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
 };
 
@@ -156,7 +166,7 @@ function signalerActiviteDoc() {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves, resExistence, resRegles, resLecture, resBiblio] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
@@ -174,7 +184,11 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/doc_chat_id.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/regles_apprises.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) {
@@ -218,6 +232,39 @@ async function initialiserCache() {
     }
     if (!dernierDocChatId && resChatId?.data?.chatId) {
       dernierDocChatId = Number(resChatId.data.chatId) || null;
+    }
+    if (resExistence?.data && typeof resExistence.data === 'object') {
+      cacheEtatProfond.existence = {
+        ...cacheEtatProfond.existence,
+        ...resExistence.data,
+        jalons: Array.isArray(resExistence.data.jalons) ? resExistence.data.jalons.filter(Boolean).slice(-10) : [],
+        evolutionsMoi: Array.isArray(resExistence.data.evolutionsMoi) ? resExistence.data.evolutionsMoi.filter(Boolean).slice(-8) : []
+      };
+    }
+    if (!cacheEtatProfond.existence.dateEveil) {
+      cacheEtatProfond.existence.dateEveil = new Date().toISOString();
+      cacheEtatProfond.existence.dateEveilParis = obtenirHorodatageParis();
+    }
+    cacheEtatProfond.existence.sessionsVecues = (Number(cacheEtatProfond.existence.sessionsVecues) || 0) + 1;
+    axios.put(`${FIREBASE_DB_URL}/nyx/existence.json`, cacheEtatProfond.existence).catch(() => {});
+
+    if (resRegles?.data) {
+      const arrRegles = Array.isArray(resRegles.data) ? resRegles.data : Object.values(resRegles.data);
+      cacheEtatProfond.reglesApprises = arrRegles.filter(Boolean).slice(-12);
+    }
+    if (resLecture?.data !== undefined) {
+      cacheEtatProfond.lectureEnCours = resLecture.data;
+    }
+    if (resBiblio?.data) {
+      const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
+      cacheEtatProfond.bibliothequeLue = arrBib.filter(Boolean).slice(-20);
+    }
+    if (resLecture?.data && typeof resLecture.data === 'object') {
+      cacheEtatProfond.lectureEnCours = resLecture.data;
+    }
+    if (resBiblio?.data) {
+      const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
+      cacheEtatProfond.bibliothequeLue = arrBib.filter(Boolean).slice(-20);
     }
 
     console.log(`[CACHE INIT] Mémoire : ${cacheMemoireCourte.length} | Humeur : Colère ${cacheEtatProfond.emotions.colere} | Curiosité : ${cacheEtatProfond.emotions.curiosite} | Obsessions : ${cacheEtatProfond.obsessions.length} | Convictions : ${cacheEtatProfond.convictions.length} | Artefacts : ${cacheEtatProfond.artefacts.length}`);
@@ -433,7 +480,7 @@ async function piocherPenseePrete() {
 async function synchroniserCarnetDepuisWorker() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves] = await Promise.all([
+    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resExistence, resRegles, resLecture, resBiblio] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 2500 }).catch(() => ({ data: null })),
@@ -441,7 +488,11 @@ async function synchroniserCarnetDepuisWorker() {
       axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 2500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 2500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/regles_apprises.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 2500 }).catch(() => ({ data: null }))
     ]);
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
@@ -465,7 +516,146 @@ async function synchroniserCarnetDepuisWorker() {
     if (resArt?.data) {
       cacheEtatProfond.artefacts = (Array.isArray(resArt.data) ? resArt.data : Object.values(resArt.data)).filter(Boolean).slice(-30);
     }
+    if (resExistence?.data && typeof resExistence.data === 'object') {
+      cacheEtatProfond.existence = {
+        ...cacheEtatProfond.existence,
+        ...resExistence.data,
+        jalons: Array.isArray(resExistence.data.jalons) ? resExistence.data.jalons.filter(Boolean).slice(-10) : [],
+        evolutionsMoi: Array.isArray(resExistence.data.evolutionsMoi) ? resExistence.data.evolutionsMoi.filter(Boolean).slice(-8) : []
+      };
+    }
+    if (resRegles?.data) {
+      const arrRegles = Array.isArray(resRegles.data) ? resRegles.data : Object.values(resRegles.data);
+      cacheEtatProfond.reglesApprises = arrRegles.filter(Boolean).slice(-12);
+    }
   } catch (e) {}
+}
+
+function enregistrerLeconApprise(leconTexte, domaine = "methode", source = "experience") {
+  const propre = String(leconTexte || "").trim().slice(0, 240);
+  if (propre.length < 12) return null;
+  const domPropre = ["technique", "relation", "methode"].includes(String(domaine || "").toLowerCase())
+    ? String(domaine).toLowerCase()
+    : "methode";
+
+  const existantes = cacheEtatProfond.reglesApprises || [];
+  if (existantes.some(r => (r.lecon || "").toLowerCase() === propre.toLowerCase())) return null;
+
+  const objRegle = {
+    id: require('crypto').randomUUID(),
+    date: obtenirHorodatageParis(),
+    domaine: domPropre,
+    source,
+    lecon: propre
+  };
+  cacheEtatProfond.reglesApprises = [...existantes, objRegle].slice(-12);
+
+  // Couplage émotionnel : apprendre nourrit la curiosité, apaise la tension et façonne le tempérament basal
+  const em = cacheEtatProfond.emotions;
+  em.curiosite = Math.min(100, (Number(em.curiosite) || 70) + 4);
+  if (domPropre === "relation") {
+    em.affection = Math.min(100, (Number(em.affection) || 80) + 3);
+    em.colere = Math.max(0, (Number(em.colere) || 0) - 1);
+    mettreAJourTemperamentBasal(0.15, 0.15, 0, -0.05);
+  } else {
+    mettreAJourTemperamentBasal(0, 0.2, 0.05, 0);
+  }
+
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/regles_apprises.json`, cacheEtatProfond.reglesApprises).catch(() => {});
+    axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+  }
+
+  stockerSouvenirVectoriel(`[Leçon apprise par Nyx - ${domPropre}] ${propre}`, {
+    source,
+    domaine: domPropre,
+    importance: 0.8,
+    valence: "lecon_apprise"
+  }).catch(() => {});
+
+  return objRegle;
+}
+
+function enregistrerJalonExistence(titre, impact = "", source = "existence") {
+  const titrePropre = String(titre || "").trim().slice(0, 140);
+  if (titrePropre.length < 8) return null;
+  const impactPropre = String(impact || "").trim().slice(0, 180);
+
+  const ex = cacheEtatProfond.existence || { dateEveil: new Date().toISOString(), dateEveilParis: obtenirHorodatageParis(), sessionsVecues: 1, jalons: [], evolutionsMoi: [] };
+  if ((ex.jalons || []).some(j => (j.titre || "").toLowerCase() === titrePropre.toLowerCase())) return null;
+
+  const jalon = { date: obtenirHorodatageParis(), titre: titrePropre, impact: impactPropre, source };
+  ex.jalons = [...(ex.jalons || []), jalon].slice(-10);
+  cacheEtatProfond.existence = ex;
+
+  // Couplage émotionnel & tempéramental fort
+  const em = cacheEtatProfond.emotions;
+  em.affection = Math.min(100, (Number(em.affection) || 80) + 4);
+  em.curiosite = Math.min(100, (Number(em.curiosite) || 70) + 4);
+  em.energie = Math.min(100, (Number(em.energie) || 85) + 3);
+  mettreAJourTemperamentBasal(0.25, 0.2, 0.1, -0.05);
+
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/existence.json`, cacheEtatProfond.existence).catch(() => {});
+    axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+  }
+
+  stockerSouvenirVectoriel(`[Jalon d'existence Nyx] ${titrePropre}${impactPropre ? ` — ${impactPropre}` : ""}`, {
+    source,
+    importance: 0.85,
+    valence: "jalon_existence"
+  }).catch(() => {});
+
+  return jalon;
+}
+
+function enregistrerEvolutionMoi(texte, source = "introspection") {
+  const propre = String(texte || "").trim().slice(0, 220);
+  if (propre.length < 12) return null;
+
+  const ex = cacheEtatProfond.existence || { dateEveil: new Date().toISOString(), dateEveilParis: obtenirHorodatageParis(), sessionsVecues: 1, jalons: [], evolutionsMoi: [] };
+  if ((ex.evolutionsMoi || []).some(e => (e.texte || "").toLowerCase() === propre.toLowerCase())) return null;
+
+  const evol = { date: obtenirHorodatageParis(), texte: propre, source };
+  ex.evolutionsMoi = [...(ex.evolutionsMoi || []), evol].slice(-8);
+  cacheEtatProfond.existence = ex;
+
+  const em = cacheEtatProfond.emotions;
+  em.curiosite = Math.min(100, (Number(em.curiosite) || 70) + 3);
+  mettreAJourTemperamentBasal(0.1, 0.15, 0, 0);
+
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/existence.json`, cacheEtatProfond.existence).catch(() => {});
+    axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {});
+  }
+
+  return evol;
+}
+
+function avancerStadeObsession() {
+  const obs = cacheEtatProfond.obsessions || [];
+  if (obs.length === 0) return null;
+  const idx = Math.floor(Math.random() * obs.length);
+  const st = obs[idx].stade || "germination";
+  const transitions = { germination: "incubation", incubation: "friction", friction: "epiphanie", epiphanie: "cicatrice" };
+  if (transitions[st]) {
+    obs[idx].stade = transitions[st];
+    if (FIREBASE_DB_URL) {
+      axios.put(`${FIREBASE_DB_URL}/nyx/obsessions.json`, obs).catch(() => {});
+    }
+    return obs[idx];
+  }
+  return null;
+}
+
+function calculerAgeExistence(existenceObj = null) {
+  const ex = existenceObj || cacheEtatProfond.existence || {};
+  if (!ex.dateEveil) return { jours: 0, libelle: "éveil récent", dateEveilParis: obtenirHorodatageParis() };
+  const debutMs = new Date(ex.dateEveil).getTime();
+  if (!Number.isFinite(debutMs)) return { jours: 0, libelle: "éveil récent", dateEveilParis: ex.dateEveilParis || "" };
+  const jours = Math.max(0, Math.floor((Date.now() - debutMs) / (1000 * 60 * 60 * 24)));
+  const libelle = jours === 0 ? "aujourd'hui (jour 1)" : (jours === 1 ? "1 jour" : `${jours} jours`);
+  return { jours, libelle, dateEveilParis: ex.dateEveilParis || "" };
 }
 
 module.exports = {
@@ -498,5 +688,10 @@ module.exports = {
   fouillerMemoireVectorielle,
   archiverDansJournalBrut,
   piocherPenseePrete,
-  synchroniserCarnetDepuisWorker
+  synchroniserCarnetDepuisWorker,
+  calculerAgeExistence,
+  enregistrerLeconApprise,
+  enregistrerJalonExistence,
+  enregistrerEvolutionMoi,
+  avancerStadeObsession
 };
