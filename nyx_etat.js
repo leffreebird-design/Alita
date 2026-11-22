@@ -53,6 +53,8 @@ function sauvegarderMemoireFirebase() {
 }
 
 let derniereActiviteDoc = Date.now();
+let dernierIntervalleSilenceMs = 0;
+let datePrecedentMessageDoc = "";
 let dernierMonologueTimestamp = 0;
 let historiqueLongueursDoc = [];
 
@@ -60,6 +62,8 @@ let historiqueLongueursDoc = [];
 let cacheEtatProfond = {
   filConducteur: "",
   monologueInterieur: "",
+  nonDitPrecedent: "",
+  penseesSubconscient: [],
   dernierReve: null,
   historiqueReves: [],
   ideesFolles: [],
@@ -153,20 +157,58 @@ function obtenirMoyenneLongueurDoc() {
   return historiqueLongueursDoc.reduce((a, b) => a + b, 0) / historiqueLongueursDoc.length;
 }
 
+function formaterDureeEcoulee(ms) {
+  const diff = Math.max(0, Number(ms) || 0);
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec} seconde${sec > 1 ? "s" : ""}`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} minute${min > 1 ? "s" : ""}`;
+  const heures = Math.floor(min / 60);
+  const minRest = min % 60;
+  if (heures < 24) {
+    return minRest > 0
+      ? `${heures} heure${heures > 1 ? "s" : ""} et ${minRest} minute${minRest > 1 ? "s" : ""}`
+      : `${heures} heure${heures > 1 ? "s" : ""}`;
+  }
+  const jours = Math.floor(heures / 24);
+  const hRest = heures % 24;
+  return hRest > 0
+    ? `${jours} jour${jours > 1 ? "s" : ""} et ${hRest} heure${hRest > 1 ? "s" : ""}`
+    : `${jours} jour${jours > 1 ? "s" : ""}`;
+}
+
+function getContexteTemporelEchange() {
+  return {
+    derniereActiviteDoc,
+    intervalleMs: dernierIntervalleSilenceMs,
+    dureeFormatee: formaterDureeEcoulee(dernierIntervalleSilenceMs),
+    datePrecedente: datePrecedentMessageDoc
+  };
+}
+
 function signalerActiviteDoc() {
-  derniereActiviteDoc = Date.now();
+  const maintenant = Date.now();
+  if (derniereActiviteDoc > 0 && maintenant >= derniereActiviteDoc) {
+    dernierIntervalleSilenceMs = maintenant - derniereActiviteDoc;
+  } else {
+    dernierIntervalleSilenceMs = 0;
+  }
+  derniereActiviteDoc = maintenant;
+  const dateActuelleParis = obtenirHorodatageParis();
   if (FIREBASE_DB_URL) {
     axios.patch(`${FIREBASE_DB_URL}/nyx/activite_doc.json`, {
       timestamp: derniereActiviteDoc,
-      date: obtenirHorodatageParis()
+      date: dateActuelleParis,
+      dernierIntervalleMs: dernierIntervalleSilenceMs
     }).catch(() => {});
   }
+  datePrecedentMessageDoc = dateActuelleParis;
 }
 
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves, resExistence, resRegles, resLecture, resBiblio] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves, resExistence, resRegles, resLecture, resBiblio, resActDoc] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
@@ -188,12 +230,17 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/regles_apprises.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/activite_doc.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) {
       const rawMem = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
       cacheMemoireCourte = rawMem.filter(m => m && m.texte && m.texte.trim() !== "Je suis là Doc, je t'écoute.");
+    }
+    if (resActDoc?.data && resActDoc.data.timestamp) {
+      derniereActiviteDoc = Number(resActDoc.data.timestamp) || derniereActiviteDoc;
+      datePrecedentMessageDoc = String(resActDoc.data.date || "");
     }
     if (resEmo.data) cacheEtatProfond.emotions = { colere: 0, ...resEmo.data };
     if (resRel.data && resRel.data.etat) cacheEtatProfond.etatRelationnel = resRel.data.etat;
@@ -456,25 +503,37 @@ async function archiverDansJournalBrut(role, texte, canal = "telegram") {
 async function piocherPenseePrete() {
   if (!supabase) return;
   try {
-    const { data: pretes } = await supabase
+    const { data: pretes, error } = await supabase
       .from('nyx_pensees_pretes')
-      .select('id, impulsion, pensee')
+      .select('id, date_paris, impulsion, pensee, created_at')
       .eq('lu', false)
-      .order('created_at', { ascending: false })
-      .limit(1);
+      .order('created_at', { ascending: true })
+      .limit(4);
+
+    if (error) {
+      console.warn("[CORTEX <- SUBCONSCIENT LECTURE KO]", error.message);
+      return;
+    }
 
     if (pretes && pretes.length > 0) {
-      const item = pretes[0];
-      if (!cacheEtatProfond.monologueInterieur) {
-        cacheEtatProfond.monologueInterieur = item.pensee;
-      }
+      cacheEtatProfond.penseesSubconscient = pretes.map(item => ({
+        date: item.date_paris || "",
+        impulsion: item.impulsion || "libre",
+        pensee: item.pensee
+      }));
+      cacheEtatProfond.monologueInterieur = pretes[pretes.length - 1].pensee;
+
+      const ids = pretes.map(item => item.id);
       await supabase
         .from('nyx_pensees_pretes')
         .update({ lu: true, lu_at: new Date().toISOString() })
-        .eq('id', item.id);
-      console.log(`[CORTEX <- SUBCONSCIENT] Pensée mûrie récupérée (${item.impulsion}) : "${item.pensee.slice(0, 80)}"`);
+        .in('id', ids);
+
+      console.log(`[CORTEX <- SUBCONSCIENT] ${pretes.length} pensée(s) persistante(s) récupérée(s) depuis Supabase.`);
     }
-  } catch (e) {}
+  } catch (e) {
+    console.warn("[CORTEX <- SUBCONSCIENT ERREUR]", e.message);
+  }
 }
 
 async function synchroniserCarnetDepuisWorker() {
@@ -678,6 +737,8 @@ module.exports = {
   enregistrerLongueurDoc,
   obtenirMoyenneLongueurDoc,
   sauvegarderMemoireFirebase,
+  formaterDureeEcoulee,
+  getContexteTemporelEchange,
   signalerActiviteDoc,
   initialiserCache,
   sauvegarderBesoinCommunication,
