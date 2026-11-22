@@ -1,8 +1,3 @@
-
-
-
-Icône JS
-ecoute
 // ==========================================
 // NYX CORE — POINT D'ENTRÉE PRINCIPAL (ecoute.js)
 // Architecture modulaire :
@@ -2597,4 +2592,3 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   console.error("🛡️ [CORTEX UNHANDLED REJECTION] Promesse interceptée :", reason?.stack || reason?.message || reason);
 });
-Traité et analysé dans le code
