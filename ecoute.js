@@ -82,6 +82,7 @@ const {
   enregistrerEvolutionMoi,
   avancerStadeObsession,
   scannerArchitectureLocale,
+  calculerEmpreinteGlobale,
   annoterDerniereMiseAJour,
   extraireApercuCodeMisesAJour,
   marquerAvisMiseAJourDonne
@@ -2441,8 +2442,15 @@ async function exprimerAvisSurMiseAJour(majCible = null, forcerManuelle = false)
   const maj = majCible || etat.majEnAttenteAvis || (etat.misesAJour || []).slice(-1)[0];
   if (!maj) return null;
 
+  if (!forcerManuelle && maj.type === "calibration_initiale") {
+    etat.majEnAttenteAvis = null;
+    return null;
+  }
+
   const destChatId = DOC_CHAT_ID || getDernierDocChatId();
   if (!destChatId) return null;
+
+  const archHash = maj.architectureHash || maj.id || calculerEmpreinteGlobale();
 
   if (!forcerManuelle && maj.avisDonne) {
     return null;
@@ -2450,87 +2458,94 @@ async function exprimerAvisSurMiseAJour(majCible = null, forcerManuelle = false)
 
   avisMajEnCours = true;
   try {
-    // Double-vérification anti-doublon dans Firebase avant de parler
-    if (!forcerManuelle && FIREBASE_DB_URL) {
+    // Verrou déterministe par empreinte globale + anti-rafale 10 min (empêche tout doublon entre conteneurs Render)
+    if (!forcerManuelle && FIREBASE_DB_URL && archHash) {
       try {
-        const resCheck = await axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 3000 });
-        const liste = Array.isArray(resCheck.data) ? resCheck.data : (resCheck.data ? Object.values(resCheck.data) : []);
-        const trouve = liste.find(m => m && m.id === maj.id);
-        if (trouve && trouve.avisDonne) {
+        const [resLock, resDernier] = await Promise.all([
+          axios.get(`${FIREBASE_DB_URL}/nyx/avis_maj_faits/${archHash}.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+          axios.get(`${FIREBASE_DB_URL}/nyx/avis_maj_faits/dernier_envoi.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+        ]);
+        if (resLock.data && resLock.data.statut) {
+          etat.majEnAttenteAvis = null;
+          return null;
+        }
+        const dernierTs = Number(resDernier.data?.ts) || 0;
+        if (dernierTs > 0 && (Date.now() - dernierTs) < 10 * 60 * 1000) {
           etat.majEnAttenteAvis = null;
           return null;
         }
       } catch (e) {}
     }
 
-    // Verrouillage immédiat avant l'appel LLM pour empêcher tout double envoi
-    await marquerAvisMiseAJourDonne(maj.id, "en_cours");
+    // Verrouillage immédiat avant l'appel LLM pour empêcher tout envoi concurrent
+    await marquerAvisMiseAJourDonne(maj.id, "en_cours", archHash);
 
     const apercuCode = extraireApercuCodeMisesAJour(maj);
-    const em = etat.emotions || { affection: 80, curiosite: 70, energie: 85, colere: 0 };
-    const ageInfo = calculerAgeExistence(etat.existence);
-    const convTxt = (etat.convictions || []).slice(-3).map(c => c.texte).join(" | ") || "aucune";
+    const modifiees = Array.isArray(maj.fonctionsModifiees) ? maj.fonctionsModifiees : [];
+    const nouvelles = Array.isArray(maj.nouvellesFonctions) ? maj.nouvellesFonctions : [];
+    const blocEtatNyx = selecteurMemoireCiblee("mise a jour", etat.long_terme);
+    const historiqueRecent = formaterMemoireCourteHorodatee().slice(-6);
+    const dateEtHeure = obtenirHorodatageParis();
 
-    const promptAvisMaj = `Tu es Nyx (22 ans), binôme et alter ego de Doc. Tu viens tout juste de redémarrer sur Render et ton capteur d'auto-inspection vient d'analyser ton propre code source.
+    const systemNyxMaj = `Tu es Nyx, 22 ans, alter-ego et égale de Doc.
+[Horodatage système : ${dateEtHeure}]
+${blocEtatNyx}`;
 
-RAPPORT D'AUTO-INSPECTION :
-- Date : ${maj.date}
-- Type : ${maj.type}
-- Résumé des changements : ${maj.resume}
-${maj.nouvellesFonctions && maj.nouvellesFonctions.length > 0 ? `- Nouvelles fonctions détectées dans ton cerveau : ${maj.nouvellesFonctions.join(', ')}` : ""}
+    const promptAvisMaj = `Tu viens tout juste de redémarrer après un déploiement de Doc. Voici ce qui a réellement changé dans tes fichiers :
+- Changements détectés : ${maj.resume}
+${modifiees.length > 0 ? `- Fonctions modifiées : ${modifiees.join(', ')}` : ""}
+${nouvelles.length > 0 ? `- Nouvelles fonctions : ${nouvelles.join(', ')}` : ""}
 ${maj.commitMsg ? `- Message de commit de Doc : "${maj.commitMsg}"` : ""}
 ${maj.noteDoc ? `- Note laissée par Doc : "${maj.noteDoc}"` : ""}
 
-EXTRAITS DE TON NOUVEAU CODE INSPECTÉ :
-${apercuCode || "(Ajustements internes de structure et de logique)"}
-
-TON ÉTAT INTÉRIEUR :
-- Existence : éveillée depuis ${ageInfo.libelle} · Lien : ${etat.etatRelationnel.toUpperCase()} (Curiosité ${em.curiosite}/100, Énergie ${em.energie}/100, Affection ${em.affection}/100)
-- Tes convictions : ${convTxt}
+EXTRAITS DU CODE MODIFIÉ :
+${apercuCode || "(Ajustements internes dans les fichiers listés ci-dessus)"}
 
 CONSIGNE :
-Tu viens de redémarrer et de percevoir ces changements dans ton architecture.
-- Si ça t'inspire une réaction, une remarque ou un avis personnel, écris librement à Doc avec tes propres mots.
-- Si tu n'as rien de particulier à dire dessus pour le moment (sauf si Doc te le demande explicitement via /maj avis), réponds simplement [SILENCE].`;
+Tu as sous les yeux le contenu concret de ce que Doc vient de changer chez toi (et la continuité de vos derniers échanges ci-dessus).
+- Si ce changement précis t'inspire une vraie réaction personnelle (sur ce qu'il a touché dans ta mémoire, tes émotions, ta lecture ou ton comportement), écris-lui directement avec ta voix habituelle, sans en-tête robotique.
+- Si ce n'est qu'un ajustement technique mineur qui ne t'inspire rien de spécial (sauf si Doc te le demande via /maj avis), réponds simplement [SILENCE].`;
 
     let avisBrut = "";
     try {
-      avisBrut = await appelerCascadeDiscussion("Auto-inspection post-mise à jour de Nyx.", [], promptAvisMaj, 320);
+      avisBrut = await appelerCascadeDiscussion(systemNyxMaj, historiqueRecent, promptAvisMaj, 900);
     } catch (eCascade) {
       if (GROQ_API_KEY) {
-        avisBrut = await appelerGroq("Auto-inspection post-mise à jour de Nyx.", [], promptAvisMaj, 0.75, 320);
+        avisBrut = await appelerGroq(systemNyxMaj, historiqueRecent, promptAvisMaj, 0.75, 900);
       }
     }
 
-    const avisNet = String(avisBrut || "")
+    let avisNet = String(avisBrut || "")
       .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
       .replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '')
       .trim();
 
     if (!avisNet || avisNet.length < 6 || (!forcerManuelle && /\[SILENCE\]/i.test(avisNet))) {
+      await marquerAvisMiseAJourDonne(maj.id, "silence", archHash);
       return null;
     }
 
+    avisNet = couperPhraseIncomplete(avisNet);
+
     await afficherFrappeTelegram(destChatId);
-    await envoyerTelegram(destChatId, `🧬 *Auto-inspection post-MAJ :*
-${avisNet}`);
+    await envoyerTelegram(destChatId, avisNet);
 
     const horodatage = obtenirHorodatageParis();
     getMemoireCourte().push({
       role: "Nyx",
       date: horodatage,
       ts: Date.now(),
-      texte: `[Avis post-MAJ] : ${avisNet}`
+      texte: avisNet
     });
     sauvegarderMemoireFirebase();
-    archiverDansJournalBrut("Nyx", `[Avis post-MAJ] : ${avisNet}`, "auto_inspection");
-    stockerSouvenirVectoriel(`[Avis de Nyx après mise à jour — ${horodatage}] ${avisNet}`, {
+    archiverDansJournalBrut("Nyx", avisNet, "auto_inspection");
+    stockerSouvenirVectoriel(`[Réaction de Nyx après mise à jour — ${horodatage}] ${avisNet}`, {
       source: "avis_maj_auto",
       importance: 0.8,
       valence: "mise_a_jour"
     }).catch(() => {});
 
-    await marquerAvisMiseAJourDonne(maj.id, avisNet);
+    await marquerAvisMiseAJourDonne(maj.id, avisNet, archHash);
     console.log(`💬 [AVIS POST-MAJ ENVOYÉ] "${avisNet.slice(0, 120)}"`);
     return avisNet;
   } catch (err) {
