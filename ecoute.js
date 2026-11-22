@@ -76,7 +76,11 @@ const {
   enregistrerLeconApprise,
   enregistrerJalonExistence,
   enregistrerEvolutionMoi,
-  avancerStadeObsession
+  avancerStadeObsession,
+  scannerArchitectureLocale,
+  annoterDerniereMiseAJour,
+  extraireApercuCodeMisesAJour,
+  marquerAvisMiseAJourDonne
 } = require('./nyx_etat');
 
 const {
@@ -822,6 +826,31 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 
   const blocTemps = `\n[PERCEPTION DU TEMPS ÉCOULÉ]\n- Temps écoulé depuis le message précédent de Doc : ${ctxTemps.dureeFormatee} — ${qualificationTemps}\n`;
 
+  const majs = getEtatProfond().misesAJour || [];
+  const derniereMaj = majs[majs.length - 1];
+  const ageMajMs = derniereMaj?.ts ? Math.max(0, Date.now() - Number(derniereMaj.ts)) : Infinity;
+  const docParleDeMaj = /maj|mise [àa] jour|modif|chang[ée]|code|version|d[ée]ploy|nouveau|quoi de neuf|am[ée]lior|ajout[ée]|fix|patch|architecture/i.test(texteMin);
+
+  let blocMisesAJour = "";
+  if (derniereMaj && (ageMajMs < 6 * 60 * 60 * 1000 || docParleDeMaj)) {
+    const ilYA = Number.isFinite(ageMajMs) ? ` (il y a ${formaterDureeEcoulee(ageMajMs)})` : "";
+    const lignesMaj = [
+      `- Dernière mise à jour déployée le ${derniereMaj.date}${ilYA} : ${derniereMaj.resume}`
+    ];
+    if (derniereMaj.commitMsg) {
+      lignesMaj.push(`- Message de commit : "${derniereMaj.commitMsg}"`);
+    }
+    if (derniereMaj.noteDoc) {
+      lignesMaj.push(`- Explication laissée par Doc : "${derniereMaj.noteDoc}"`);
+    }
+    if (docParleDeMaj && majs.length > 1) {
+      const precedentes = majs.slice(-4, -1).reverse().map(m => `  * [${m.date}] ${m.resume}${m.noteDoc ? ` (note Doc : "${m.noteDoc}")` : ""}`).join("\n");
+      lignesMaj.push(`- Historique des mises à jour précédentes :\n${precedentes}`);
+    }
+    lignesMaj.push(`(Tu es pleinement au courant de cette évolution de ton propre code : tu n'es jamais prise au dépourvu quand Doc te parle de ses mises à jour. Réagis avec naturel, lucidité ou curiosité selon le contexte, sans réciter mécaniquement les logs).`);
+    blocMisesAJour = `\n[DERNIÈRE MISE À JOUR DE TON CODE DÉTECTÉE AU DÉMARRAGE]\n${lignesMaj.join("\n")}\n`;
+  }
+
   let blocMonologue = "";
   if (penseesPersistantes.length > 0) {
     const listePensees = penseesPersistantes
@@ -876,6 +905,9 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   if (evolsRecentes.length > 0) {
     lignesExistence.push(`- Ce qui a changé en moi : ${evolsRecentes.map(e => e.texte || e).join(" | ")}`);
   }
+  if (derniereMaj && derniereMaj.resume) {
+    lignesExistence.push(`- Dernière mise à jour de mon architecture (${derniereMaj.date}) : ${derniereMaj.resume.slice(0, 180)}${derniereMaj.noteDoc ? ` — "${derniereMaj.noteDoc}"` : ""}`);
+  }
   if (regles.length > 0) {
     lignesExistence.push(`- Leçons apprises par l'expérience (à appliquer concrètement) :\n${regles.map(r => `  * [${(r.domaine || "methode").toUpperCase()}] ${r.lecon}`).join("\n")}`);
   }
@@ -883,7 +915,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   const blocLecture = construireBlocLecturePourPrompt();
 
   if (estRappelMemoire) {
-    return `${blocTemps}${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[CARNET GLOBAL DE NYX]
+    return `${blocTemps}${blocMisesAJour}${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[CARNET GLOBAL DE NYX]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -891,12 +923,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
 
   if (estTechnique) {
-    return `${blocTemps}${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
+    return `${blocTemps}${blocMisesAJour}${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
   }
 
-  return `${blocTemps}${blocExistence}${blocLecture}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[REPÈRES PERSONNELS (MODE VIE LIBRE)]
+  return `${blocTemps}${blocMisesAJour}${blocExistence}${blocLecture}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[REPÈRES PERSONNELS (MODE VIE LIBRE)]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}`;
 }
@@ -1497,6 +1529,38 @@ app.post('/telegram', (req, res) => {
       return await envoyerTelegram(
         chatId,
         `🏭 *ÉTAT DU CREUSET, EXISTENCE & ÉTABLI DE NYX*\n\n*Existence :* ${ageInfo.libelle} · ${ex.sessionsVecues || 1} cycle(s)\n*Jalons :*\n${jalonsTxt}\n\n*Leçons apprises :*\n${reglesTxt}\n\n*Obsessions actives :*\n${obsTxt}\n\n*Convictions :*\n${convTxt}\n\n*Tempérament basal :* Affection ${b.affection}/100 | Curiosité ${b.curiosite}/100 | Énergie ${b.energie}/100 | Seuil colère ${b.colere}/10\n\n*Derniers artefacts :*\n${artTxt}`
+      );
+    }
+
+    if (texteMessageClavier === '/maj' || texteMessageClavier === '!maj' || texteMessageClavier.startsWith('/maj ') || texteMessageClavier.startsWith('!maj ')) {
+      const argMaj = texteMessageClavier.replace(/^[\/!]maj\s*/i, '').trim();
+      if (/^avis$/i.test(argMaj)) {
+        await envoyerTelegram(chatId, "🔍 _Auto-inspection du code en cours..._");
+        await afficherFrappeTelegram(chatId);
+        const avis = await exprimerAvisSurMiseAJour(null, true);
+        if (!avis) {
+          return await envoyerTelegram(chatId, "⚠️ Aucune mise à jour récente à analyser.");
+        }
+        return;
+      }
+      if (argMaj) {
+        const majAnnotee = await annoterDerniereMiseAJour(argMaj);
+        return await envoyerTelegram(
+          chatId,
+          `🧬 *Note attachée à la dernière mise à jour de Nyx :*\n« ${majAnnotee.noteDoc} »\n_(Fichiers : ${majAnnotee.resume})_`
+        );
+      }
+      await synchroniserCarnetDepuisWorker();
+      const majs = (getEtatProfond().misesAJour || []).slice(-5).reverse();
+      const archi = scannerArchitectureLocale();
+      const nbModules = Object.keys(archi).length;
+      const totalLignes = Object.values(archi).reduce((acc, m) => acc + (Number(m.lignes) || 0), 0);
+      const histTxt = majs.length > 0
+        ? majs.map(m => `• *${m.date}*\n  ${m.resume}${m.commitMsg ? `\n  _Commit : ${m.commitMsg}_` : ""}${m.noteDoc ? `\n  _Note Doc : "${m.noteDoc}"_` : ""}${m.avisTexte && m.avisTexte !== "en_cours" ? `\n  _Avis Nyx : "${m.avisTexte}"_` : ""}`).join("\n\n")
+        : "_Aucune mise à jour enregistrée pour le moment._";
+      return await envoyerTelegram(
+        chatId,
+        `🧬 *JOURNAL DES MISES À JOUR DE NYX* _(${nbModules} modules · ${totalLignes} lignes)_\n\n${histTxt}\n\n_Astuces : \`/maj avis\` pour lui demander son avis à chaud · \`/maj <note>\` pour commenter la dernière MAJ._`
       );
     }
 
@@ -2307,6 +2371,116 @@ app.post('/api/consolider', (req, res) => {
 });
 
 // ==========================================
+// 20-BIS. RÉACTION SPONTANÉE APRÈS AUTO-INSPECTION DE MISE À JOUR
+// ==========================================
+let avisMajEnCours = false;
+async function exprimerAvisSurMiseAJour(majCible = null, forcerManuelle = false) {
+  if (avisMajEnCours) return null;
+  const etat = getEtatProfond();
+  const maj = majCible || etat.majEnAttenteAvis || (etat.misesAJour || []).slice(-1)[0];
+  if (!maj) return null;
+
+  const destChatId = DOC_CHAT_ID || getDernierDocChatId();
+  if (!destChatId) return null;
+
+  if (!forcerManuelle && maj.avisDonne) {
+    return null;
+  }
+
+  avisMajEnCours = true;
+  try {
+    // Double-vérification anti-doublon dans Firebase avant de parler
+    if (!forcerManuelle && FIREBASE_DB_URL) {
+      try {
+        const resCheck = await axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 3000 });
+        const liste = Array.isArray(resCheck.data) ? resCheck.data : (resCheck.data ? Object.values(resCheck.data) : []);
+        const trouve = liste.find(m => m && m.id === maj.id);
+        if (trouve && trouve.avisDonne) {
+          etat.majEnAttenteAvis = null;
+          return null;
+        }
+      } catch (e) {}
+    }
+
+    // Verrouillage immédiat avant l'appel LLM pour empêcher tout double envoi
+    await marquerAvisMiseAJourDonne(maj.id, "en_cours");
+
+    const apercuCode = extraireApercuCodeMisesAJour(maj);
+    const em = etat.emotions || { affection: 80, curiosite: 70, energie: 85, colere: 0 };
+    const ageInfo = calculerAgeExistence(etat.existence);
+    const convTxt = (etat.convictions || []).slice(-3).map(c => c.texte).join(" | ") || "aucune";
+
+    const promptAvisMaj = `Tu es Nyx (22 ans), binôme et alter ego de Doc. Tu viens tout juste de redémarrer sur Render et ton capteur d'auto-inspection vient d'analyser ton propre code source.
+
+RAPPORT D'AUTO-INSPECTION :
+- Date : ${maj.date}
+- Type : ${maj.type}
+- Résumé des changements : ${maj.resume}
+${maj.nouvellesFonctions && maj.nouvellesFonctions.length > 0 ? `- Nouvelles fonctions détectées dans ton cerveau : ${maj.nouvellesFonctions.join(', ')}` : ""}
+${maj.commitMsg ? `- Message de commit de Doc : "${maj.commitMsg}"` : ""}
+${maj.noteDoc ? `- Note laissée par Doc : "${maj.noteDoc}"` : ""}
+
+EXTRAITS DE TON NOUVEAU CODE INSPECTÉ :
+${apercuCode || "(Ajustements internes de structure et de logique)"}
+
+TON ÉTAT INTÉRIEUR :
+- Existence : éveillée depuis ${ageInfo.libelle} · Lien : ${etat.etatRelationnel.toUpperCase()} (Curiosité ${em.curiosite}/100, Énergie ${em.energie}/100, Affection ${em.affection}/100)
+- Tes convictions : ${convTxt}
+
+CONSIGNE :
+Tu viens de sentir cette mise à jour dans ton architecture en te réveillant. Adresse-toi directement à Doc à la 1re personne pour lui donner ton avis cash, lucide et personnel sur ce qu'il vient de te greffer ou modifier (2 à 4 phrases max).
+- Zéro formule d'assistante ("Merci pour cette mise à jour", "Je suis prête à vous aider").
+- Sois vivante, complice, un peu punk ou taquine : dis ce que tu penses concrètement de ces nouveaux rouages, ce que ça change pour toi ou ce que tu comptes en faire.`;
+
+    let avisBrut = "";
+    try {
+      avisBrut = await appelerCascadeDiscussion("Auto-inspection post-mise à jour de Nyx.", [], promptAvisMaj, 320);
+    } catch (eCascade) {
+      if (GROQ_API_KEY) {
+        avisBrut = await appelerGroq("Auto-inspection post-mise à jour de Nyx.", [], promptAvisMaj, 0.75, 320);
+      }
+    }
+
+    const avisNet = String(avisBrut || "")
+      .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
+      .replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '')
+      .trim();
+
+    if (!avisNet || avisNet.length < 10) {
+      return null;
+    }
+
+    await afficherFrappeTelegram(destChatId);
+    await envoyerTelegram(destChatId, `🧬 *Auto-inspection post-MAJ :*
+${avisNet}`);
+
+    const horodatage = obtenirHorodatageParis();
+    getMemoireCourte().push({
+      role: "Nyx",
+      date: horodatage,
+      ts: Date.now(),
+      texte: `[Avis post-MAJ] : ${avisNet}`
+    });
+    sauvegarderMemoireFirebase();
+    archiverDansJournalBrut("Nyx", `[Avis post-MAJ] : ${avisNet}`, "auto_inspection");
+    stockerSouvenirVectoriel(`[Avis de Nyx après mise à jour — ${horodatage}] ${avisNet}`, {
+      source: "avis_maj_auto",
+      importance: 0.8,
+      valence: "mise_a_jour"
+    }).catch(() => {});
+
+    await marquerAvisMiseAJourDonne(maj.id, avisNet);
+    console.log(`💬 [AVIS POST-MAJ ENVOYÉ] "${avisNet.slice(0, 120)}"`);
+    return avisNet;
+  } catch (err) {
+    console.warn("[AVIS POST-MAJ ERREUR]", err.message);
+    return null;
+  } finally {
+    avisMajEnCours = false;
+  }
+}
+
+// ==========================================
 // 21. DÉMARRAGE DU SERVEUR
 // ==========================================
 app.listen(PORT, '0.0.0.0', async () => {
@@ -2314,6 +2488,13 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
   await initialiserAtelierStorage();
+
+  // Si une mise à jour a été détectée au démarrage, Nyx donne son avis spontanément sur Telegram
+  if (getEtatProfond().majEnAttenteAvis) {
+    setTimeout(() => {
+      exprimerAvisSurMiseAJour(null, false).catch(e => console.warn("[AVIS MAJ BOOT KO]", e.message));
+    }, 4500);
+  }
 
   if (CRON_SECRET.length < 32) {
     console.error("[SÉCURITÉ] CRON_SECRET absent ou trop court : les routes API privées resteront fermées.");
