@@ -102,12 +102,20 @@ function createLectureEngine(deps) {
     obtenirHorodatageParis
   } = deps;
 
-  async function sauvegarderEtatLecture(etat) {
+  async function sauvegarderEtatLecture(etat, chapitresToSave = null) {
     if (!firebaseDbUrl) return;
     if (etat.lectureEnCours) {
-      await axios.put(`${firebaseDbUrl}/nyx/lecture_en_cours.json`, etat.lectureEnCours).catch(() => {});
+      const { chapitres: _ignoreChap, ...metaLegere } = etat.lectureEnCours;
+      etat.lectureEnCours = metaLegere;
+      await axios.put(`${firebaseDbUrl}/nyx/lecture_en_cours.json`, metaLegere).catch(() => {});
+      if (Array.isArray(chapitresToSave) && chapitresToSave.length > 0) {
+        await axios.put(`${firebaseDbUrl}/nyx/lecture_chapitres.json`, chapitresToSave).catch(() => {});
+      }
     } else {
-      await axios.delete(`${firebaseDbUrl}/nyx/lecture_en_cours.json`).catch(() => {});
+      await Promise.all([
+        axios.delete(`${firebaseDbUrl}/nyx/lecture_en_cours.json`).catch(() => {}),
+        axios.delete(`${firebaseDbUrl}/nyx/lecture_chapitres.json`).catch(() => {})
+      ]);
     }
     if (Array.isArray(etat.bibliothequeLue)) {
       await axios.put(`${firebaseDbUrl}/nyx/bibliotheque_lue.json`, etat.bibliothequeLue.slice(-20)).catch(() => {});
@@ -242,13 +250,12 @@ Réponds STRICTEMENT avec un JSON valide :
       dateDebut: obtenirHorodatageParis(),
       chapitreIndex: 0,
       totalChapitres: chapitres.length,
-      chapitres,
       notesLecture: [],
       derniereLectureTs: 0
     };
 
     etat.lectureEnCours = nouvelleLecture;
-    await sauvegarderEtatLecture(etat);
+    await sauvegarderEtatLecture(etat, chapitres);
 
     if (supabase) {
       await supabase.from('nyx_pensees_pretes').insert({
@@ -271,7 +278,7 @@ Réponds STRICTEMENT avec un JSON valide :
   async function lireProchainChapitre(forcer = false) {
     const etat = getEtatProfond();
     const livre = etat.lectureEnCours;
-    if (!livre || !livre.actif || !Array.isArray(livre.chapitres)) return null;
+    if (!livre || !livre.actif) return null;
 
     if (!forcer) {
       if ((etat.emotions?.energie || 80) < 30) return null;
@@ -280,12 +287,32 @@ Réponds STRICTEMENT avec un JSON valide :
       }
     }
 
+    // Chargement paresseux des chapitres depuis Firebase (avec migration douce si l'ancien format est encore en base)
+    let chapitres = null;
+    if (Array.isArray(livre.chapitres) && livre.chapitres.length > 0) {
+      chapitres = livre.chapitres;
+      await sauvegarderEtatLecture(etat, chapitres);
+    } else if (firebaseDbUrl) {
+      try {
+        const resChap = await axios.get(`${firebaseDbUrl}/nyx/lecture_chapitres.json`, { timeout: 6000 });
+        if (Array.isArray(resChap.data)) {
+          chapitres = resChap.data;
+        } else if (resChap.data && typeof resChap.data === 'object') {
+          chapitres = Object.values(resChap.data);
+        }
+      } catch (e) {}
+    }
+
+    if (!Array.isArray(chapitres) || chapitres.length === 0) {
+      return null;
+    }
+
     const idx = Number(livre.chapitreIndex) || 0;
-    if (idx >= livre.chapitres.length) {
+    if (idx >= chapitres.length) {
       return await cloturerLivreTermine();
     }
 
-    const texteChapitre = livre.chapitres[idx];
+    const texteChapitre = chapitres[idx];
     const notesPrecedentes = (livre.notesLecture || [])
       .slice(-2)
       .map(n => `Ch.${n.chapitre} : ${n.reflexion}`)
