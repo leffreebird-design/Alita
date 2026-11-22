@@ -299,13 +299,6 @@ async function initialiserCache() {
       const arrRegles = Array.isArray(resRegles.data) ? resRegles.data : Object.values(resRegles.data);
       cacheEtatProfond.reglesApprises = arrRegles.filter(Boolean).slice(-12);
     }
-    if (resLecture?.data !== undefined) {
-      cacheEtatProfond.lectureEnCours = resLecture.data;
-    }
-    if (resBiblio?.data) {
-      const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
-      cacheEtatProfond.bibliothequeLue = arrBib.filter(Boolean).slice(-20);
-    }
     if (resLecture?.data && typeof resLecture.data === 'object') {
       cacheEtatProfond.lectureEnCours = resLecture.data;
     }
@@ -586,6 +579,13 @@ async function synchroniserCarnetDepuisWorker() {
     if (resRegles?.data) {
       const arrRegles = Array.isArray(resRegles.data) ? resRegles.data : Object.values(resRegles.data);
       cacheEtatProfond.reglesApprises = arrRegles.filter(Boolean).slice(-12);
+    }
+    if (resLecture?.data !== undefined) {
+      cacheEtatProfond.lectureEnCours = resLecture.data;
+    }
+    if (resBiblio?.data) {
+      const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
+      cacheEtatProfond.bibliothequeLue = arrBib.filter(Boolean).slice(-20);
     }
   } catch (e) {}
 }
