@@ -101,6 +101,7 @@ let cacheEtatProfond = {
   misesAJour: [],
   empreinteCode: {},
   majEnAttenteAvis: null,
+  intentionDuJour: null,
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
 };
 
@@ -189,6 +190,25 @@ function getContexteTemporelEchange() {
     dureeFormatee: formaterDureeEcoulee(dernierIntervalleSilenceMs),
     datePrecedente: datePrecedentMessageDoc
   };
+}
+
+function formaterMemoireCourteHorodatee(memoireArray = null) {
+  const source = Array.isArray(memoireArray) ? memoireArray : cacheMemoireCourte;
+  const maintenant = Date.now();
+  return source.map(m => {
+    if (!m || !m.texte) return m;
+    let repere = "";
+    if (m.ts && Number.isFinite(Number(m.ts))) {
+      const diff = Math.max(0, maintenant - Number(m.ts));
+      repere = diff < 60000 ? "à l'instant" : `il y a ${formaterDureeEcoulee(diff)}`;
+    } else if (m.date) {
+      repere = String(m.date);
+    }
+    return {
+      role: m.role,
+      texte: repere ? `[${repere}] ${m.texte}` : m.texte
+    };
+  });
 }
 
 function signalerActiviteDoc() {
@@ -486,7 +506,7 @@ async function marquerAvisMiseAJourDonne(majId, avisTexte = "") {
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves, resExistence, resRegles, resLecture, resBiblio, resActDoc, resEmpreinte, resMaj] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves, resExistence, resRegles, resLecture, resBiblio, resActDoc, resEmpreinte, resMaj, resIntention] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
@@ -511,7 +531,8 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/activite_doc.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/empreinte_code.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/intention_jour.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) {
@@ -580,11 +601,15 @@ async function initialiserCache() {
       cacheEtatProfond.reglesApprises = arrRegles.filter(Boolean).slice(-12);
     }
     if (resLecture?.data && typeof resLecture.data === 'object') {
-      cacheEtatProfond.lectureEnCours = resLecture.data;
+      const { chapitres: _ignoreChap, ...metaLecture } = resLecture.data;
+      cacheEtatProfond.lectureEnCours = metaLecture;
     }
     if (resBiblio?.data) {
       const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
       cacheEtatProfond.bibliothequeLue = arrBib.filter(Boolean).slice(-20);
+    }
+    if (resIntention?.data && typeof resIntention.data === 'object') {
+      cacheEtatProfond.intentionDuJour = resIntention.data;
     }
 
     await verifierMisesAJourAuDemarrage(resEmpreinte?.data, resMaj?.data);
@@ -814,7 +839,7 @@ async function piocherPenseePrete() {
 async function synchroniserCarnetDepuisWorker() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resExistence, resRegles, resLecture, resBiblio, resMajSync] = await Promise.all([
+    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resExistence, resRegles, resLecture, resBiblio, resMajSync, resIntentionSync] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 2500 }).catch(() => ({ data: null })),
@@ -827,7 +852,8 @@ async function synchroniserCarnetDepuisWorker() {
       axios.get(`${FIREBASE_DB_URL}/nyx/regles_apprises.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 2500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 2500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/intention_jour.json`, { timeout: 2500 }).catch(() => ({ data: null }))
     ]);
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
@@ -864,7 +890,12 @@ async function synchroniserCarnetDepuisWorker() {
       cacheEtatProfond.reglesApprises = arrRegles.filter(Boolean).slice(-12);
     }
     if (resLecture?.data !== undefined) {
-      cacheEtatProfond.lectureEnCours = resLecture.data;
+      if (resLecture.data && typeof resLecture.data === 'object') {
+        const { chapitres: _ignoreChap, ...metaLecture } = resLecture.data;
+        cacheEtatProfond.lectureEnCours = metaLecture;
+      } else {
+        cacheEtatProfond.lectureEnCours = resLecture.data;
+      }
     }
     if (resBiblio?.data) {
       const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
@@ -873,6 +904,9 @@ async function synchroniserCarnetDepuisWorker() {
     if (resMajSync?.data) {
       const arrMaj = Array.isArray(resMajSync.data) ? resMajSync.data : Object.values(resMajSync.data);
       cacheEtatProfond.misesAJour = arrMaj.filter(Boolean).slice(-15);
+    }
+    if (resIntentionSync?.data !== undefined) {
+      cacheEtatProfond.intentionDuJour = resIntentionSync.data;
     }
   } catch (e) {}
 }
@@ -1026,6 +1060,7 @@ module.exports = {
   sauvegarderMemoireFirebase,
   formaterDureeEcoulee,
   getContexteTemporelEchange,
+  formaterMemoireCourteHorodatee,
   signalerActiviteDoc,
   initialiserCache,
   sauvegarderBesoinCommunication,
