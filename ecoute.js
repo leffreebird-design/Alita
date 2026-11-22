@@ -62,6 +62,7 @@ const {
   sauvegarderMemoireFirebase,
   formaterDureeEcoulee,
   getContexteTemporelEchange,
+  formaterMemoireCourteHorodatee,
   signalerActiviteDoc,
   initialiserCache,
   sauvegarderBesoinCommunication,
@@ -913,9 +914,14 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
   const blocExistence = `\n[LIGNE DE TEMPS & EXPÉRIENCE ACQUISE DE NYX]\n${lignesExistence.join("\n")}\n`;
   const blocLecture = construireBlocLecturePourPrompt();
+  const intent = getEtatProfond().intentionDuJour;
+  const cleAujourdhui = obtenirCleJourParis();
+  const blocIntention = (intent && intent.cleJour === cleAujourdhui && intent.intention)
+    ? `\n[TON INTENTION DU JOUR (choisie à ton réveil ce matin)]\n- Cap personnel du jour (${intent.domaine || "libre"}) : "${intent.intention}"\n`
+    : "";
 
   if (estRappelMemoire) {
-    return `${blocTemps}${blocMisesAJour}${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[CARNET GLOBAL DE NYX]
+    return `${blocTemps}${blocIntention}${blocMisesAJour}${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[CARNET GLOBAL DE NYX]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}
 - Réussites : ${carnet.reussites || "N/A"}
@@ -923,12 +929,12 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   }
 
   if (estTechnique) {
-    return `${blocTemps}${blocMisesAJour}${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
+    return `${blocTemps}${blocIntention}${blocMisesAJour}${blocExistence}${blocLecture}${blocFil}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocArtefacts}${blocEmotionnel}[MÉMOIRE TECHNIQUE - RECETTES & CHANTIERS]
 - Réussites validées : ${carnet.reussites || "N/A"}
 - Chantiers en cours : ${carnet.chantiers || "N/A"}`;
   }
 
-  return `${blocTemps}${blocMisesAJour}${blocExistence}${blocLecture}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[REPÈRES PERSONNELS (MODE VIE LIBRE)]
+  return `${blocTemps}${blocIntention}${blocMisesAJour}${blocExistence}${blocLecture}${blocMonologue}${blocReve}${blocForge}${blocObsessions}${blocConvictions}${blocEmotionnel}[REPÈRES PERSONNELS (MODE VIE LIBRE)]
 - Doc : ${carnet.doc || "N/A"}
 - Nyx : ${carnet.nyx || "N/A"}`;
 }
@@ -1060,6 +1066,25 @@ Réponds STRICTEMENT avec un JSON valide :
       enregistrerLeconApprise(parsed.lecon_a_retenir, "relation", "sas_temps_reel");
     }
 
+    // Renforcement organique d'une conviction si l'échange la sollicite ou la met à l'épreuve
+    const convsActuelles = getEtatProfond().convictions || [];
+    if (convsActuelles.length > 0 && texteUser.length >= 18) {
+      const motsUser = new Set(texteUser.toLowerCase().split(/[^a-zà-ÿ0-9]+/).filter(w => w.length >= 5));
+      let convRenforcee = false;
+      for (const c of convsActuelles) {
+        const motsConv = String(c.texte || "").toLowerCase().split(/[^a-zà-ÿ0-9]+/).filter(w => w.length >= 5);
+        const chevauchement = motsConv.filter(w => motsUser.has(w)).length;
+        if (chevauchement >= 2) {
+          c.force = Math.min(100, (Number(c.force) || 55) + 4);
+          c.date_maj = obtenirHorodatageParis();
+          convRenforcee = true;
+        }
+      }
+      if (convRenforcee && FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/convictions.json`, convsActuelles).catch(() => {});
+      }
+    }
+
     if (parsed.besoin_parler !== undefined || parsed.motif_besoin !== undefined) {
       const nouveauNiveau = majJauge(parsed.besoin_parler, getEtatProfond().besoinCommunication.niveau, 0, 100);
       sauvegarderBesoinCommunication(nouveauNiveau, parsed.categorie_besoin || "aucun", parsed.motif_besoin || "");
@@ -1176,13 +1201,14 @@ ${evaluerSyntonieRythmique()}
     : "";
 
   const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${blocDeliberation}${injectionSouvenirs}`;
+  const historiqueHorodate = formaterMemoireCourteHorodatee();
 
   let reponseNyx = "";
 
   if (estImage) {
     const sys = `${systemBase}\nMode Vision : Analyse directe, sans filtre.`;
     try {
-      reponseNyx = await appelerGoogleGeminiVision(sys, getMemoireCourte(), promptPourLlm || "Analyse cette image.", mediaData);
+      reponseNyx = await appelerGoogleGeminiVision(sys, historiqueHorodate, promptPourLlm || "Analyse cette image.", mediaData);
     } catch (e) {
       reponseNyx = `[ERREUR VISION] : ${e.message}`;
     }
@@ -1190,7 +1216,7 @@ ${evaluerSyntonieRythmique()}
   else if (estAudio) {
     const sys = `${systemBase}\nMode Audio : Transcris et réponds naturellement avec ta voix de Nyx.`;
     try {
-      reponseNyx = await appelerGoogleGeminiVision(sys, getMemoireCourte(), promptPourLlm, mediaData);
+      reponseNyx = await appelerGoogleGeminiVision(sys, historiqueHorodate, promptPourLlm, mediaData);
     } catch (errGoogle) {
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
     }
@@ -1200,12 +1226,12 @@ ${evaluerSyntonieRythmique()}
     try {
       reponseNyx = await resoudreAvecDoubleVerification(sys, promptPourLlm);
     } catch (errDual) {
-      reponseNyx = await appelerCascadeCode(sys, getMemoireCourte(), promptPourLlm, plafondTokens);
+      reponseNyx = await appelerCascadeCode(sys, historiqueHorodate, promptPourLlm, plafondTokens);
     }
   }
   else {
     try {
-      reponseNyx = await appelerCascadeDiscussion(systemBase, getMemoireCourte(), promptPourLlm, plafondTokens);
+      reponseNyx = await appelerCascadeDiscussion(systemBase, historiqueHorodate, promptPourLlm, plafondTokens);
     } catch (errCascade) {
       console.error("[CASCADE ÉCHEC TOTAL] :", errCascade.message);
       reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
@@ -1526,9 +1552,13 @@ app.post('/telegram', (req, res) => {
       const convTxt = (getEtatProfond().convictions || []).map(c => `• ${c.texte}${c.cicatrice ? ` _(cicatrice : ${c.cicatrice})_` : ""}`).join("\n") || "_Aucune conviction gravée_";
       const artTxt = (getEtatProfond().artefacts || []).slice(-5).map(a => `• \`${a.nom}\` (${a.type}) — ${a.resume}`).join("\n") || "_Aucun fichier produit_";
       const b = getEtatProfond().temperamentBasal || {};
+      const intentAt = getEtatProfond().intentionDuJour;
+      const intentTxt = (intentAt && intentAt.cleJour === obtenirCleJourParis() && intentAt.intention)
+        ? `\n*Intention du jour :* _${intentAt.intention}_`
+        : "";
       return await envoyerTelegram(
         chatId,
-        `🏭 *ÉTAT DU CREUSET, EXISTENCE & ÉTABLI DE NYX*\n\n*Existence :* ${ageInfo.libelle} · ${ex.sessionsVecues || 1} cycle(s)\n*Jalons :*\n${jalonsTxt}\n\n*Leçons apprises :*\n${reglesTxt}\n\n*Obsessions actives :*\n${obsTxt}\n\n*Convictions :*\n${convTxt}\n\n*Tempérament basal :* Affection ${b.affection}/100 | Curiosité ${b.curiosite}/100 | Énergie ${b.energie}/100 | Seuil colère ${b.colere}/10\n\n*Derniers artefacts :*\n${artTxt}`
+        `🏭 *ÉTAT DU CREUSET, EXISTENCE & ÉTABLI DE NYX*\n\n*Existence :* ${ageInfo.libelle} · ${ex.sessionsVecues || 1} cycle(s)${intentTxt}\n*Jalons :*\n${jalonsTxt}\n\n*Leçons apprises :*\n${reglesTxt}\n\n*Obsessions actives :*\n${obsTxt}\n\n*Convictions :*\n${convTxt}\n\n*Tempérament basal :* Affection ${b.affection}/100 | Curiosité ${b.curiosite}/100 | Énergie ${b.energie}/100 | Seuil colère ${b.colere}/10\n\n*Derniers artefacts :*\n${artTxt}`
       );
     }
 
@@ -2512,4 +2542,22 @@ app.listen(PORT, '0.0.0.0', async () => {
   } else if (TELEGRAM_BOT_TOKEN) {
     console.error("[SÉCURITÉ] Webhook Telegram non configuré : TELEGRAM_WEBHOOK_SECRET doit contenir au moins 32 caractères.");
   }
+
+  // Ping croisé anti-veille vers le worker Subconscient s'il expose une URL HTTP
+  const subconscientUrl = assainirParametre(process.env.SUBCONSCIENT_URL).replace(/\/$/, '');
+  if (subconscientUrl && /^https?:\/\//i.test(subconscientUrl)) {
+    setInterval(() => {
+      axios.get(`${subconscientUrl}/ping`, { timeout: 6000 }).catch(() => {});
+    }, 10 * 60 * 1000);
+    console.log(`💓 [SURVIE] Ping croisé actif vers ${subconscientUrl}/ping`);
+  }
+});
+
+// Bouclier anti-crash global (évite l'arrêt brutal sur erreur asynchrone isolée)
+process.on('uncaughtException', (err) => {
+  console.error("🛡️ [CORTEX UNCAUGHT EXCEPTION] Survie maintenue :", err?.stack || err?.message || err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error("🛡️ [CORTEX UNHANDLED REJECTION] Promesse interceptée :", reason?.stack || reason?.message || reason);
 });
