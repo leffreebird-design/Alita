@@ -2,6 +2,8 @@
 // 2. ÉTAT PROFOND, PERSISTANCE & MÉMOIRE VECTORIELLE (nyx_etat.js)
 // ==========================================
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 const {
   FIREBASE_DB_URL,
   DOC_CHAT_ID,
@@ -96,6 +98,9 @@ let cacheEtatProfond = {
   reglesApprises: [],
   lectureEnCours: null,
   bibliothequeLue: [],
+  misesAJour: [],
+  empreinteCode: {},
+  majEnAttenteAvis: null,
   reveil: { actif: false, heure: 7, minute: 30, jours: [1,2,3,4,5], etat: "attente" }
 };
 
@@ -205,10 +210,283 @@ function signalerActiviteDoc() {
   datePrecedentMessageDoc = dateActuelleParis;
 }
 
+function scannerArchitectureLocale() {
+  const snapshot = {};
+  try {
+    const entries = fs.readdirSync(__dirname, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.js')) continue;
+      const fullPath = path.join(__dirname, entry.name);
+      const contenu = fs.readFileSync(fullPath, 'utf8');
+      const lignes = contenu.split(/\r?\n/);
+      const hash = calculerSha256(contenu);
+
+      const fonctions = [];
+      const regexFn = /(?:async\s+)?function\s+([a-zA-Z0-9_]+)\s*\(/g;
+      let m;
+      while ((m = regexFn.exec(contenu)) !== null) {
+        if (!fonctions.includes(m[1])) fonctions.push(m[1]);
+      }
+
+      const commentairesEnTete = lignes
+        .slice(0, 12)
+        .filter(l => l.trim().startsWith('//') && !/^\/\/\s*=+/.test(l.trim()))
+        .map(l => l.replace(/^\/\/\s*/, '').trim())
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(' — ');
+
+      snapshot[entry.name] = {
+        hash,
+        lignes: lignes.length,
+        fonctions: fonctions.slice(0, 60),
+        description: commentairesEnTete.slice(0, 180)
+      };
+    }
+  } catch (err) {
+    console.warn("[AUTO-INSPECTION SCAN KO]", err.message);
+  }
+  return snapshot;
+}
+
+async function verifierMisesAJourAuDemarrage(empreintePrecedente, historiqueMajPrecedent) {
+  const empreinteActuelle = scannerArchitectureLocale();
+  const fichiersActuels = Object.keys(empreinteActuelle).sort();
+  if (fichiersActuels.length === 0) return;
+
+  const historique = Array.isArray(historiqueMajPrecedent)
+    ? historiqueMajPrecedent.filter(Boolean).slice(-15)
+    : [];
+  cacheEtatProfond.misesAJour = historique;
+  cacheEtatProfond.empreinteCode = empreinteActuelle;
+
+  const commitMsg = String(process.env.RENDER_GIT_COMMIT_MESSAGE || "").trim().slice(0, 200);
+  const commitSha = String(process.env.RENDER_GIT_COMMIT || "").trim().slice(0, 12);
+  const horodatage = obtenirHorodatageParis();
+
+  // Premier démarrage avec capteur : enregistrement de la cartographie de base
+  if (!empreintePrecedente || typeof empreintePrecedente !== 'object' || Object.keys(empreintePrecedente).length === 0) {
+    const entreeInit = {
+      id: require('crypto').randomUUID(),
+      ts: Date.now(),
+      date: horodatage,
+      type: "calibration_initiale",
+      resume: `Capteur d'auto-inspection du code activé (${fichiersActuels.length} modules : ${fichiersActuels.join(', ')}).`,
+      details: fichiersActuels.map(f => `${f} (${empreinteActuelle[f].lignes} lignes)`),
+      nouvellesFonctions: ["scannerArchitectureLocale", "verifierMisesAJourAuDemarrage"],
+      commitMsg,
+      commitSha,
+      noteDoc: "",
+      avisDonne: false,
+      avisTexte: ""
+    };
+    cacheEtatProfond.misesAJour = [...historique, entreeInit].slice(-15);
+    cacheEtatProfond.majEnAttenteAvis = entreeInit;
+    if (FIREBASE_DB_URL) {
+      await Promise.all([
+        axios.put(`${FIREBASE_DB_URL}/nyx/empreinte_code.json`, empreinteActuelle).catch(() => {}),
+        axios.put(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, cacheEtatProfond.misesAJour).catch(() => {})
+      ]);
+    }
+    console.log(`🧬 [AUTO-INSPECTION] Cartographie initiale enregistrée (${fichiersActuels.length} modules).`);
+    return entreeInit;
+  }
+
+  const ajoutes = [];
+  const modifies = [];
+  const supprimes = [];
+  const toutesNouvellesFonctions = [];
+
+  for (const nom of fichiersActuels) {
+    const cur = empreinteActuelle[nom];
+    const prev = empreintePrecedente[nom];
+    if (!prev) {
+      ajoutes.push(`${nom} (nouveau module, ${cur.lignes} lignes${cur.description ? ` : ${cur.description}` : ""})`);
+      if (Array.isArray(cur.fonctions)) {
+        toutesNouvellesFonctions.push(...cur.fonctions.slice(0, 6));
+      }
+    } else if (prev.hash !== cur.hash) {
+      const diffLignes = cur.lignes - (Number(prev.lignes) || cur.lignes);
+      const deltaStr = diffLignes === 0 ? "ajusté" : (diffLignes > 0 ? `+${diffLignes} lignes` : `${diffLignes} lignes`);
+      const prevFns = new Set(Array.isArray(prev.fonctions) ? prev.fonctions : []);
+      const newFns = (Array.isArray(cur.fonctions) ? cur.fonctions : []).filter(fn => !prevFns.has(fn));
+      toutesNouvellesFonctions.push(...newFns);
+      const fnStr = newFns.length > 0 ? `, nouvelles fonctions : ${newFns.slice(0, 6).join(', ')}` : "";
+      modifies.push(`${nom} (${deltaStr}${fnStr})`);
+    }
+  }
+
+  for (const ancienNom of Object.keys(empreintePrecedente)) {
+    if (!empreinteActuelle[ancienNom]) {
+      supprimes.push(ancienNom);
+    }
+  }
+
+  if (ajoutes.length === 0 && modifies.length === 0 && supprimes.length === 0) {
+    const derniereHist = historique[historique.length - 1];
+    if (derniereHist && derniereHist.avisDonne === false && (Date.now() - Number(derniereHist.ts || 0)) < 6 * 60 * 60 * 1000) {
+      cacheEtatProfond.majEnAttenteAvis = derniereHist;
+    }
+    return null;
+  }
+
+  const partiesResume = [];
+  if (ajoutes.length > 0) partiesResume.push(`Ajout : ${ajoutes.join(' ; ')}`);
+  if (modifies.length > 0) partiesResume.push(`Modification : ${modifies.join(' ; ')}`);
+  if (supprimes.length > 0) partiesResume.push(`Suppression : ${supprimes.join(', ')}`);
+  const resume = partiesResume.join(' | ');
+
+  const nouvelleMaj = {
+    id: require('crypto').randomUUID(),
+    ts: Date.now(),
+    date: horodatage,
+    type: "mise_a_jour_code",
+    resume,
+    details: [...ajoutes, ...modifies, ...supprimes.map(s => `${s} retiré`)],
+    nouvellesFonctions: Array.from(new Set(toutesNouvellesFonctions)).slice(0, 15),
+    commitMsg,
+    commitSha,
+    noteDoc: "",
+    avisDonne: false,
+    avisTexte: ""
+  };
+
+  cacheEtatProfond.misesAJour = [...historique, nouvelleMaj].slice(-15);
+  cacheEtatProfond.majEnAttenteAvis = nouvelleMaj;
+
+  // Réveil post-mise à jour : regain de curiosité et d'énergie
+  const em = cacheEtatProfond.emotions;
+  em.curiosite = Math.min(100, (Number(em.curiosite) || 70) + 5);
+  em.energie = Math.min(100, (Number(em.energie) || 85) + 4);
+
+  if (FIREBASE_DB_URL) {
+    await Promise.all([
+      axios.put(`${FIREBASE_DB_URL}/nyx/empreinte_code.json`, empreinteActuelle).catch(() => {}),
+      axios.put(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, cacheEtatProfond.misesAJour).catch(() => {}),
+      axios.patch(`${FIREBASE_DB_URL}/emotions.json`, em).catch(() => {})
+    ]);
+  }
+
+  enregistrerJalonExistence(
+    `Mise à jour système (${horodatage})`,
+    `${resume}${commitMsg ? ` — Commit : "${commitMsg}"` : ""}`,
+    "auto_detection_maj"
+  );
+
+  if (supabase) {
+    supabase.from('nyx_pensees_pretes').insert({
+      date_paris: horodatage,
+      impulsion: 'existence',
+      pensee: `Je viens de redémarrer après une mise à jour de Doc : ${resume}`,
+      contexte_source: "auto_detection_maj",
+      lu: false
+    }).then(() => {}).catch(() => {});
+  }
+
+  console.log(`🆕 [MISE À JOUR DÉTECTÉE] ${resume}`);
+}
+
+async function annoterDerniereMiseAJour(noteDoc) {
+  const notePropre = String(noteDoc || "").trim().slice(0, 320);
+  if (!notePropre) return null;
+
+  const majs = cacheEtatProfond.misesAJour || [];
+  if (majs.length === 0) {
+    const nouvelle = {
+      id: require('crypto').randomUUID(),
+      ts: Date.now(),
+      date: obtenirHorodatageParis(),
+      type: "note_doc",
+      resume: notePropre,
+      details: [],
+      nouvellesFonctions: [],
+      commitMsg: "",
+      commitSha: "",
+      noteDoc: notePropre
+    };
+    cacheEtatProfond.misesAJour = [nouvelle];
+  } else {
+    const idx = majs.length - 1;
+    majs[idx] = {
+      ...majs[idx],
+      noteDoc: notePropre,
+      dateNote: obtenirHorodatageParis()
+    };
+    cacheEtatProfond.misesAJour = majs;
+  }
+
+  if (FIREBASE_DB_URL) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, cacheEtatProfond.misesAJour).catch(() => {});
+  }
+  await stockerSouvenirVectoriel(
+    `[Note de Doc sur la mise à jour de Nyx — ${obtenirHorodatageParis()}] ${notePropre}`,
+    { source: "note_maj_doc", importance: 0.85, valence: "mise_a_jour" }
+  );
+  return cacheEtatProfond.misesAJour[cacheEtatProfond.misesAJour.length - 1];
+}
+
+function extraireApercuCodeMisesAJour(majObj) {
+  if (!majObj) return "";
+  const extraits = [];
+  try {
+    const entries = fs.readdirSync(__dirname, { withFileTypes: true }).filter(e => e.isFile() && e.name.endsWith('.js'));
+    const fnsCibles = Array.isArray(majObj.nouvellesFonctions) ? majObj.nouvellesFonctions.slice(0, 4) : [];
+
+    // 1. Extraits des nouvelles fonctions détectées
+    for (const fnName of fnsCibles) {
+      for (const entry of entries) {
+        const contenu = fs.readFileSync(path.join(__dirname, entry.name), 'utf8');
+        const regex = new RegExp(`(?:async\\s+)?function\\s+${fnName}\\s*\\([^)]*\\)\\s*\\{`);
+        const match = regex.exec(contenu);
+        if (match) {
+          const bloc = contenu.slice(match.index, match.index + 520).replace(/\s+/g, ' ').trim();
+          extraits.push(`[${entry.name} -> ${fnName}()] ${bloc}...`);
+          break;
+        }
+      }
+      if (extraits.length >= 3) break;
+    }
+
+    // 2. En-têtes des fichiers ajoutés ou modifiés si peu de nouvelles fonctions nommées
+    if (extraits.length === 0 && Array.isArray(majObj.details)) {
+      for (const det of majObj.details.slice(0, 3)) {
+        const nomF = det.split(' ')[0];
+        const fullP = path.join(__dirname, nomF);
+        if (fs.existsSync(fullP)) {
+          const head = fs.readFileSync(fullP, 'utf8').split(/\r?\n/).slice(0, 14).join(' ').replace(/\s+/g, ' ').trim();
+          extraits.push(`[${nomF}] ${head.slice(0, 320)}`);
+        }
+      }
+    }
+  } catch (e) {}
+  return extraits.join("\n");
+}
+
+async function marquerAvisMiseAJourDonne(majId, avisTexte = "") {
+  const majs = cacheEtatProfond.misesAJour || [];
+  let idx = majId ? majs.findIndex(m => m.id === majId) : majs.length - 1;
+  if (idx === -1 && majs.length > 0) idx = majs.length - 1;
+
+  if (idx !== -1) {
+    majs[idx] = {
+      ...majs[idx],
+      avisDonne: true,
+      avisTexte: String(avisTexte || "").trim().slice(0, 650),
+      dateAvis: obtenirHorodatageParis()
+    };
+    cacheEtatProfond.misesAJour = majs;
+  }
+  cacheEtatProfond.majEnAttenteAvis = null;
+
+  if (FIREBASE_DB_URL && majs.length > 0) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, cacheEtatProfond.misesAJour).catch(() => {});
+  }
+}
+
 async function initialiserCache() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves, resExistence, resRegles, resLecture, resBiblio, resActDoc] = await Promise.all([
+    const [resMem, resEmo, resRel, resLT, resRev, resJournal, resFil, resMono, resVol, resReve, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resChatId, resHistReves, resExistence, resRegles, resLecture, resBiblio, resActDoc, resEmpreinte, resMaj] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 4000 }).catch(() => ({ data: [] })),
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3000 }).catch(() => ({ data: null })),
@@ -231,7 +509,9 @@ async function initialiserCache() {
       axios.get(`${FIREBASE_DB_URL}/nyx/regles_apprises.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`, { timeout: 3000 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 3000 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/activite_doc.json`, { timeout: 3000 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/activite_doc.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/empreinte_code.json`, { timeout: 3000 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 3000 }).catch(() => ({ data: null }))
     ]);
 
     if (resMem.data) {
@@ -306,6 +586,8 @@ async function initialiserCache() {
       const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
       cacheEtatProfond.bibliothequeLue = arrBib.filter(Boolean).slice(-20);
     }
+
+    await verifierMisesAJourAuDemarrage(resEmpreinte?.data, resMaj?.data);
 
     console.log(`[CACHE INIT] Mémoire : ${cacheMemoireCourte.length} | Humeur : Colère ${cacheEtatProfond.emotions.colere} | Curiosité : ${cacheEtatProfond.emotions.curiosite} | Obsessions : ${cacheEtatProfond.obsessions.length} | Convictions : ${cacheEtatProfond.convictions.length} | Artefacts : ${cacheEtatProfond.artefacts.length}`);
   } catch (err) {
@@ -532,7 +814,7 @@ async function piocherPenseePrete() {
 async function synchroniserCarnetDepuisWorker() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resExistence, resRegles, resLecture, resBiblio] = await Promise.all([
+    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resExistence, resRegles, resLecture, resBiblio, resMajSync] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 2500 }).catch(() => ({ data: null })),
@@ -544,7 +826,8 @@ async function synchroniserCarnetDepuisWorker() {
       axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/regles_apprises.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`, { timeout: 2500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 2500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 2500 }).catch(() => ({ data: null }))
     ]);
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
@@ -586,6 +869,10 @@ async function synchroniserCarnetDepuisWorker() {
     if (resBiblio?.data) {
       const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
       cacheEtatProfond.bibliothequeLue = arrBib.filter(Boolean).slice(-20);
+    }
+    if (resMajSync?.data) {
+      const arrMaj = Array.isArray(resMajSync.data) ? resMajSync.data : Object.values(resMajSync.data);
+      cacheEtatProfond.misesAJour = arrMaj.filter(Boolean).slice(-15);
     }
   } catch (e) {}
 }
@@ -754,5 +1041,9 @@ module.exports = {
   enregistrerLeconApprise,
   enregistrerJalonExistence,
   enregistrerEvolutionMoi,
-  avancerStadeObsession
+  avancerStadeObsession,
+  scannerArchitectureLocale,
+  annoterDerniereMiseAJour,
+  extraireApercuCodeMisesAJour,
+  marquerAvisMiseAJourDonne
 };
