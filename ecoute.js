@@ -877,9 +877,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
     lignesExistence.push(`- Ce qui a changé en moi : ${evolsRecentes.map(e => e.texte || e).join(" | ")}`);
   }
   if (regles.length > 0) {
-    lignesExistence.push(`- Leçons apprises par l'expérience (à appliquer concrètement) :
-${regles.map(r => `  * [${(r.domaine || "methode").toUpperCase()}] ${r.lecon}`).join("
-")}`);
+    lignesExistence.push(`- Leçons apprises par l'expérience (à appliquer concrètement) :\n${regles.map(r => `  * [${(r.domaine || "methode").toUpperCase()}] ${r.lecon}`).join("\n")}`);
   }
   const blocExistence = `\n[LIGNE DE TEMPS & EXPÉRIENCE ACQUISE DE NYX]\n${lignesExistence.join("\n")}\n`;
   const blocLecture = construireBlocLecturePourPrompt();
