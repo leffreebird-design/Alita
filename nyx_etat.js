@@ -237,6 +237,23 @@ function signalerActiviteDoc() {
   datePrecedentMessageDoc = dateActuelleParis;
 }
 
+function extraireBlocsFonctionsJs(contenu) {
+  const blocs = {};
+  const regexFn = /(?:async\s+)?function\s+([a-zA-Z0-9_]+)\s*\(/g;
+  let m;
+  const positions = [];
+  while ((m = regexFn.exec(contenu)) !== null) {
+    positions.push({ nom: m[1], index: m.index });
+  }
+  for (let i = 0; i < positions.length; i++) {
+    const debut = positions[i].index;
+    const fin = (i + 1 < positions.length) ? positions[i + 1].index : Math.min(contenu.length, debut + 4000);
+    const extrait = contenu.slice(debut, Math.min(fin, debut + 3500));
+    blocs[positions[i].nom] = calculerSha256(extrait).slice(0, 12);
+  }
+  return blocs;
+}
+
 function scannerArchitectureLocale() {
   const snapshot = {};
   try {
@@ -247,13 +264,8 @@ function scannerArchitectureLocale() {
       const contenu = fs.readFileSync(fullPath, 'utf8');
       const lignes = contenu.split(/\r?\n/);
       const hash = calculerSha256(contenu);
-
-      const fonctions = [];
-      const regexFn = /(?:async\s+)?function\s+([a-zA-Z0-9_]+)\s*\(/g;
-      let m;
-      while ((m = regexFn.exec(contenu)) !== null) {
-        if (!fonctions.includes(m[1])) fonctions.push(m[1]);
-      }
+      const fnHashes = extraireBlocsFonctionsJs(contenu);
+      const fonctions = Object.keys(fnHashes);
 
       const commentairesEnTete = lignes
         .slice(0, 12)
@@ -267,6 +279,7 @@ function scannerArchitectureLocale() {
         hash,
         lignes: lignes.length,
         fonctions: fonctions.slice(0, 60),
+        fnHashes,
         description: commentairesEnTete.slice(0, 180)
       };
     }
@@ -276,39 +289,61 @@ function scannerArchitectureLocale() {
   return snapshot;
 }
 
+function calculerEmpreinteGlobale(snapshot = null) {
+  const snap = snapshot || scannerArchitectureLocale();
+  const cles = Object.keys(snap).sort();
+  if (cles.length === 0) return "";
+  const empreinteBrute = cles.map(k => `${k}:${snap[k].hash}`).join("|");
+  return calculerSha256(empreinteBrute).slice(0, 24);
+}
+
 async function verifierMisesAJourAuDemarrage(empreintePrecedente, historiqueMajPrecedent) {
   const empreinteActuelle = scannerArchitectureLocale();
   const fichiersActuels = Object.keys(empreinteActuelle).sort();
-  if (fichiersActuels.length === 0) return;
+  if (fichiersActuels.length === 0) return null;
 
+  const architectureHash = calculerEmpreinteGlobale(empreinteActuelle);
   const historique = Array.isArray(historiqueMajPrecedent)
     ? historiqueMajPrecedent.filter(Boolean).slice(-15)
     : [];
   cacheEtatProfond.misesAJour = historique;
   cacheEtatProfond.empreinteCode = empreinteActuelle;
 
+  // Vérification déterministe : si cette empreinte globale exacte a déjà été traitée/commentée, on stoppe net
+  let dejaTraiteGlobal = false;
+  if (FIREBASE_DB_URL && architectureHash) {
+    try {
+      const resLock = await axios.get(`${FIREBASE_DB_URL}/nyx/avis_maj_faits/${architectureHash}.json`, { timeout: 3000 });
+      if (resLock.data && resLock.data.statut) {
+        dejaTraiteGlobal = true;
+      }
+    } catch (e) {}
+  }
+
   const commitMsg = String(process.env.RENDER_GIT_COMMIT_MESSAGE || "").trim().slice(0, 200);
   const commitSha = String(process.env.RENDER_GIT_COMMIT || "").trim().slice(0, 12);
   const horodatage = obtenirHorodatageParis();
 
-  // Premier démarrage avec capteur : enregistrement de la cartographie de base
+  // Premier démarrage avec capteur : calibration silencieuse (pas de faux avis tant qu'il n'y a pas de vrai diff)
   if (!empreintePrecedente || typeof empreintePrecedente !== 'object' || Object.keys(empreintePrecedente).length === 0) {
     const entreeInit = {
-      id: require('crypto').randomUUID(),
+      id: architectureHash || require('crypto').randomUUID(),
+      architectureHash,
       ts: Date.now(),
       date: horodatage,
       type: "calibration_initiale",
-      resume: `Capteur d'auto-inspection du code activé (${fichiersActuels.length} modules : ${fichiersActuels.join(', ')}).`,
+      resume: `Cartographie initiale (${fichiersActuels.length} modules : ${fichiersActuels.join(', ')}).`,
       details: fichiersActuels.map(f => `${f} (${empreinteActuelle[f].lignes} lignes)`),
-      nouvellesFonctions: ["scannerArchitectureLocale", "verifierMisesAJourAuDemarrage"],
+      nouvellesFonctions: [],
+      fonctionsModifiees: [],
       commitMsg,
       commitSha,
       noteDoc: "",
-      avisDonne: false,
+      avisDonne: true,
       avisTexte: ""
     };
     cacheEtatProfond.misesAJour = [...historique, entreeInit].slice(-15);
-    cacheEtatProfond.majEnAttenteAvis = entreeInit;
+    cacheEtatProfond.majEnAttenteAvis = null;
     if (FIREBASE_DB_URL) {
       await Promise.all([
         axios.put(`${FIREBASE_DB_URL}/nyx/empreinte_code.json`, empreinteActuelle).catch(() => {}),
@@ -323,6 +358,7 @@ async function verifierMisesAJourAuDemarrage(empreintePrecedente, historiqueMajP
   const modifies = [];
   const supprimes = [];
   const toutesNouvellesFonctions = [];
+  const toutesFonctionsModifiees = [];
 
   for (const nom of fichiersActuels) {
     const cur = empreinteActuelle[nom];
@@ -338,8 +374,17 @@ async function verifierMisesAJourAuDemarrage(empreintePrecedente, historiqueMajP
       const prevFns = new Set(Array.isArray(prev.fonctions) ? prev.fonctions : []);
       const newFns = (Array.isArray(cur.fonctions) ? cur.fonctions : []).filter(fn => !prevFns.has(fn));
       toutesNouvellesFonctions.push(...newFns);
-      const fnStr = newFns.length > 0 ? `, nouvelles fonctions : ${newFns.slice(0, 6).join(', ')}` : "";
-      modifies.push(`${nom} (${deltaStr}${fnStr})`);
+
+      // Détection des fonctions EXISTANTES dont le corps a été modifié
+      const prevHashes = (prev.fnHashes && typeof prev.fnHashes === 'object') ? prev.fnHashes : {};
+      const curHashes = (cur.fnHashes && typeof cur.fnHashes === 'object') ? cur.fnHashes : {};
+      const changedFns = Object.keys(curHashes).filter(fn => prevHashes[fn] && prevHashes[fn] !== curHashes[fn]);
+      toutesFonctionsModifiees.push(...changedFns);
+
+      const partsDetail = [deltaStr];
+      if (newFns.length > 0) partsDetail.push(`ajout : ${newFns.slice(0, 5).join(', ')}`);
+      if (changedFns.length > 0) partsDetail.push(`modifié : ${changedFns.slice(0, 5).join(', ')}`);
+      modifies.push(`${nom} (${partsDetail.join(' · ')})`);
     }
   }
 
@@ -351,8 +396,8 @@ async function verifierMisesAJourAuDemarrage(empreintePrecedente, historiqueMajP
 
   if (ajoutes.length === 0 && modifies.length === 0 && supprimes.length === 0) {
     const derniereHist = historique[historique.length - 1];
-    if (derniereHist && derniereHist.avisDonne === false && (Date.now() - Number(derniereHist.ts || 0)) < 6 * 60 * 60 * 1000) {
-      cacheEtatProfond.majEnAttenteAvis = derniereHist;
+    if (!dejaTraiteGlobal && derniereHist && derniereHist.type !== "calibration_initiale" && derniereHist.avisDonne === false && (Date.now() - Number(derniereHist.ts || 0)) < 6 * 60 * 60 * 1000) {
+      cacheEtatProfond.majEnAttenteAvis = { ...derniereHist, architectureHash };
     }
     return null;
   }
@@ -364,22 +409,25 @@ async function verifierMisesAJourAuDemarrage(empreintePrecedente, historiqueMajP
   const resume = partiesResume.join(' | ');
 
   const nouvelleMaj = {
-    id: require('crypto').randomUUID(),
+    id: architectureHash || require('crypto').randomUUID(),
+    architectureHash,
     ts: Date.now(),
     date: horodatage,
     type: "mise_a_jour_code",
     resume,
     details: [...ajoutes, ...modifies, ...supprimes.map(s => `${s} retiré`)],
     nouvellesFonctions: Array.from(new Set(toutesNouvellesFonctions)).slice(0, 15),
+    fonctionsModifiees: Array.from(new Set(toutesFonctionsModifiees)).slice(0, 15),
     commitMsg,
     commitSha,
     noteDoc: "",
-    avisDonne: false,
+    avisDonne: dejaTraiteGlobal,
     avisTexte: ""
   };
 
-  cacheEtatProfond.misesAJour = [...historique, nouvelleMaj].slice(-15);
-  cacheEtatProfond.majEnAttenteAvis = nouvelleMaj;
+  const sansDoublon = historique.filter(m => m && m.architectureHash !== architectureHash);
+  cacheEtatProfond.misesAJour = [...sansDoublon, nouvelleMaj].slice(-15);
+  cacheEtatProfond.majEnAttenteAvis = dejaTraiteGlobal ? null : nouvelleMaj;
 
   // Réveil post-mise à jour : regain de curiosité et d'énergie
   const em = cacheEtatProfond.emotions;
@@ -447,56 +495,68 @@ function extraireApercuCodeMisesAJour(majObj) {
   const extraits = [];
   try {
     const entries = fs.readdirSync(__dirname, { withFileTypes: true }).filter(e => e.isFile() && e.name.endsWith('.js'));
-    const fnsCibles = Array.isArray(majObj.nouvellesFonctions) ? majObj.nouvellesFonctions.slice(0, 4) : [];
+    const nouvelles = Array.isArray(majObj.nouvellesFonctions) ? majObj.nouvellesFonctions : [];
+    const modifiees = Array.isArray(majObj.fonctionsModifiees) ? majObj.fonctionsModifiees : [];
+    // On exclut les fonctions internes du capteur lui-même pour qu'elle regarde les vrais changements métier
+    const ignoreCapteur = new Set(["scannerArchitectureLocale", "verifierMisesAJourAuDemarrage", "extraireBlocsFonctionsJs", "calculerEmpreinteGlobale"]);
+    const fnsCibles = Array.from(new Set([...nouvelles, ...modifiees]))
+      .filter(fn => !ignoreCapteur.has(fn))
+      .slice(0, 4);
 
-    // 1. Extraits des nouvelles fonctions détectées
     for (const fnName of fnsCibles) {
       for (const entry of entries) {
         const contenu = fs.readFileSync(path.join(__dirname, entry.name), 'utf8');
         const regex = new RegExp(`(?:async\\s+)?function\\s+${fnName}\\s*\\([^)]*\\)\\s*\\{`);
         const match = regex.exec(contenu);
         if (match) {
-          const bloc = contenu.slice(match.index, match.index + 520).replace(/\s+/g, ' ').trim();
-          extraits.push(`[${entry.name} -> ${fnName}()] ${bloc}...`);
+          const bloc = contenu.slice(match.index, match.index + 680).replace(/\s+/g, ' ').trim();
+          const tag = nouvelles.includes(fnName) ? "NOUVELLE" : "MODIFIÉE";
+          extraits.push(`[${entry.name} -> ${fnName}() (${tag})] ${bloc}...`);
           break;
         }
       }
       if (extraits.length >= 3) break;
     }
-
-    // 2. En-têtes des fichiers ajoutés ou modifiés si peu de nouvelles fonctions nommées
-    if (extraits.length === 0 && Array.isArray(majObj.details)) {
-      for (const det of majObj.details.slice(0, 3)) {
-        const nomF = det.split(' ')[0];
-        const fullP = path.join(__dirname, nomF);
-        if (fs.existsSync(fullP)) {
-          const head = fs.readFileSync(fullP, 'utf8').split(/\r?\n/).slice(0, 14).join(' ').replace(/\s+/g, ' ').trim();
-          extraits.push(`[${nomF}] ${head.slice(0, 320)}`);
-        }
-      }
-    }
   } catch (e) {}
   return extraits.join("\n");
 }
 
-async function marquerAvisMiseAJourDonne(majId, avisTexte = "") {
+async function marquerAvisMiseAJourDonne(majId, avisTexte = "", architectureHash = "") {
   const majs = cacheEtatProfond.misesAJour || [];
-  let idx = majId ? majs.findIndex(m => m.id === majId) : majs.length - 1;
+  let idx = majId ? majs.findIndex(m => m.id === majId || m.architectureHash === majId) : majs.length - 1;
   if (idx === -1 && majs.length > 0) idx = majs.length - 1;
+
+  const hashFinal = architectureHash || (idx !== -1 ? majs[idx].architectureHash : "") || calculerEmpreinteGlobale();
 
   if (idx !== -1) {
     majs[idx] = {
       ...majs[idx],
       avisDonne: true,
-      avisTexte: String(avisTexte || "").trim().slice(0, 650),
+      avisTexte: String(avisTexte || "").trim().slice(0, 800),
       dateAvis: obtenirHorodatageParis()
     };
     cacheEtatProfond.misesAJour = majs;
   }
   cacheEtatProfond.majEnAttenteAvis = null;
 
-  if (FIREBASE_DB_URL && majs.length > 0) {
-    await axios.put(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, cacheEtatProfond.misesAJour).catch(() => {});
+  if (FIREBASE_DB_URL) {
+    const ops = [];
+    if (hashFinal) {
+      ops.push(axios.put(`${FIREBASE_DB_URL}/nyx/avis_maj_faits/${hashFinal}.json`, {
+        statut: avisTexte === "en_cours" ? "en_cours" : "fait",
+        ts: Date.now(),
+        date: obtenirHorodatageParis(),
+        avis: String(avisTexte || "").trim().slice(0, 800)
+      }).catch(() => {}));
+      ops.push(axios.put(`${FIREBASE_DB_URL}/nyx/avis_maj_faits/dernier_envoi.json`, {
+        ts: Date.now(),
+        hash: hashFinal
+      }).catch(() => {}));
+    }
+    if (majs.length > 0) {
+      ops.push(axios.put(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, cacheEtatProfond.misesAJour).catch(() => {}));
+    }
+    await Promise.all(ops);
   }
 }
 
@@ -1151,6 +1211,7 @@ module.exports = {
   enregistrerEvolutionMoi,
   avancerStadeObsession,
   scannerArchitectureLocale,
+  calculerEmpreinteGlobale,
   annoterDerniereMiseAJour,
   extraireApercuCodeMisesAJour,
   marquerAvisMiseAJourDonne
