@@ -1,8 +1,3 @@
-
-
-
-Icône JS
-nyx_subconscient
 const axios = require('axios');
 const https = require('https');
 const crypto = require('crypto');
@@ -14,6 +9,7 @@ const {
 } = require('./reve');
 const { createLectureEngine } = require('./lecture');
 const { axiosGetHttpsPublic } = require('./nyx_config');
+const { genererPiece3DAvancee } = require('./nyx_cao_formats');
 
 // ============================================================================
 // NYX SUBCONSCIENT — WORKER ASYNCHRONE ISOLÉ (RENDER BACKGROUND WORKER)
@@ -1439,13 +1435,16 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
   }
   texteNet = texteNet.replace(/\[FICHIER:\s*([^\]\r\n]+)\]\s*[\s\S]*?\[\/FICHIER\]/gi, (_, nom) => `📎 *Fichier livré :* \`${nom.trim()}\``).trim();
 
-  // 2. Pièces 3D [3D_STL: description]
-  const matchStl = texteNet.match(/\[3D_STL:\s*([\s\S]*?)(?:\]|$)/i);
+  // 2. Pièces 3D [3D_STL: description] -> CSG + STL + 3MF + OpenSCAD
+  const matchStl = texteNet.match(/\[(?:3D_STL|3D_3MF|CAO_3D):\s*([\s\S]*?)(?:\]|$)/i);
   if (matchStl) {
     const desc3D = matchStl[1].trim();
     texteNet = texteNet.replace(matchStl[0], '').trim();
     try {
-      const stlResult = await genererPiece3D(desc3D, contexteProjet);
+      const stlResult = await genererPiece3DAvancee(desc3D, contexteProjet, async (sys, prompt, temp, maxTok) => {
+        if (GROQ_API_KEY) return await appelerGroq(sys, prompt, temp, maxTok);
+        return await appelerCascadeSubconscient(sys, prompt, temp, maxTok);
+      });
       await archiverArtefactAtelier({
         projet: stlResult.projet,
         type: "stl_3d",
@@ -1454,7 +1453,18 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
         mimeType: "application/sla",
         resume: stlResult.resume
       });
-      if (chatId) await envoyerDocumentTelegram(chatId, stlResult.stlBuffer, `${stlResult.nomBase}.stl`, "application/sla", `🧊 STL prêt à slicer : ${stlResult.resume}`);
+      if (chatId) await envoyerDocumentTelegram(chatId, stlResult.stlBuffer, `${stlResult.nomBase}.stl`, "application/sla", `🧊 STL : ${stlResult.resume}`);
+      if (stlResult.threemfBuffer) {
+        await archiverArtefactAtelier({
+          projet: stlResult.projet,
+          type: "3mf_3d",
+          nomFichier: `${stlResult.nomBase}.3mf`,
+          buffer: stlResult.threemfBuffer,
+          mimeType: "model/3mf",
+          resume: `3MF : ${stlResult.resume}`
+        });
+        if (chatId) await envoyerDocumentTelegram(chatId, stlResult.threemfBuffer, `${stlResult.nomBase}.3mf`, "model/3mf", `📦 3MF prêt à slicer`);
+      }
       if (stlResult.scadBuffer) {
         await archiverArtefactAtelier({
           projet: stlResult.projet,
@@ -2434,13 +2444,13 @@ CONTINUITÉ DE VOS DERNIERS ÉCHANGES :
 ${derniersEchanges || "Rien de récent"}
 
 CONSIGNE :
-- Va droit au but : pas d'accroche générique molle, balance directement ta pensée, ta trouvaille, ta pique ou ton idée complète en 2 à 4 phrases finies et percutantes.
-- Générateurs réels disponibles si tu veux joindre quelque chose : [DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].
+- Tu dois être brève et adapter la longueur de ton message à son importance réelle dans la conversation (un clin d'œil ou une réaction tient en 1 ou 2 phrases ; n'en mets plus que si tu apportes une vraie matière).
+- Action directe (zéro exposé préalable) : il n'y a aucun danger sur une image ou une pièce 3D — si tu veux montrer un visuel ou un modèle 3D, balance directement la balise ([DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER]) avec une seule phrase courte.
 - Si tu préfères garder le silence : réponds [SILENCE]. Sinon encadre ton message complet par [INITIATIVE: ton message à Doc].`;
 
     let decision = "";
     try {
-      decision = await appelerCascadeSubconscient(systemVolition, promptVolition, 0.78, 950);
+      decision = await appelerCascadeSubconscient(systemVolition, promptVolition, 0.78, 900);
     } catch (e) {
       decision = "";
     }
@@ -3346,4 +3356,3 @@ app.post('/volition', async (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[NYX SUBCONSCIENT] Serveur de veille lancé sur le port ${PORT}`);
 });
-Traité et analysé dans le code
