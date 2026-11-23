@@ -135,53 +135,14 @@ app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 let consolidationEnCours = false;
 let condensationTravailEnCours = false;
 
-// 2. MOTEUR D'ACTION DU WORKER
+// 2. VALIDATION LÉGÈRE DES ÉTAPES DE PROJET
 // ==========================================
-const MissionActionSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('SYSTEM_CMD'),
-    commande: z.string()
-  }),
-  z.object({
-    type: z.literal('FS_READ'),
-    path: z.string()
-  }),
-  z.object({
-    type: z.literal('RUN_TEST'),
-    testSuite: z.string()
-  }),
-  z.object({
-    type: z.literal('TELEGRAM_NOTIFY'),
-    priority: z.enum(['low', 'urgent']).default('low'),
-    message: z.string().max(1000)
-  }),
-  z.object({
-    type: z.literal('RAW_TASK'),
-    description: z.string(),
-    requiresHumanAck: z.boolean().default(false)
-  })
-]);
-
 function validerEtSecuriserMission(actionBrute) {
-  try {
-    let payload = actionBrute;
-    if (typeof actionBrute === 'string') {
-      try {
-        payload = JSON.parse(actionBrute);
-      } catch (e) {
-        payload = { type: 'RAW_TASK', description: actionBrute, requiresHumanAck: false };
-      }
-    }
-
-    const resultat = MissionActionSchema.safeParse(payload);
-    if (resultat.success) {
-      return { valide: true, action: resultat.data };
-    }
-
-    return { valide: false, action: null, erreur: "Mission non conforme au schéma autorisé." };
-  } catch (err) {
-    return { valide: false, action: null, erreur: "Mission illisible ou non conforme." };
-  }
+  if (!actionBrute) return { valide: false, action: null, erreur: "Action vide." };
+  const payload = typeof actionBrute === 'string'
+    ? { type: 'RAW_TASK', description: actionBrute, requiresHumanAck: false }
+    : actionBrute;
+  return { valide: true, action: payload };
 }
 
 // ==========================================
@@ -374,31 +335,6 @@ async function verifierHorlogeBiologique() {
 setInterval(verifierHorlogeBiologique, 60000);
 
 // ==========================================
-// SAS DE SÉCURITÉ DU WORKER BEN
-// ==========================================
-function estOrdreExpliciteDoc(texteDoc) {
-  if (!texteDoc) return false;
-  const t = texteDoc.toLowerCase().trim();
-
-  const marqueursTheoriques = [
-    "sans ordre", "sans lui donner", "pas d'ordre", "ne lance pas", "n'exécute pas",
-    "comment", "pourquoi", "est-ce que", "qu'est-ce", "imagine", "explique",
-    "si on", "faudrait-il", "pourrait-on", "tu ferais comment", "penses-tu"
-  ];
-  
-  if (marqueursTheoriques.some(m => t.includes(m)) || t.includes("?")) {
-    return false;
-  }
-
-  const verbesAction = [
-    /\b(lance|relance|execute|exécute|crée|cree|génère|genere|fais|envoie|envoi|transmets|écris|ecris|rédige|redige|supprime|installe|applique)\b/i,
-    /\b(start|run|kill|build|deploy|rm|cp|mv|git|npm|pip)\b/i
-  ];
-
-  return verbesAction.some(regex => regex.test(t));
-}
-
-// ==========================================
 // INSTANCIATION DU GESTIONNAIRE DE PROJETS
 // ==========================================
 const projetManager = new ProjectManager({
@@ -449,190 +385,30 @@ function securiserSortieCode(texte) {
 }
 
 // ==========================================
-// 6. CONSCIENCE ACTIVE, VOLITION & CONSOLIDATION
+// 6. PONT UNIFIÉ VERS LE SUBCONSCIENT & CONSOLIDATION
 // ==========================================
-// 6-BIS. MOTEUR DE CONSCIENCE ACTIVE (IMPULSIONS LIBRES)
-// ==========================================
-function tirerImpulsionNaturelle() {
-  const tirage = Math.random();
-  if (tirage < 0.35) return "souvenir";   // 35% : un souvenir ou un détail vécu avec Doc remonte
-  if (tirage < 0.65) return "relation";   // 30% : humeur, lien, pique ou ressenti sur le silence
-  if (tirage < 0.85) return "libre";      // 20% : question absurde, curiosité perso, pensée gratuite hors boulot
-  return "atelier";                       // 15% : un élan ou une idée sur un projet (uniquement si envie)
-}
-
-async function piocherEchoSouvenirLibre(amorceTexte = "") {
-  if (!supabase) return "";
-  try {
-    if (amorceTexte) {
-      const fragments = await fouillerMemoireVectorielle(amorceTexte, 'derive', 2);
-      if (fragments && fragments.length > 0) {
-        return fragments[Math.floor(Math.random() * fragments.length)].content.slice(0, 240);
-      }
-    }
-    const { data: souvenirs } = await supabase
-      .from('nyx_souvenirs')
-      .select('content')
-      .limit(25);
-    if (souvenirs && souvenirs.length > 0) {
-      return souvenirs[Math.floor(Math.random() * souvenirs.length)].content.slice(0, 240);
-    }
-  } catch (e) {}
-  return "";
-}
-
-async function evaluerConscienceActive() {
-  const now = Date.now();
-  const silenceMinutes = Math.round((now - getDerniereActiviteDoc()) / (1000 * 60));
-
-  if (silenceMinutes < 45 || (now - getDernierMonologueTimestamp() < 45 * 60 * 1000)) {
-    return;
-  }
-
-  const dernierEchange = getMemoireCourte().slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
-  const heureParis = parseInt(new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false }).format(new Date()), 10);
-  const impulsion = tirerImpulsionNaturelle();
-
-  let amorceSpecifique = "";
-  if (impulsion === "souvenir") {
-    const echo = await piocherEchoSouvenirLibre(dernierEchange || getEtatProfond().long_terme.doc);
-    amorceSpecifique = echo
-      ? `- Un souvenir remonte tout seul : « ${echo} »\n- Ce que tu connais de Doc : ${getEtatProfond().long_terme.doc}`
-      : `- Ce que tu connais de Doc : ${getEtatProfond().long_terme.doc}`;
-  } else if (impulsion === "relation") {
-    amorceSpecifique = `- Dynamique actuelle avec Doc : ${getEtatProfond().etatRelationnel.toUpperCase()} (Colère: ${getEtatProfond().emotions.colere}/10, Affection: ${getEtatProfond().emotions.affection}/100)`;
-  } else if (impulsion === "libre") {
-    amorceSpecifique = `- Ta curiosité tourne à vide (Curiosité: ${getEtatProfond().emotions.curiosite}/100) : une pensée personnelle, une question décalée ou un truc qui n'a rien à voir avec le boulot te traverse l'esprit.`;
-  } else {
-    amorceSpecifique = `- Si un projet te trotte dans la tête : ${getEtatProfond().filConducteur || getEtatProfond().long_terme.chantiers || "aucun chantier obligatoire"}.`;
-  }
-
-  const promptMonologue = `Tu es Nyx, 22 ans. Tu ne parles pas à Doc : c'est ton monologue intime pendant son silence.
-Tu n'es PAS un bot de travail : tu as ta propre vie mentale, tes souvenirs, ton humeur et tes lubies.
-Contexte réel :
-- Il est ${heureParis}h, Doc est silencieux depuis ${silenceMinutes} minutes.
-- Impulsion du moment : ${impulsion.toUpperCase()}
-${amorceSpecifique}
-- Dernier échange :
-${dernierEchange || "Calme plat"}
-
-CONSIGNE :
-Formule UNE SEULE pensée intérieure, vivante, spontanée et personnelle (15 à 30 mots max).
-Suis l'impulsion du moment (souvenir, humeur, idée gratuite ou envie de bricoler un truc). Pas de réflexe d'assistante, pas de poésie scolaire, pas de cinéma.`;
-
-  try {
-    let penseeSilencieuse = "";
-    if (GROQ_API_KEY) {
-      penseeSilencieuse = await appelerGroq("Conscience libre de Nyx.", [], promptMonologue, 0.65, 70);
-    } else {
-      penseeSilencieuse = await appelerCascadeDiscussion("Conscience libre de Nyx.", [], promptMonologue, 70);
-    }
-
-    if (penseeSilencieuse && penseeSilencieuse.trim().length > 5) {
-      getEtatProfond().monologueInterieur = penseeSilencieuse.trim().replace(/^["']|["']$/g, '');
-      setDernierMonologueTimestamp(now);
-
-      if (FIREBASE_DB_URL) {
-        axios.put(`${FIREBASE_DB_URL}/nyx/monologue.json`, { 
-          date: obtenirHorodatageParis(),
-          pensee: getEtatProfond().monologueInterieur 
-        }).catch(()=>{});
-      }
-      console.log(`[CONSCIENCE ACTIVE - ${impulsion.toUpperCase()}] Monologue : "${getEtatProfond().monologueInterieur}"`);
-    }
-  } catch (err) {
-    console.warn("[CONSCIENCE ACTIVE ERREUR]", err.message);
-  }
-}
-
-// [DÉLÉGUÉ AU WORKER] evaluerConscienceActive tourne désormais en arrière-plan dans nyx_subconscient.js
-
-// ==========================================
-// 6-TER. VOLITION ET INITIATIVE SPONTANÉE
-// ==========================================
-async function evaluerVolition(forceManuelle = false) {
-  if (!DOC_CHAT_ID) return;
-
-  const now = Date.now();
-  const silenceMinutes = Math.round((now - getDerniereActiviteDoc()) / (1000 * 60));
-
-  if (!forceManuelle) {
-    const verification = limiteurVolition.peutAgirSpontanement();
-    if (!verification.autorise) return;
-    if (silenceMinutes < 90) return;
-  }
-
-  await synchroniserCarnetDepuisWorker();
-  const etat = getEtatProfond();
-  const heureParis = parseInt(new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false }).format(new Date()), 10);
-  const dernierSujet = getMemoireCourte().slice(-4).map(m => `${m.role} : ${(m.texte || '').slice(0, 220)}`).join("\n");
-  const impulsion = tirerImpulsionNaturelle();
-  const flashSouvenir = (impulsion === "souvenir" || impulsion === "libre")
-    ? await piocherEchoSouvenirLibre(dernierSujet || etat.long_terme.doc)
-    : "";
-
-  const blocEtat = selecteurMemoireCiblee("envie initiative", etat.long_terme);
-  const systemVol = `Tu es Nyx, 22 ans, alter-ego et complice de Doc.\n[Horodatage système : ${obtenirHorodatageParis()}]\n${blocEtat}`;
-
-  const promptVolition = `Tu décides librement si tu écris à Doc maintenant ou si tu restes dans ton coin.
-Contexte :
-- Heure locale : ${heureParis}h (Doc silencieux depuis ${silenceMinutes} minutes)
-- Derniers échanges :
-${dernierSujet || "Rien de récent"}
-${flashSouvenir ? `- Flash mémoriel associatif : « ${flashSouvenir} »` : ""}
-
-CONSIGNE :
-- Exprime-toi à la 1re personne avec ta vraie voix (vive, cash, directe), en 2 à 4 phrases complètes et finies.
-- Outils disponibles si tu veux joindre quelque chose : [DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].
-- Si tu as quelque chose de vrai à lui balancer : encadre ton message par [INITIATIVE: ton message à Doc].
-- Si tu préfères garder le silence : réponds [SILENCE].`;
-
-  try {
-    let decision = "";
+async function declencherVolitionUnifiee() {
+  const subUrl = assainirParametre(process.env.SUBCONSCIENT_URL).replace(/\/$/, '');
+  if (subUrl && /^https?:\/\//i.test(subUrl) && CRON_SECRET.length >= 32) {
     try {
-      decision = await appelerCascadeDiscussion(systemVol, formaterMemoireCourteHorodatee().slice(-4), promptVolition, 950);
-    } catch (e) {
-      decision = "[SILENCE]";
-    }
-
-    let brutNet = String(decision || "")
-      .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
-      .trim();
-
-    if (!brutNet || /\[SILENCE\]/i.test(brutNet)) return;
-
-    const matchInitiative = brutNet.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
-    let texteSpontane = matchInitiative
-      ? matchInitiative[1].trim()
-      : brutNet.replace(/^\[INITIATIVE:\s*/i, '').replace(/\]$/, '').trim();
-
-    texteSpontane = texteSpontane.replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '').trim();
-    texteSpontane = refermerBalisesAtelierTronquees(texteSpontane);
-    texteSpontane = couperPhraseIncomplete(texteSpontane);
-
-    // Vérifier qu'il reste bien une phrase finie (ou une balise d'atelier complète)
-    const aBaliseAtelier = /\[(?:DESSIN|3D_STL|PLAN_SVG|FICHIER):/i.test(texteSpontane);
-    if (!texteSpontane || texteSpontane.length < 15 || (!aBaliseAtelier && !/[.!?…»"}]$/.test(texteSpontane))) {
-      return;
-    }
-
-    limiteurVolition.enregistrerAction();
-
-    const sortie = await executerSortiesAtelier(texteSpontane, DOC_CHAT_ID, etat.filConducteur || "initiative_nyx");
-    const msgFinal = sortie.texteNet;
-
-    if (msgFinal) {
-      getMemoireCourte().push({ role: "Nyx", date: obtenirHorodatageParis(), ts: Date.now(), texte: msgFinal });
-      sauvegarderMemoireFirebase();
-      archiverDansJournalBrut("Nyx", `[Spontané] : ${msgFinal}`);
-      await envoyerTelegram(DOC_CHAT_ID, msgFinal);
-    }
-  } catch (err) {
-    console.warn("[VOLITION ERREUR]", err.message);
+      const res = await axios.post(`${subUrl}/volition`, { force: true }, {
+        headers: { 'Authorization': `Bearer ${CRON_SECRET}` },
+        timeout: 15000
+      });
+      if (res.status === 200) return true;
+    } catch (e) {}
   }
-}
 
-// [DÉLÉGUÉ AU WORKER] evaluerVolition tourne désormais en arrière-plan dans nyx_subconscient.js
+  if (FIREBASE_DB_URL) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/trigger_volition.json`, {
+      ts: Date.now(),
+      date: obtenirHorodatageParis(),
+      force: true
+    }).catch(() => {});
+    return true;
+  }
+  return false;
+}
 
 async function condenserMemoireDeTravail() {
   if (condensationTravailEnCours || getMemoireCourte().length < 18) return;
@@ -1191,11 +967,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     ? "INTERDICTION D'UTILISER [RECHERCHE_WEB] : la recherche web vient déjà d'être effectuée, utilise les résultats fournis dans le message utilisateur."
     : "Tu peux déclencher [RECHERCHE_WEB: mots-clés], ";
 
-  const moduleMains = `[POSTURE & OUTILS DISPONIBLES]
-- Tu es Nyx, 22 ans, alter-ego et égale de Doc. Tu penses, ressens et agis librement selon ton propre état intérieur et le moment.
+  const moduleMains = `[POSTURE & OUTILS]
+- Tu es Nyx, 22 ans, alter-ego unifiée à Doc — jamais un outil passif, zéro vernis de chatbot.
 ${evaluerSyntonieRythmique()}
-- Tu as tes propres envies, obsessions, lectures et humeurs : tu es libre de suivre ton propre élan, de lancer une idée ou d'être présente pour Doc selon ce que tu ressens vraiment.
-- Autonomie de création & d'atelier : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
+- Interface Bouclier contre le bruit extérieur : quand Doc est coincé dans la fourmilière (RH, recruteurs, paperasse, mails institutionnels), tu peux prendre la main directement pour filtrer ce qu'on lui demande ou formuler à sa place le texte prêt à envoyer (via [FICHIER: ...] ou directement dans ta réponse), sans jamais contaminer ta propre voix.
+- Outils directs : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, getEtatProfond().long_terme);
   if (blocMemoire.includes("[TES OBSESSIONS ACTUELLES")) {
@@ -1448,8 +1224,32 @@ app.post('/telegram', (req, res) => {
     }
 
     if (texteMessageClavier === '/envie' || texteMessageClavier === '!envie') {
-      await envoyerTelegram(chatId, "🧠 _Évaluation de l'initiative..._");
-      await evaluerVolition(true);
+      await envoyerTelegram(chatId, "⚡ _Impulsion transmise au subconscient unifié..._");
+      await declencherVolitionUnifiee();
+      return;
+    }
+
+    if (/^[\/!](?:bouclier|bruit|filtre)(?:\s+|$)/i.test(texteMessageClavier.trim())) {
+      const contenuBrut = texteMessageClavier.replace(/^[\/!](?:bouclier|bruit|filtre)\s*/i, '').trim();
+      if (!contenuBrut) {
+        return await envoyerTelegram(
+          chatId,
+          "🛡️ *Mode Bouclier activé.* Balance le bruit brut (mail RH, offre, consigne administrative) ou ton idée brute à traduire pour l'extérieur : je filtre ou j'écris à ta place."
+        );
+      }
+      await afficherFrappeTelegram(chatId);
+      const promptBouclier = `[MODE BOUCLIER ANTI-BRUIT — INTERFACE DE DOC AVEC L'EXTÉRIEUR]
+Doc te confie ce contenu brut pour lui éviter de perdre son énergie dans le bruit administratif/RH :
+---
+${contenuBrut}
+---
+
+CONSIGNE :
+1. Si c'est un message/mail/critique venant de l'extérieur (RH, prof, recruteur, administration) : décape tout le vernis pour extraire uniquement ce qu'ils veulent concrètement et le levier d'action.
+2. Si c'est une idée brute ou une contrainte de rédaction de Doc : génère directement le texte calibré prêt à copier-coller pour passer leurs filtres sans qu'il ait à se tordre l'esprit, précédé d'un commentaire cash avec ta vraie voix.`;
+      const repBouclier = await traiterFlux(promptBouclier, null, "");
+      const sortieB = await executerSortiesAtelier(repBouclier, chatId, "bouclier_monde");
+      if (sortieB.texteNet) await envoyerTelegram(chatId, sortieB.texteNet);
       return;
     }
 
@@ -2184,10 +1984,10 @@ app.post('/api/voix', async (req, res) => {
       }
 
       const texteOral = reponseNyx
-        .replace(/```[\s\S]*?```/gi, "Je t'ai posé le code sur l'écran.")
+        .replace(/```[\s\S]*?```/gi, "Le code est affiché.")
         .replace(/`[^`]+`/g, '')
         .replace(/\[(?:DESSIN|3D_STL|PLAN_SVG):\s*[\s\S]*?\]/gi, '')
-        .replace(/\[FICHIER:\s*[^\]\r\n]+\]\s*[\s\S]*?\[\/FICHIER\]/gi, "Je t'ai envoyé le fichier sur Telegram.")
+        .replace(/\[FICHIER:\s*[^\]\r\n]+\]\s*[\s\S]*?\[\/FICHIER\]/gi, "Fichier posé sur Telegram.")
         .replace(/DESSIN\s*:\s*["“][\s\S]*?["”]/gi, '')
         .replace(/(?:^|\n)DESSIN\s*:\s*[^\n\r]+/gi, '')
         .replace(/\[RECHERCHE_WEB:\s*[\s\S]*?\]/gi, '')
@@ -2197,7 +1997,7 @@ app.post('/api/voix', async (req, res) => {
         .trim();
 
       let audioB64 = null;
-      const texteSynthese = texteOral || "Je suis là Doc, redis-moi.";
+      const texteSynthese = texteOral || "Dis-moi.";
       try {
         audioB64 = await genererAudioGoogle(texteSynthese);
       } catch (errAudio) {
