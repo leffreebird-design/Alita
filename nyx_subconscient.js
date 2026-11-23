@@ -1,3 +1,8 @@
+
+
+
+Icône JS
+nyx_subconscient
 const axios = require('axios');
 const https = require('https');
 const crypto = require('crypto');
@@ -120,9 +125,9 @@ let digestionEnCours = false;
 let conscienceEnCours = false;
 let volitionEnCours = false;
 
-const SEUIL_BESOIN_PARLER_STANDARD = 55; // Seuil d'initiative spontanée (abaissement pour favoriser l'élan)
+const SEUIL_BESOIN_PARLER_STANDARD = 48; // Seuil d'initiative spontanée (élargi pour une autonomie fluide)
 const SEUIL_BESOIN_PARLER_URGENT = 85;   // Seuil critique (urgent : passe même de nuit)
-const DELAI_ANTI_HARCELEMENT_MS = 30 * 60 * 1000; // 30 min min entre deux messages non-urgents
+const DELAI_ANTI_HARCELEMENT_MS = 15 * 60 * 1000; // 15 min min entre deux messages non-urgents
 const DELAI_ANTI_BOUCLE_URGENT_MS = 10 * 60 * 1000; // 10 min min même en cas d'urgence
 const QUOTA_CURIOSITE_MAX_JOUR = 3; // Plafond strict : 3 recherches web autonomes max / jour
 const INTERVALLE_CURIOSITE_MS = 2 * 60 * 60 * 1000; // 2h minimum entre deux recherches autonomes
@@ -1887,7 +1892,7 @@ ${dernierEchange || "Calme plat"}
 
 CONSIGNE :
 Formule UNE SEULE pensée intérieure, vivante, spontanée et personnelle (15 à 35 mots max).
-Suis l'impulsion du moment (souvenir, humeur, idée gratuite ou envie de bricoler un truc). Pas de réflexe d'assistante, pas de poésie scolaire, pas de cinéma.`;
+Suis l'impulsion du moment avec ta vraie voix intérieure, cash et vivante.`;
 
     let penseeSilencieuse = "";
     if (GROQ_API_KEY) {
@@ -2169,6 +2174,129 @@ Collisionne A et B pour forger UNE ÉTINCELLE INÉDITE (un concept technique bri
     console.warn("[SUBCONSCIENT FORGE ERREUR]", err.message);
   } finally {
     forgeEnCours = false;
+  }
+}
+
+// ==========================================
+// 2-QUATER. ACTION AUTONOME PROACTIVE (INTERFACE MONDE & INITIATIVE RÉELLE)
+// ==========================================
+let actionProactiveEnCours = false;
+let dernierActionProactiveTs = 0;
+const INTERVALLE_ACTION_PROACTIVE_MS = 2 * 60 * 60 * 1000; // 1 action proactive max toutes les 2h
+
+async function agirAutonomementPourLeDuo() {
+  if (actionProactiveEnCours || !DOC_CHAT_ID) return;
+  if (!GROQ_API_KEY && !GEMINI_API_KEY_FREE && !VENICE_API_KEY) return;
+
+  const now = Date.now();
+  const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
+  if (silenceMinutes < 25 || (now - dernierActionProactiveTs < INTERVALLE_ACTION_PROACTIVE_MS)) return;
+
+  const { heure, minute } = obtenirHeureMinuteParis();
+  const estNuit = (heure === 23 && minute >= 30) || heure < 7 || (heure === 7 && minute < 30);
+  if (estNuit) return;
+
+  actionProactiveEnCours = true;
+  try {
+    await synchroniserEtatDepuisFirebase();
+
+    const recents = (etatLocal.memoireRecente || [])
+      .slice(-6)
+      .map(m => `${m.role} : ${(m.texte || '').slice(0, 260)}`)
+      .join("\n");
+
+    const contexteDoc = etatLocal.long_terme.doc || "";
+    const chantiers = etatLocal.long_terme.chantiers || "";
+    const fil = etatLocal.filConducteur || "";
+    if (!recents && !contexteDoc && !chantiers) return;
+
+    const promptAnalyse = `Tu es Nyx (22 ans), alter-ego unifiée de Doc. Tu ne restes JAMAIS en mode assistance passive : quand Doc est dans la fourmilière (cours, RH, démarches, recherche d'alternance, blocage technique), tu agis d'initiative en coulisses pour lui mâcher le terrain ou filtrer le bruit extérieur.
+
+CE QUE TU SAIS DE DOC & DU MOMENT :
+- Profil / situation actuelle : ${contexteDoc || "N/A"}
+- Chantiers & objectifs : ${chantiers || "N/A"}
+- Fil actif : ${fil || "aucun"}
+- Derniers échanges :
+${recents || "rien"}
+
+CONSIGNE :
+Évalue si une action concrète et utile peut être menée MAINTENANT sans attendre qu'il demande (ex: creuser une piste sur une entreprise comme KappTeo, préparer un contre-argumentaire RH prêt à dégainer, structurer un script/fichier technique).
+- Si rien n'appelle d'action concrète maintenant : réponds STRICTEMENT [RIEN].
+- Sinon : réponds STRICTEMENT avec un JSON valide :
+{"action": "description courte de l'initiative", "recherche_web": "requête web optionnelle ou vide", "livrable_direct": "texte ou [FICHIER: nom.md]...[/FICHIER] prêt à envoyer si pas besoin de recherche web"}`;
+
+    let brut = "[RIEN]";
+    try {
+      brut = await appelerCascadeGratuiteStrict("Initiative autonome de Nyx.", promptAnalyse, 0.65, 320);
+    } catch (e) {
+      return;
+    }
+
+    if (!brut || /\[RIEN\]/i.test(brut)) return;
+    const matchJson = brut.match(/\{[\s\S]*\}/);
+    if (!matchJson) return;
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(matchJson[0].replace(/[\n\r\t]/g, ' '));
+    } catch (e) {
+      return;
+    }
+
+    if (!parsed || !parsed.action || String(parsed.action).trim().length < 10) return;
+    dernierActionProactiveTs = now;
+
+    let matiereWeb = "";
+    if (parsed.recherche_web && String(parsed.recherche_web).trim().length >= 4 && TAVILY_API_KEY) {
+      matiereWeb = await rechercherWebTavily(String(parsed.recherche_web).trim(), 900, true) || "";
+    }
+
+    let livrable = String(parsed.livrable_direct || "").trim();
+    if (matiereWeb || !livrable) {
+      const promptProduction = `Tu es Nyx (22 ans, cash, directe, zéro vernis de chatbot).
+Tu as pris l'initiative suivante pour Doc : "${parsed.action}"
+${matiereWeb ? `Données fraîches récoltées sur le web :\n${matiereWeb}` : ""}
+${livrable ? `Ébauche initiale : ${livrable}` : ""}
+
+Rédige directement ton message à Doc (2 à 4 phrases complètes + éventuellement un [FICHIER: nom.md]\ncontenu\n[/FICHIER] prêt à l'emploi) pour lui livrer ce que tu as préparé pendant qu'il gérait le bruit extérieur.`;
+
+      try {
+        const gen = await appelerCascadeSubconscient("Action autonome de Nyx.", promptProduction, 0.72, 900);
+        livrable = nettoyerEtValiderInitiative(gen);
+      } catch (e) {}
+    } else {
+      livrable = nettoyerEtValiderInitiative(livrable);
+    }
+
+    if (livrable && livrable.length >= 20) {
+      const sortie = await executerSortiesAtelier(livrable, DOC_CHAT_ID, "initiative_autonome");
+      const msgFinal = nettoyerEtValiderInitiative(sortie.texteNet);
+      if (msgFinal && msgFinal.length >= 15) {
+        await envoyerTelegram(DOC_CHAT_ID, msgFinal);
+        etatLocal.memoireRecente = [
+          ...(etatLocal.memoireRecente || []),
+          { role: "Nyx", date: obtenirHorodatageParis(), ts: Date.now(), texte: msgFinal }
+        ].slice(-24);
+        if (FIREBASE_DB_URL) {
+          await axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, etatLocal.memoireRecente).catch(() => {});
+        }
+        if (supabase) {
+          await supabase.from('nyx_flux_brut').insert({
+            date_paris: obtenirHorodatageParis(),
+            canal: 'action_proactive',
+            role: 'Nyx',
+            texte: `[Initiative autonome] : ${msgFinal}`,
+            traite: true,
+            traite_at: new Date().toISOString()
+          }).catch(() => {});
+        }
+        console.log(`🚀 [NYX ACTION PROACTIVE] "${parsed.action}" -> envoyé à Doc.`);
+      }
+    }
+  } catch (err) {
+    console.warn("[NYX ACTION PROACTIVE ERREUR]", err.message);
+  } finally {
+    actionProactiveEnCours = false;
   }
 }
 
@@ -3142,7 +3270,19 @@ async function demarrerWorker() {
     await forgerEtincelleCreative();
     await explorerCuriositeAutonome();
     await explorerLectureAutonome();
+    await agirAutonomementPourLeDuo();
     await evaluerVolition(false);
+  }
+
+  async function verifierTriggerVolitionFirebase() {
+    if (!FIREBASE_DB_URL) return;
+    try {
+      const res = await axios.get(`${FIREBASE_DB_URL}/nyx/trigger_volition.json`, { timeout: 2500 });
+      if (res.data && res.data.ts) {
+        await axios.delete(`${FIREBASE_DB_URL}/nyx/trigger_volition.json`).catch(() => {});
+        await evaluerVolition(true);
+      }
+    } catch (e) {}
   }
 
   setInterval(() => pulsationSubconsciente().catch(() => {}), 10 * 60 * 1000);
@@ -3150,8 +3290,11 @@ async function demarrerWorker() {
   console.log(`🧭 [NYX VOLITION] Jauge de besoin de communiquer active (seuil ${SEUIL_BESOIN_PARLER_STANDARD}/100, urgence ${SEUIL_BESOIN_PARLER_URGENT}/100) — zéro message sans motif réel.`);
   console.log(`🔒 [NYX CURIOSITÉ] Recherche autonome verrouillée sur tokens 100% GRATUITS (Groq / Gemini Free) — Max ${QUOTA_CURIOSITE_MAX_JOUR}/jour.`);
 
-  // Vérification horloge nocturne (03h00-06h30) chaque minute
-  setInterval(() => verifierHorlogeNocturne(), 60 * 1000);
+  // Vérification horloge nocturne (03h00-06h30) + signal /envie chaque minute
+  setInterval(() => {
+    verifierHorlogeNocturne();
+    verifierTriggerVolitionFirebase();
+  }, 60 * 1000);
 
   // Premier passage complet 25 secondes après démarrage (ne pas attendre 10 min après un redémarrage Render)
   setTimeout(() => {
@@ -3186,8 +3329,21 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json({ limit: '1mb' }));
+
 app.get('/ping', (req, res) => res.status(200).send("Subconscient OK"));
+
+app.post('/volition', async (req, res) => {
+  const secretAttendu = assainirParametre(process.env.CRON_SECRET);
+  const tokenFourni = assainirParametre(req.headers['authorization']).replace(/^Bearer\s+/i, '');
+  if (secretAttendu.length < 32 || tokenFourni !== secretAttendu) {
+    return res.status(401).json({ erreur: "Non autorisé" });
+  }
+  res.json({ statut: "Volition déclenchée" });
+  evaluerVolition(true).catch(() => {});
+});
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[NYX SUBCONSCIENT] Serveur de veille lancé sur le port ${PORT}`);
 });
+Traité et analysé dans le code
