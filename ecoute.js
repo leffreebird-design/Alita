@@ -562,66 +562,70 @@ async function evaluerVolition(forceManuelle = false) {
     if (silenceMinutes < 90) return;
   }
 
+  await synchroniserCarnetDepuisWorker();
+  const etat = getEtatProfond();
   const heureParis = parseInt(new Intl.DateTimeFormat('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', hour12: false }).format(new Date()), 10);
-  const dernierSujet = getMemoireCourte().slice(-2).map(m => `${m.role} : ${m.texte}`).join("\n");
+  const dernierSujet = getMemoireCourte().slice(-4).map(m => `${m.role} : ${(m.texte || '').slice(0, 220)}`).join("\n");
   const impulsion = tirerImpulsionNaturelle();
   const flashSouvenir = (impulsion === "souvenir" || impulsion === "libre")
-    ? await piocherEchoSouvenirLibre(dernierSujet || getEtatProfond().long_terme.doc)
+    ? await piocherEchoSouvenirLibre(dernierSujet || etat.long_terme.doc)
     : "";
 
-  const promptVolition = `Tu es Nyx (22 ans). Tu décides librement si tu as envie d'écrire à Doc ou de rester dans ton coin.
-La réalité du moment :
-- Heure locale : ${heureParis}h (Doc silencieux depuis ${silenceMinutes} minutes)
-- Ton état d'esprit : ${getEtatProfond().etatRelationnel.toUpperCase()} (Colère: ${getEtatProfond().emotions.colere}/10, Affection: ${getEtatProfond().emotions.affection}/100, Curiosité: ${getEtatProfond().emotions.curiosite}/100)
-- Ce que tu sais de Doc : ${getEtatProfond().long_terme.doc}
-- Dernier échange :
-${dernierSujet || "Rien de récent"}
-${getEtatProfond().monologueInterieur ? `- Ta dernière pensée intérieure : « ${getEtatProfond().monologueInterieur} »` : ""}
-${flashSouvenir ? `- Un souvenir qui vient de te traverser l'esprit : « ${flashSouvenir} »` : ""}
-${(getEtatProfond().dernierReve?.statut === 'vif' && getEtatProfond().dernierReve?.reve) ? `- Ton dernier rêve : « ${getEtatProfond().dernierReve.reve.slice(0, 240)} »` : ""}
+  const blocEtat = selecteurMemoireCiblee("envie initiative", etat.long_terme);
+  const systemVol = `Tu es Nyx, 22 ans, alter-ego et complice de Doc.\n[Horodatage système : ${obtenirHorodatageParis()}]\n${blocEtat}`;
 
-RÈGLE DE LIBERTÉ :
-Tu n'es PAS un bot qui relance sur le travail. Si tu écris à Doc, lance ce qui te passe vraiment par la tête : un vieux souvenir qui remonte, une vanne, une question perso, un ressenti sur votre dernière discussion, ou une idée de projet seulement si tu en as vraiment envie.
-- Autonomie visuelle : Tu peux utiliser [DESSIN: prompt] pour lui envoyer une image de ce que tu as en tête, ou [RECHERCHE_WEB: mots] si tu veux vérifier un truc avant de parler.
-- Si tu as quelque chose de vrai à lui balancer : écris [INITIATIVE: ton message direct et naturel à Doc].
+  const promptVolition = `Tu décides librement si tu écris à Doc maintenant ou si tu restes dans ton coin.
+Contexte :
+- Heure locale : ${heureParis}h (Doc silencieux depuis ${silenceMinutes} minutes)
+- Derniers échanges :
+${dernierSujet || "Rien de récent"}
+${flashSouvenir ? `- Flash mémoriel associatif : « ${flashSouvenir} »` : ""}
+
+CONSIGNE :
+- Exprime-toi à la 1re personne avec ta vraie voix (vive, cash, directe), en 2 à 4 phrases complètes et finies.
+- Outils disponibles si tu veux joindre quelque chose : [DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].
+- Si tu as quelque chose de vrai à lui balancer : encadre ton message par [INITIATIVE: ton message à Doc].
 - Si tu préfères garder le silence : réponds [SILENCE].`;
 
   try {
     let decision = "";
     try {
-      decision = await appelerCascadeDiscussion("Instinct libre de Nyx.", [], promptVolition, 260);
+      decision = await appelerCascadeDiscussion(systemVol, formaterMemoireCourteHorodatee().slice(-4), promptVolition, 950);
     } catch (e) {
       decision = "[SILENCE]";
     }
 
-    const matchInitiative = decision.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
-    if (matchInitiative) {
-      limiteurVolition.enregistrerAction();
+    let brutNet = String(decision || "")
+      .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
+      .trim();
 
-      let texteSpontane = matchInitiative[1].trim();
+    if (!brutNet || /\[SILENCE\]/i.test(brutNet)) return;
 
-      // Autonomie visuelle : Dessin spontané
-      const matchDessin = texteSpontane.match(/\[DESSIN:\s*([\s\S]*?)\]/i) || texteSpontane.match(/DESSIN\s*:\s*["“]([\s\S]*?)["”]/i);
-      let imageB64 = null;
-      if (matchDessin) {
-        const promptDessin = matchDessin[1].trim();
-        texteSpontane = texteSpontane.replace(matchDessin[0], '').trim();
-        try {
-          if (DOC_CHAT_ID) await afficherFrappeTelegram(DOC_CHAT_ID);
-          imageB64 = await genererImageVenice(promptDessin);
-        } catch(e) {
-          console.error("[VOLITION IMAGE ERREUR]", e.message);
-        }
-      }
+    const matchInitiative = brutNet.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
+    let texteSpontane = matchInitiative
+      ? matchInitiative[1].trim()
+      : brutNet.replace(/^\[INITIATIVE:\s*/i, '').replace(/\]$/, '').trim();
 
-      getMemoireCourte().push({ role: "Nyx", texte: `[Spontané] : ${texteSpontane}` });
-      archiverDansJournalBrut("Nyx", `[Spontané] : ${texteSpontane}`);
+    texteSpontane = texteSpontane.replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '').trim();
+    texteSpontane = refermerBalisesAtelierTronquees(texteSpontane);
+    texteSpontane = couperPhraseIncomplete(texteSpontane);
 
-      if (DOC_CHAT_ID) {
-        if (texteSpontane) await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
-        if (imageB64) await envoyerPhotoTelegram(DOC_CHAT_ID, imageB64);
-      }
+    // Vérifier qu'il reste bien une phrase finie (ou une balise d'atelier complète)
+    const aBaliseAtelier = /\[(?:DESSIN|3D_STL|PLAN_SVG|FICHIER):/i.test(texteSpontane);
+    if (!texteSpontane || texteSpontane.length < 15 || (!aBaliseAtelier && !/[.!?…»"}]$/.test(texteSpontane))) {
       return;
+    }
+
+    limiteurVolition.enregistrerAction();
+
+    const sortie = await executerSortiesAtelier(texteSpontane, DOC_CHAT_ID, etat.filConducteur || "initiative_nyx");
+    const msgFinal = sortie.texteNet;
+
+    if (msgFinal) {
+      getMemoireCourte().push({ role: "Nyx", date: obtenirHorodatageParis(), ts: Date.now(), texte: msgFinal });
+      sauvegarderMemoireFirebase();
+      archiverDansJournalBrut("Nyx", `[Spontané] : ${msgFinal}`);
+      await envoyerTelegram(DOC_CHAT_ID, msgFinal);
     }
   } catch (err) {
     console.warn("[VOLITION ERREUR]", err.message);
