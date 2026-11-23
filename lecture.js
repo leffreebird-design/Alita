@@ -196,7 +196,7 @@ Réponds STRICTEMENT avec un JSON valide :
 
     let choix = null;
     try {
-      const brut = await appelerLlmGratuit("Désir de lecture autonome de Nyx.", promptChoix, 0.75, 220);
+      const brut = await appelerLlmGratuit("Désir de lecture autonome de Nyx.", promptChoix, 0.75, 650);
       const m = brut.match(/\{[\s\S]*\}/);
       if (m) choix = JSON.parse(m[0].replace(/[\n\r\t]/g, ' '));
     } catch (e) {}
@@ -480,7 +480,7 @@ Réponds STRICTEMENT avec un JSON valide :
     if (typeof appelerLlmGratuit === 'function' && notesResume) {
       try {
         const promptBilan = `Tu viens de terminer "${livre.titre}" (${livre.auteur}). Voici tes notes de lecture :\n${notesResume}\n\nFormule en 2 phrases cash ce que ce livre te laisse durablement.`;
-        const res = await appelerLlmGratuit("Bilan de lecture de Nyx.", promptBilan, 0.65, 140);
+        const res = await appelerLlmGratuit("Bilan de lecture de Nyx.", promptBilan, 0.65, 550);
         if (res && res.trim().length > 12) bilanGlobal = res.trim().slice(0, 300);
       } catch (e) {}
     }
