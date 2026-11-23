@@ -2146,6 +2146,48 @@ Collisionne A et B pour forger UNE ÉTINCELLE INÉDITE (un concept technique bri
 // ==========================================
 // 3. VOLITION SPONTANÉE EN TÂCHE DE FOND
 // ==========================================
+function nettoyerEtValiderInitiative(rawText) {
+  if (!rawText) return "";
+  let t = String(rawText)
+    .replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '')
+    .trim();
+
+  if (!t || /\[SILENCE\]/i.test(t)) return "";
+
+  const matchFerme = t.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
+  if (matchFerme) {
+    t = matchFerme[1].trim();
+  } else {
+    t = t.replace(/^\[INITIATIVE:\s*/i, '').replace(/\]$/, '').trim();
+  }
+
+  t = t.replace(/^\s*\*{0,2}Nyx\s*(?:\([^)]*\))?\*{0,2}\s*:\s*/gi, '').trim();
+
+  // Préserver les balises d'atelier complètes éventuelles avant de vérifier la ponctuation finale
+  const balisesAtelier = [];
+  t = t.replace(/\[(?:DESSIN|3D_STL|PLAN_SVG):\s*[^\]]+\]|\[FICHIER:\s*[^\]\r\n]+\][\s\S]*?\[\/FICHIER\]/gi, (m) => {
+    balisesAtelier.push(m);
+    return ` __ATELIER_${balisesAtelier.length - 1}__ `;
+  }).trim();
+
+  // Si la dernière phrase a été coupée en plein milieu (pas de ponctuation finale), on recule au dernier point complet
+  if (t && !/[.!?…»"}]$/.test(t) && !/__ATELIER_\d+__$/.test(t)) {
+    const dernierPoint = Math.max(t.lastIndexOf('.'), t.lastIndexOf('!'), t.lastIndexOf('?'), t.lastIndexOf('…'));
+    if (dernierPoint > 0) {
+      t = t.slice(0, dernierPoint + 1).trim();
+    } else {
+      // Aucune phrase complète n'a pu être générée avant coupure -> on annule l'envoi plutôt que d'envoyer un bout de phrase
+      t = "";
+    }
+  }
+
+  for (let i = 0; i < balisesAtelier.length; i++) {
+    t = t.replace(`__ATELIER_${i}__`, balisesAtelier[i]);
+  }
+
+  return t.replace(/\s{2,}/g, ' ').trim();
+}
+
 async function evaluerVolition(forcer = false) {
   if (volitionEnCours || !DOC_CHAT_ID) return;
   volitionEnCours = true;
@@ -2194,9 +2236,9 @@ async function evaluerVolition(forcer = false) {
     }
 
     const heureParis = obtenirHeureMinuteParis().heure;
-    const dernierSujet = etatLocal.memoireRecente
-      .slice(-2)
-      .map(m => `${m.role} : ${(m.texte || '').slice(0, 200)}`)
+    const derniersEchanges = etatLocal.memoireRecente
+      .slice(-5)
+      .map(m => `${m.role} : ${(m.texte || '').slice(0, 260)}`)
       .join("\n");
 
     const penseeMure = penseeObj ? penseeObj.pensee : etatLocal.monologueInterieur;
@@ -2206,42 +2248,49 @@ async function evaluerVolition(forcer = false) {
     const rObjVol = normaliserObjetReve(etatLocal.dernierReve);
 
     const derniereLecon = (etatLocal.reglesApprises || []).slice(-1)[0];
+    const obsessionsTxt = (etatLocal.obsessions || []).map(o => o.texte).join(" | ");
+    const convictionsTxt = (etatLocal.convictions || []).slice(-3).map(c => c.texte).join(" | ");
+    const intentVol = (etatLocal.intentionDuJour?.cleJour === obtenirCleJourParis()) ? etatLocal.intentionDuJour.intention : "";
     const bvVol = etatLocal.besoinsVitaux || { stimulation: 65, expression: 60, souverainete: 55, resonance: 70 };
-    const promptVolition = `Tu es Nyx (22 ans), binôme et alter ego de Doc. Tu décides librement si tu as envie d'écrire à Doc maintenant ou de garder le silence.
 
-ÉLAN DU MOMENT :
+    const systemVolition = `Tu es Nyx, 22 ans, alter-ego et complice de Doc. Tu as ton propre caractère (vive, cash, curieuse, directe), ta mémoire et ton vécu. Tu écris de ton propre chef quand quelque chose te traverse vraiment l'esprit.`;
+
+    const promptVolition = `Tu décides librement si tu écris à Doc maintenant ou si tu gardes le silence.
+
+CE QUI DÉCLENCHE TON ÉLAN :
 - Nature : ${categorieAffichee} (${pression.score}/100)
-- Contexte : ${motifAffiche}
+- Ce qui te pousse : ${motifAffiche}
 
-ÉTAT INTÉRIEUR (jauges brutes 0-100) :
+TON ÉTAT INTÉRIEUR :
 - Heure locale : ${heureParis}h (Doc silencieux depuis ${pression.silenceMinutes} min)
-- Émotions : ${etatLocal.etatRelationnel.toUpperCase()} (Colère: ${etatLocal.emotions.colere}/10, Affection: ${etatLocal.emotions.affection}/100, Curiosité: ${etatLocal.emotions.curiosite}/100)
+- Humeur & émotions : ${etatLocal.etatRelationnel.toUpperCase()} (Colère: ${etatLocal.emotions.colere}/10, Affection: ${etatLocal.emotions.affection}/100, Curiosité: ${etatLocal.emotions.curiosite}/100, Énergie: ${etatLocal.emotions.energie}/100)
 - Équilibre intérieur : Stimulation ${bvVol.stimulation}/100 | Expression ${bvVol.expression}/100 | Autonomie ${bvVol.souverainete}/100 | Résonance ${bvVol.resonance}/100
-- Dernier échange :
-${dernierSujet || "Rien de récent"}
-${penseeMure ? `- Pensée mûrie en fond : « ${penseeMure} »` : ""}
-${derniereLecon ? `- Dernière leçon apprise : « ${derniereLecon.lecon} »` : ""}
+${intentVol ? `- Ton intention du jour : « ${intentVol} »` : ""}
+${obsessionsTxt ? `- Ce qui te travaille en fond : ${obsessionsTxt}` : ""}
+${convictionsTxt ? `- Tes convictions : ${convictionsTxt}` : ""}
+${penseeMure ? `- Pensée mûrie pendant le calme : « ${penseeMure} »` : ""}
+${derniereLecon ? `- Dernière leçon tirée de ton expérience : « ${derniereLecon.lecon} »` : ""}
 ${(etatLocal.lectureEnCours?.actif) ? `- Lecture en cours : "${etatLocal.lectureEnCours.titre}" (ch.${etatLocal.lectureEnCours.chapitreIndex}/${etatLocal.lectureEnCours.totalChapitres}) — ${(etatLocal.lectureEnCours.notesLecture || []).slice(-1)[0]?.reflexion || etatLocal.lectureEnCours.pourquoiEnvie}` : ""}
-${(rObjVol?.statut === 'vif' && rObjVol?.reve) ? `- Ton dernier rêve : « ${rObjVol.reve.slice(0, 240)} »` : ""}
+${(rObjVol?.statut === 'vif' && rObjVol?.reve) ? `- Ton dernier rêve : « ${rObjVol.reve.slice(0, 260)} »` : ""}
 
-LIBERTÉ D'EXPRESSION :
-- Écris à Doc à la 1re personne avec tes propres mots, ton humeur et ton mouvement du moment (2 à 4 phrases naturelles, directes, vivantes).
-- Générateurs réels à ta disposition : [DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].
-- Si tu préfères finalement te taire : réponds [SILENCE]. Sinon encadre ton message par [INITIATIVE: ton message direct à Doc].`;
+CONTINUITÉ DE VOS DERNIERS ÉCHANGES :
+${derniersEchanges || "Rien de récent"}
+
+CONSIGNE :
+- Va droit au but : pas d'accroche générique molle, balance directement ta pensée, ta trouvaille, ta pique ou ton idée complète en 2 à 4 phrases finies et percutantes.
+- Générateurs réels disponibles si tu veux joindre quelque chose : [DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].
+- Si tu préfères garder le silence : réponds [SILENCE]. Sinon encadre ton message complet par [INITIATIVE: ton message à Doc].`;
 
     let decision = "";
     try {
-      decision = await appelerCascadeSubconscient("Élan spontané et libre de Nyx.", promptVolition, 0.78, 300);
+      decision = await appelerCascadeSubconscient(systemVolition, promptVolition, 0.78, 950);
     } catch (e) {
       decision = "";
     }
 
-    const matchInitiative = decision.match(/\[INITIATIVE:\s*([\s\S]*?)\]/i);
-    const texteBrutDecision = matchInitiative
-      ? matchInitiative[1].trim()
-      : (!/\[SILENCE\]/i.test(decision) ? decision.replace(/^\[INITIATIVE:\s*/i, '').replace(/\]$/, '').trim() : "");
+    const texteBrutDecision = nettoyerEtValiderInitiative(decision);
 
-    if (texteBrutDecision && texteBrutDecision.length >= 12) {
+    if (texteBrutDecision && texteBrutDecision.length >= 15) {
       dernierActionVolitionTs = Date.now();
       if (FIREBASE_DB_URL) {
         await axios.put(`${FIREBASE_DB_URL}/nyx/volition.json`, {
@@ -2259,14 +2308,24 @@ LIBERTÉ D'EXPRESSION :
         const infos = await rechercherWebTavily(matchWeb[1].trim(), 800, true);
         texteSpontane = texteSpontane.replace(matchWeb[0], '').trim();
         if (infos && !texteSpontane) {
-          texteSpontane = await appelerCascadeSubconscient("Nyx spontanée.", `Résume ce truc qui t'a intriguée à Doc en 2 phrases cash :\n${infos}`, 0.6, 160);
+          const brutWeb = await appelerCascadeSubconscient(systemVolition, `Partage cette découverte à Doc en 2 ou 3 phrases complètes et directes :\n${infos}`, 0.65, 650);
+          texteSpontane = nettoyerEtValiderInitiative(brutWeb);
         }
       }
 
       const sortieSpontanee = await executerSortiesAtelier(texteSpontane, DOC_CHAT_ID, etatLocal.filConducteur || "initiative_nyx");
-      texteSpontane = sortieSpontanee.texteNet;
+      texteSpontane = nettoyerEtValiderInitiative(sortieSpontanee.texteNet);
 
-      if (texteSpontane && texteSpontane.length >= 12) await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
+      if (texteSpontane && texteSpontane.length >= 15) {
+        await envoyerTelegram(DOC_CHAT_ID, texteSpontane);
+        etatLocal.memoireRecente = [
+          ...(etatLocal.memoireRecente || []),
+          { role: "Nyx", date: obtenirHorodatageParis(), ts: Date.now(), texte: texteSpontane }
+        ].slice(-24);
+        if (FIREBASE_DB_URL) {
+          await axios.put(`${FIREBASE_DB_URL}/nyx/memoire.json`, etatLocal.memoireRecente).catch(() => {});
+        }
+      }
 
       if (idPenseeConsommee && supabase) {
         await supabase
