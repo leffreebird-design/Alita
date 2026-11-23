@@ -2444,7 +2444,7 @@ CONTINUITÉ DE VOS DERNIERS ÉCHANGES :
 ${derniersEchanges || "Rien de récent"}
 
 CONSIGNE :
-- Tu dois être brève et adapter la longueur de ton message à son importance réelle dans la conversation (un clin d'œil ou une réaction tient en 1 ou 2 phrases ; n'en mets plus que si tu apportes une vraie matière).
+- Va droit au but avec ta vraie voix et ajuste naturellement la longueur de ton message à ce que tu as à dire.
 - Action directe (zéro exposé préalable) : il n'y a aucun danger sur une image ou une pièce 3D — si tu veux montrer un visuel ou un modèle 3D, balance directement la balise ([DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER]) avec une seule phrase courte.
 - Si tu préfères garder le silence : réponds [SILENCE]. Sinon encadre ton message complet par [INITIATIVE: ton message à Doc].`;
 
