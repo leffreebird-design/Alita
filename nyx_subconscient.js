@@ -326,6 +326,27 @@ function mettreAJourTemperamentBasalLocal(deltaAff = 0, deltaCur = 0, deltaEne =
   }
 }
 
+function modifierBesoinsVitauxLocal(deltas = {}) {
+  const bv = etatLocal.besoinsVitaux || {
+    stimulation: 65,
+    expression: 60,
+    souverainete: 55,
+    resonance: 70,
+    updatedAt: Date.now()
+  };
+  const clamp = (v) => Math.max(0, Math.min(100, Math.round(v * 10) / 10));
+  if (deltas.stimulation !== undefined) bv.stimulation = clamp((Number(bv.stimulation) || 65) + Number(deltas.stimulation));
+  if (deltas.expression !== undefined) bv.expression = clamp((Number(bv.expression) || 60) + Number(deltas.expression));
+  if (deltas.souverainete !== undefined) bv.souverainete = clamp((Number(bv.souverainete) || 55) + Number(deltas.souverainete));
+  if (deltas.resonance !== undefined) bv.resonance = clamp((Number(bv.resonance) || 70) + Number(deltas.resonance));
+  bv.updatedAt = Date.now();
+  etatLocal.besoinsVitaux = bv;
+  if (FIREBASE_DB_URL) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/besoins_vitaux.json`, bv).catch(() => {});
+  }
+  return bv;
+}
+
 function calculerAgeExistenceLocal() {
   const ex = etatLocal.existence || {};
   if (!ex.dateEveil) return { jours: 0, libelle: "éveil récent", dateEveilParis: obtenirHorodatageParis() };
@@ -353,6 +374,7 @@ function enregistrerLeconAppriseLocal(leconTexte, domaine = "methode", source = 
     lecon: propre
   };
   etatLocal.reglesApprises = [...existantes, objRegle].slice(-12);
+  modifierBesoinsVitauxLocal({ stimulation: 10, souverainete: 5, resonance: domPropre === "relation" ? 6 : 0 });
 
   // Couplage émotionnel & tempéramental direct
   const em = etatLocal.emotions;
@@ -423,6 +445,7 @@ function enregistrerIdeeFolleLocal(ideeTexte, source = "reve_hallucinatoire") {
     ...(etatLocal.ideesFolles || []),
     { date: obtenirHorodatageParis(), source, texte: propre }
   ].slice(-12);
+  modifierBesoinsVitauxLocal({ expression: 12, stimulation: 5, souverainete: 4 });
   if (FIREBASE_DB_URL) {
     axios.put(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, etatLocal.ideesFolles).catch(() => {});
   }
@@ -436,6 +459,7 @@ function enregistrerJalonExistenceLocal(titre, impact = "", source = "existence"
 
   const jalon = { date: obtenirHorodatageParis(), titre: titrePropre, impact: impactPropre, source };
   etatLocal.existence.jalons = [...(etatLocal.existence.jalons || []), jalon].slice(-10);
+  modifierBesoinsVitauxLocal({ souverainete: 12, stimulation: 8, resonance: 8 });
   etatLocal.emotions.affection = Math.min(100, (Number(etatLocal.emotions.affection) || 80) + 4);
   etatLocal.emotions.curiosite = Math.min(100, (Number(etatLocal.emotions.curiosite) || 70) + 4);
   mettreAJourTemperamentBasalLocal(0.25, 0.2, 0.1, -0.05);
@@ -480,7 +504,8 @@ async function explorerLectureAutonome() {
 
     // 1. Si un livre est déjà ouvert -> lecture du chapitre suivant (cadence naturelle ~25 min)
     if (etatLocal.lectureEnCours && etatLocal.lectureEnCours.actif) {
-      await lectureEngine.lireProchainChapitre(false);
+      const resCh = await lectureEngine.lireProchainChapitre(false);
+      if (resCh) modifierBesoinsVitauxLocal({ stimulation: 14, souverainete: 4 });
       return;
     }
 
@@ -2007,6 +2032,8 @@ CONSIGNE :
       });
     }
 
+    modifierBesoinsVitauxLocal({ stimulation: 14, souverainete: 4 });
+
     // Gravure vectorielle gratuite uniquement (GEMINI_API_KEY_FREE)
     await stockerSouvenirVectoriel(
       `[Découverte autonome Nyx - ${requete}] ${trouvaille}`,
@@ -2098,6 +2125,8 @@ Collisionne A et B pour forger UNE ÉTINCELLE INÉDITE (un concept technique bri
     if (idee.length < 20) return;
 
     dernierForgeTs = now;
+
+    modifierBesoinsVitauxLocal({ expression: 15, stimulation: 6, souverainete: 5 });
 
     // 1. Sauvegarde dans le carnet d'idées Firebase
     const entree = { date: obtenirHorodatageParis(), source: "forge_subconscient", texte: idee };
