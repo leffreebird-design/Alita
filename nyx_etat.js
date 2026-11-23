@@ -636,6 +636,9 @@ async function initialiserCache() {
     if (resHistReves?.data) {
       cacheEtatProfond.historiqueReves = (Array.isArray(resHistReves.data) ? resHistReves.data : Object.values(resHistReves.data)).filter(Boolean).slice(-6);
     }
+    if (resHistReves?.data) {
+      cacheEtatProfond.historiqueReves = (Array.isArray(resHistReves.data) ? resHistReves.data : Object.values(resHistReves.data)).filter(Boolean).slice(-6);
+    }
     if (!dernierDocChatId && resChatId?.data?.chatId) {
       dernierDocChatId = Number(resChatId.data.chatId) || null;
     }
@@ -963,7 +966,7 @@ async function piocherPenseePrete() {
 async function synchroniserCarnetDepuisWorker() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resExistence, resRegles, resLecture, resBiblio, resMajSync, resIntentionSync, resVitauxSync] = await Promise.all([
+    const [resLT, resReve, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resExistence, resRegles, resLecture, resBiblio, resMajSync, resIntentionSync, resVitauxSync, resBesoinSync] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 2500 }).catch(() => ({ data: null })),
@@ -978,7 +981,8 @@ async function synchroniserCarnetDepuisWorker() {
       axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 2500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/intention_jour.json`, { timeout: 2500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/besoins_vitaux.json`, { timeout: 2500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/besoins_vitaux.json`, { timeout: 2500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, { timeout: 2500 }).catch(() => ({ data: null }))
     ]);
     if (resLT.data && typeof resLT.data === 'object') {
       cacheEtatProfond.long_terme = { ...cacheEtatProfond.long_terme, ...resLT.data };
@@ -1035,6 +1039,9 @@ async function synchroniserCarnetDepuisWorker() {
     }
     if (resVitauxSync?.data && typeof resVitauxSync.data === 'object') {
       cacheEtatProfond.besoinsVitaux = { ...cacheEtatProfond.besoinsVitaux, ...resVitauxSync.data };
+    }
+    if (resBesoinSync?.data && typeof resBesoinSync.data === 'object') {
+      cacheEtatProfond.besoinCommunication = { ...cacheEtatProfond.besoinCommunication, ...resBesoinSync.data };
     }
   } catch (e) {}
 }
