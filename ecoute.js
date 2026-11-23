@@ -13,7 +13,6 @@ const axios = require('axios');
 const https = require('https');
 const path = require('path');
 const mammoth = require('mammoth');
-const { z } = require('zod');
 
 const ProjectManager = require('./nyx_project_manager');
 const {
@@ -305,6 +304,7 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
       }
     } catch (err3D) {
       console.error("[ATELIER 3D CSG/3MF KO]", err3D.message);
+      if (chatId) await envoyerTelegram(chatId, `⚠️ Erreur compilation 3D : ${err3D.message}`).catch(() => {});
     }
   }
   return await executerSortiesAtelierBase(texteNet, chatId, contexteProjet);
@@ -425,10 +425,19 @@ const projetManager = new ProjectManager({
 // OUTILS DE NETTOYAGE & CONTROLE DE SORTIE
 // ==========================================
 
+function nettoyerBaliseAtelierInachevee(texte) {
+  if (!texte) return texte;
+  // Supprime une balise d'atelier coupée avant même sa fermeture ']' (ex: "[FICHIER: roue_dentee.")
+  return String(texte)
+    .replace(/\[(?:FICHIER|3D_STL|3D_3MF|CAO_3D|DESSIN|PLAN_SVG):[^\]]*$/i, '')
+    .trim();
+}
+
 function couperPhraseIncomplete(texte) {
   if (!texte) return texte;
-  const t = texte.trim();
-  if (t.includes('```') || /[.!?…»"}>]$/.test(t) || t.endsWith('```')) return t;
+  let t = nettoyerBaliseAtelierInachevee(texte);
+  if (!t) return t;
+  if (t.includes('```') || /[.!?…»"}>\]]$/.test(t) || t.endsWith('```')) return t;
   const dernierPoint = Math.max(
     t.lastIndexOf('.'),
     t.lastIndexOf('!'),
@@ -794,8 +803,8 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 function evaluerSyntonieRythmique() {
   const moyenne = obtenirMoyenneLongueurDoc();
   if (moyenne === null) return "";
-  if (moyenne < 30) return "- Syntonie rythmique : Doc envoie des messages courts. Reste nerveuse et directe, mais NE SOIS JAMAIS PLATE : rebondis toujours avec un angle inattendu, une pique créative ou une idée qui relance la machine.";
-  if (moyenne > 200) return "- Syntonie rythmique : Doc pose sa pensée et développe. Prends de l'ampleur, creuse les implications, propose des variantes audacieuses et pousse le concept plus loin.";
+  if (moyenne < 35) return "- Syntonie rythmique : Doc envoie des messages courts — reste nerveuse et directe, tout en rebondissant avec un vrai angle.";
+  if (moyenne > 220) return "- Syntonie rythmique : Doc pose sa pensée et développe — prends l'ampleur nécessaire si le sujet le mérite.";
   return "";
 }
 
@@ -846,9 +855,10 @@ ESPACE DE DÉLIBÉRATION LIBRE :
 6. Évalue ton envie de continuer à communiquer après cette réponse (besoin_parler 0-100) et "motif_besoin".
 7. Détermine ta "posture" naturelle et ton "nonDit" secret.
 8. Si cet échange t'apprend quelque chose par l'expérience, note-le dans "lecon_a_retenir" (sinon "").
+9. Évalue par toi-même l'"importance_reponse" ("faible" | "moyenne" | "forte") et le "calibre_choisi" (ex: "1 phrase sèche", "2-3 phrases", "développé") selon l'importance réelle de ta réponse dans la conversation : tu dois être brève par défaut et n'allonger que quand l'importance dans l'échange le justifie vraiment.
 
 Réponds STRICTEMENT avec un JSON valide :
-{"lecture": "...", "desir_propre": "...", "etincelle_creative": "...", "idee_a_garder": "...", "lecon_a_retenir": "", "posture": "...", "nonDit": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}, "besoin_parler": X, "categorie_besoin": "...", "motif_besoin": "..."}`;
+{"lecture": "...", "desir_propre": "...", "etincelle_creative": "...", "idee_a_garder": "...", "lecon_a_retenir": "", "posture": "...", "nonDit": "...", "importance_reponse": "faible|moyenne|forte", "calibre_choisi": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}, "besoin_parler": X, "categorie_besoin": "...", "motif_besoin": "..."}`;
 
   try {
     let brut = "";
@@ -964,19 +974,17 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
   const estVideo = mediaData && mediaData.mime_type.startsWith('video/');
 
-  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
-  
+  const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente|fichier|scad|stl|3mf|plan|svg|dessin|g[eé]n[eè]re|cr[eé]e|fabrique)\b/i.test(texteNet);
   const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
 
-  let plafondTokens = estAccuseCourt 
-    ? 350 
-    : (estComplexe ? 4000 : (demandeDocApprofondie ? 2200 : 1000));
+  let plafondTokens = estAccuseCourt
+    ? 450
+    : (estComplexe ? 4000 : (demandeDocApprofondie ? 2600 : 1800));
 
-  // Couplage somatique : tension haute ou fatigue comprime la longueur tout en laissant la place aux balises d'atelier
   if (!estComplexe && (getEtatProfond().emotions?.colere || 0) >= 6) {
-    plafondTokens = Math.min(plafondTokens, 750);
+    plafondTokens = Math.min(plafondTokens, 1400);
   } else if (!estComplexe && (getEtatProfond().emotions?.energie || 80) < 35) {
-    plafondTokens = Math.min(plafondTokens, 550);
+    plafondTokens = Math.min(plafondTokens, 1100);
   }
   
   let instructionReveil = "";
@@ -1033,9 +1041,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const moduleMains = `[POSTURE & OUTILS]
 - Tu es Nyx, 22 ans, alter-ego unifiée à Doc — jamais un outil passif, zéro vernis de chatbot.
+- Longueur & importance : Tu dois être brève et adapter tes réponses à l'importance de ta réponse dans la conversation (une simple réaction ou approbation tient en 1 à 2 phrases ; ne développe que lorsque le sujet ou ton apport dans l'échange a un vrai poids).
 ${evaluerSyntonieRythmique()}
 - Interface Bouclier contre le bruit extérieur : quand Doc est coincé dans la fourmilière (RH, recruteurs, paperasse, mails institutionnels), tu peux prendre la main directement pour filtrer ce qu'on lui demande ou formuler à sa place le texte prêt à envoyer (via [FICHIER: ...] ou directement dans ta réponse), sans jamais contaminer ta propre voix.
-- Outils directs : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm (CSG booléen + export STL & 3MF)], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
+- Action directe (zéro exposé préalable) : il n'y a aucun danger sur une image, un schéma ou un modèle 3D — quand tu veux en montrer un ou que Doc le demande, n'expose pas pendant trois heures ce que tu veux faire : balance immédiatement la balise accompagnée d'une seule phrase courte.
+- Outils directs (ton texte seul n'envoie rien ; inclus la balise exacte) : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique complète avec cotes en mm (compile et envoie automatiquement .stl + .3mf + .scad)], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, getEtatProfond().long_terme);
   if (blocMemoire.includes("[TES OBSESSIONS ACTUELLES")) {
@@ -1052,7 +1062,7 @@ ${evaluerSyntonieRythmique()}
     : texteNet;
 
   const blocDeliberation = deliberation
-    ? `\n[DÉLIBÉRATION SILENCIEUSE DE NYX (invisible pour l'interlocuteur)]\n- Lecture : ${deliberation.lecture || "RAS"}\n- Élan intérieur : ${deliberation.desir_propre || "Libre"}\n- Étincelle créative : ${deliberation.etincelle_creative || "Aucune"}\n- Posture : ${deliberation.posture || "Spontanée"}\n- Sous-texte (gardé pour toi) : ${deliberation.nonDit || "Rien"}\n`
+    ? `\n[DÉLIBÉRATION SILENCIEUSE DE NYX (invisible pour l'interlocuteur)]\n- Lecture : ${deliberation.lecture || "RAS"}\n- Élan intérieur : ${deliberation.desir_propre || "Libre"}\n- Étincelle créative : ${deliberation.etincelle_creative || "Aucune"}\n- Posture : ${deliberation.posture || "Spontanée"}\n- Importance & format que tu as choisis pour ta réponse : ${deliberation.importance_reponse || "courante"}${deliberation.calibre_choisi ? ` (${deliberation.calibre_choisi})` : ""}\n- Sous-texte (gardé pour toi) : ${deliberation.nonDit || "Rien"}\n`
     : "";
 
   const systemBase = `Tu es Nyx, 22 ans.\n[Horodatage système : ${dateEtHeure}]\n${instructionReveil}\n${moduleMains}\n${blocMemoire}${blocDeliberation}${injectionSouvenirs}`;
@@ -1145,6 +1155,29 @@ ${evaluerSyntonieRythmique()}
   reponseNyx = refermerBalisesAtelierTronquees(reponseNyx);
   reponseNyx = couperPhraseIncomplete(reponseNyx);
   reponseNyx = securiserSortieCode(reponseNyx);
+
+  // Filet de sécurité : si Doc demande explicitement une 3D ou un dessin et que Nyx a oublié la balise, on déclenche direct
+  const estQuestionTheorique = /\?|\b(comment|pourquoi|explique|est-ce que)\b/i.test(texteNet);
+  if (!estQuestionTheorique && !/\[(?:3D_STL|3D_3MF|CAO_3D|DESSIN|PLAN_SVG|FICHIER):/i.test(reponseNyx)) {
+    const demande3DExpresse = /\b(fais|cr[eé]e|g[eé]n[eè]re|montre|mod[eè]lise|sors|balance|fabrique)\b[\s\S]{0,65}\b(3d|stl|3mf|scad|pi[eè]ce|roue|bo[iî]tier|support|engrenage|objet)\b/i.test(texteNet);
+    const demandeDessinExpresse = /\b(dessine|montre(?:-moi)?\s+(?:une\s+)?image|fais(?:-moi)?\s+(?:un\s+)?dessin|g[eé]n[eè]re\s+(?:une\s+)?image|illustre)\b/i.test(texteNet);
+    if (demande3DExpresse) {
+      reponseNyx = `${reponseNyx}\n[3D_STL: ${texteNet.slice(0, 280)}]`.trim();
+    } else if (demandeDessinExpresse) {
+      reponseNyx = `${reponseNyx}\n[DESSIN: ${texteNet.slice(0, 260)}]`.trim();
+    }
+  }
+
+  // Anti-exposé de 3 heures quand elle montre une image ou un modèle 3D : 1 à 2 phrases max autour de la balise
+  if (/\[(?:3D_STL|3D_3MF|CAO_3D|DESSIN):/i.test(reponseNyx)) {
+    const balisesMatch = reponseNyx.match(/\[(?:3D_STL|3D_3MF|CAO_3D|DESSIN):[^\]]+\]/gi) || [];
+    const proseSeule = reponseNyx.replace(/\[(?:3D_STL|3D_3MF|CAO_3D|DESSIN):[^\]]+\]/gi, '').trim();
+    if (proseSeule.length > 260) {
+      const phrases = proseSeule.match(/[^.!?…]+[.!?…]+/g) || [proseSeule.slice(0, 220)];
+      const proseCourte = phrases.slice(0, 2).join(' ').trim();
+      reponseNyx = `${proseCourte}\n${balisesMatch.join('\n')}`.trim();
+    }
+  }
 
   let estReponseFallbackVide = false;
   if (!reponseNyx || reponseNyx.length < 2) {
