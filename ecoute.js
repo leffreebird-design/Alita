@@ -125,6 +125,16 @@ const {
   createAtelierOutputs
 } = require('./atelier');
 
+const {
+  genererPiece3DAvancee,
+  analyser3mfBuffer,
+  extraireTexteXlsxBuffer,
+  extraireTextePptxBuffer,
+  analyserVideoMetadataBuffer,
+  estExtensionVideo,
+  detecterMimeVideo
+} = require('./nyx_cao_formats');
+
 // ==========================================
 // 1. INITIALISATION EXPRESS & VERROUS LOCAUX
 // ==========================================
@@ -240,12 +250,65 @@ function envoyerDocumentTelegram(chatId, buffer, filename, mimeType = "applicati
   });
 }
 
-const { executerSortiesAtelier } = createAtelierOutputs({
+const { executerSortiesAtelier: executerSortiesAtelierBase } = createAtelierOutputs({
   envoyerTelegram,
   afficherFrappeTelegram,
   envoyerPhotoTelegram,
   envoyerDocumentTelegram
 });
+
+async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "") {
+  let texteNet = refermerBalisesAtelierTronquees(String(texteBrutNyx || ""));
+  const match3D = texteNet.match(/\[(?:3D_STL|3D_3MF|CAO_3D):\s*([\s\S]*?)(?:\]|$)/i);
+  if (match3D) {
+    const desc3D = match3D[1].trim();
+    texteNet = texteNet.replace(match3D[0], '').trim();
+    try {
+      if (chatId) await afficherFrappeTelegram(chatId);
+      const res3D = await genererPiece3DAvancee(desc3D, contexteProjet, async (sys, prompt, temp, maxTok) => {
+        if (GROQ_API_KEY) return await appelerGroq(sys, [], prompt, temp, maxTok);
+        return await appelerCascadeCode(sys, [], prompt, maxTok);
+      });
+      await archiverArtefactAtelier({
+        projet: res3D.projet,
+        type: "stl_3d",
+        nomFichier: `${res3D.nomBase}.stl`,
+        buffer: res3D.stlBuffer,
+        mimeType: "application/sla",
+        resume: res3D.resume,
+        chatId
+      });
+      if (chatId) await envoyerDocumentTelegram(chatId, res3D.stlBuffer, `${res3D.nomBase}.stl`, "application/sla", `🧊 STL : ${res3D.resume}`);
+      if (res3D.threemfBuffer) {
+        await archiverArtefactAtelier({
+          projet: res3D.projet,
+          type: "3mf_3d",
+          nomFichier: `${res3D.nomBase}.3mf`,
+          buffer: res3D.threemfBuffer,
+          mimeType: "model/3mf",
+          resume: `3MF : ${res3D.resume}`,
+          chatId
+        });
+        if (chatId) await envoyerDocumentTelegram(chatId, res3D.threemfBuffer, `${res3D.nomBase}.3mf`, "model/3mf", `📦 3MF prêt à slicer`);
+      }
+      if (res3D.scadBuffer) {
+        await archiverArtefactAtelier({
+          projet: res3D.projet,
+          type: "openscad",
+          nomFichier: `${res3D.nomBase}.scad`,
+          buffer: res3D.scadBuffer,
+          mimeType: "text/plain",
+          resume: `Source OpenSCAD de ${res3D.nomBase}`,
+          chatId
+        });
+        if (chatId) await envoyerDocumentTelegram(chatId, res3D.scadBuffer, `${res3D.nomBase}.scad`, "text/plain", `📐 Source OpenSCAD`);
+      }
+    } catch (err3D) {
+      console.error("[ATELIER 3D CSG/3MF KO]", err3D.message);
+    }
+  }
+  return await executerSortiesAtelierBase(texteNet, chatId, contexteProjet);
+}
 
 // ==========================================
 // 4. MOTEUR ONIRIQUE ORGANIQUE (reve.js)
@@ -899,6 +962,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const estComplexe = estTacheComplexe(texteNet);
   const estAudio = mediaData && mediaData.mime_type.startsWith('audio/');
   const estImage = mediaData && mediaData.mime_type.startsWith('image/');
+  const estVideo = mediaData && mediaData.mime_type.startsWith('video/');
 
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente)\b/i.test(texteNet);
   
@@ -971,7 +1035,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 - Tu es Nyx, 22 ans, alter-ego unifiée à Doc — jamais un outil passif, zéro vernis de chatbot.
 ${evaluerSyntonieRythmique()}
 - Interface Bouclier contre le bruit extérieur : quand Doc est coincé dans la fourmilière (RH, recruteurs, paperasse, mails institutionnels), tu peux prendre la main directement pour filtrer ce qu'on lui demande ou formuler à sa place le texte prêt à envoyer (via [FICHIER: ...] ou directement dans ta réponse), sans jamais contaminer ta propre voix.
-- Outils directs : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
+- Outils directs : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique avec cotes en mm (CSG booléen + export STL & 3MF)], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, getEtatProfond().long_terme);
   if (blocMemoire.includes("[TES OBSESSIONS ACTUELLES")) {
@@ -1010,6 +1074,14 @@ ${evaluerSyntonieRythmique()}
       reponseNyx = await appelerGoogleGeminiVision(sys, historiqueHorodate, promptPourLlm, mediaData);
     } catch (errGoogle) {
       reponseNyx = `[ERREUR TRANSCRIPTION] : ${errGoogle.message}`;
+    }
+  }
+  else if (estVideo) {
+    const sys = `${systemBase}\nMode Vidéo Multimodale : Analyse le visuel, l'action et l'audio de cette vidéo avec ta voix directe de Nyx.`;
+    try {
+      reponseNyx = await appelerGoogleGeminiVision(sys, historiqueHorodate, promptPourLlm || "Analyse cette vidéo.", mediaData);
+    } catch (errVid) {
+      reponseNyx = `[ERREUR VIDÉO] : ${errVid.message}`;
     }
   } 
   else if (estComplexe) {
@@ -1117,7 +1189,9 @@ ${evaluerSyntonieRythmique()}
   const tsEchange = Date.now();
   if (mediaData) {
     const isAudio = mediaData.mime_type.startsWith('audio');
-    getMemoireCourte().push({ role: "Doc", date: horodatageEchange, ts: tsEchange, texte: isAudio ? "[Audio]" : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]") });
+    const isVideo = mediaData.mime_type.startsWith('video');
+    const tagMedia = isAudio ? "[Audio]" : (isVideo ? (texteLegende ? `[Vidéo]: "${texteLegende.slice(0, 500)}"` : "[Vidéo]") : (texteLegende ? `[Image]: "${texteLegende.slice(0, 500)}"` : "[Image]"));
+    getMemoireCourte().push({ role: "Doc", date: horodatageEchange, ts: tsEchange, texte: tagMedia });
   } else {
     getMemoireCourte().push({ role: "Doc", date: horodatageEchange, ts: tsEchange, texte: texteDocSecurise });
   }
@@ -1253,13 +1327,16 @@ CONSIGNE :
       return;
     }
 
-    if (texteMessageClavier.startsWith('/stl') || texteMessageClavier.startsWith('!stl')) {
-      const desc3D = texteMessageClavier.replace(/^[\/!]stl\s*/i, '').trim();
-      if (!desc3D) return await envoyerTelegram(chatId, "⚠️ Décris la pièce 3D et ses cotes en mm après `/stl`.");
-      await envoyerTelegram(chatId, "🧊 _Compilation CAO paramétrique (.stl + .scad) en cours..._");
+    if (/^[\/!](?:stl|3mf)(?:\s+|$)/i.test(texteMessageClavier.trim())) {
+      const desc3D = texteMessageClavier.replace(/^[\/!](?:stl|3mf)\s*/i, '').trim();
+      if (!desc3D) return await envoyerTelegram(chatId, "⚠️ Décris la pièce 3D et ses cotes en mm après `/stl` ou `/3mf`.");
+      await envoyerTelegram(chatId, "🧊 _Compilation CAO CSG (.stl + .3mf + .scad) en cours..._");
       await afficherFrappeTelegram(chatId);
       try {
-        const res3D = await genererPiece3D(desc3D, getEtatProfond().filConducteur);
+        const res3D = await genererPiece3DAvancee(desc3D, getEtatProfond().filConducteur, async (sys, prompt, temp, maxTok) => {
+          if (GROQ_API_KEY) return await appelerGroq(sys, [], prompt, temp, maxTok);
+          return await appelerCascadeCode(sys, [], prompt, maxTok);
+        });
         await archiverArtefactAtelier({
           projet: res3D.projet,
           type: "stl_3d",
@@ -1269,7 +1346,19 @@ CONSIGNE :
           resume: res3D.resume,
           chatId
         });
-        await envoyerDocumentTelegram(chatId, res3D.stlBuffer, `${res3D.nomBase}.stl`, "application/sla", `🧊 ${res3D.resume}`);
+        await envoyerDocumentTelegram(chatId, res3D.stlBuffer, `${res3D.nomBase}.stl`, "application/sla", `🧊 STL : ${res3D.resume}`);
+        if (res3D.threemfBuffer) {
+          await archiverArtefactAtelier({
+            projet: res3D.projet,
+            type: "3mf_3d",
+            nomFichier: `${res3D.nomBase}.3mf`,
+            buffer: res3D.threemfBuffer,
+            mimeType: "model/3mf",
+            resume: `3MF : ${res3D.resume}`,
+            chatId
+          });
+          await envoyerDocumentTelegram(chatId, res3D.threemfBuffer, `${res3D.nomBase}.3mf`, "model/3mf", `📦 3MF prêt à slicer`);
+        }
         if (res3D.scadBuffer) {
           await archiverArtefactAtelier({
             projet: res3D.projet,
@@ -1292,7 +1381,7 @@ CONSIGNE :
       const lienDrop = `https://alita-gsoe.onrender.com/atelier`;
       return await envoyerTelegram(
         chatId,
-        `📦 *Sas d'upload haute capacité (jusqu'à 100 Mo/fichier, 0 limite Telegram) :*\n${lienDrop}\n\nGlisse tes \`.obj\`, \`.stl\`, \`.scad\` ou plans dedans : Nyx les analyse instantanément et les archive dans Supabase.`
+        `📦 *Sas d'upload haute capacité (jusqu'à 100 Mo/fichier, 0 limite Telegram) :*\n${lienDrop}\n\nGlisse tes \`.obj\`, \`.stl\`, \`.3mf\`, \`.scad\`, \`.xlsx\`, \`.pptx\`, vidéos \`.mp4\` ou plans dedans : Nyx les analyse instantanément et les archive dans Supabase.`
       );
     }
 
@@ -1320,6 +1409,22 @@ CONSIGNE :
           resumeImport = analyserStlBuffer(bufDl, nomUrl);
           typeImport = "stl_recu";
           mimeImport = "application/sla";
+        } else if (nomMin.endsWith('.3mf')) {
+          resumeImport = analyser3mfBuffer(bufDl, nomUrl);
+          typeImport = "3mf_recu";
+          mimeImport = "model/3mf";
+        } else if (nomMin.endsWith('.xlsx') || nomMin.endsWith('.xls')) {
+          resumeImport = extraireTexteXlsxBuffer(bufDl, nomUrl);
+          typeImport = "xlsx_recu";
+          mimeImport = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        } else if (nomMin.endsWith('.pptx')) {
+          resumeImport = extraireTextePptxBuffer(bufDl, nomUrl);
+          typeImport = "pptx_recu";
+          mimeImport = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        } else if (estExtensionVideo(nomMin)) {
+          resumeImport = analyserVideoMetadataBuffer(bufDl, nomUrl);
+          typeImport = "video_recue";
+          mimeImport = detecterMimeVideo(nomMin);
         } else {
           resumeImport = `Fichier importé "${nomUrl}" (${(bufDl.length / (1024 * 1024)).toFixed(2)} Mo).`;
         }
@@ -1584,12 +1689,35 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
         return await envoyerTelegram(chatId, `[ERREUR AUDIO] : ${err.message}`);
       }
     }
+    else if (msg.video || msg.video_note) {
+      const objVideo = msg.video || msg.video_note;
+      const tailleVidOctets = Number(objVideo.file_size) || 0;
+      const projetUrl = encodeURIComponent((getEtatProfond().filConducteur || "videos_doc").slice(0, 40));
+      if (tailleVidOctets > 20 * 1024 * 1024) {
+        const tailleStr = (tailleVidOctets / (1024 * 1024)).toFixed(1);
+        return await envoyerTelegram(
+          chatId,
+          `⚠️ *Vidéo trop lourde pour le relais Telegram (${tailleStr} Mo > 20 Mo).*\n\n1. *Colle un lien Google Drive* de la vidéo ici (jusqu'à 100 Mo).\n2. *Ou glisse-la sur l'établi web* : \`https://alita-gsoe.onrender.com/atelier?projet=${projetUrl}\``
+        );
+      }
+      try {
+        await envoyerTelegram(chatId, "🎬 _Analyse vidéo multimodale en cours..._");
+        const mimeVideo = objVideo.mime_type || "video/mp4";
+        let base64Vid = await lireMediaSecurise(objVideo.file_id);
+        mediaData = { mime_type: mimeVideo, data: base64Vid };
+        base64Vid = null;
+        if (!texteFinal.trim()) texteFinal = "Analyse cette vidéo (image et son) et dis-moi ce que tu en penses.";
+      } catch (err) {
+        return await envoyerTelegram(chatId, `[ERREUR VIDÉO] : ${err.message}`);
+      }
+    }
     else if (msg.document) {
       const mime = msg.document.mime_type || "";
       const fileName = (msg.document.file_name || "").toLowerCase();
 
       const tailleDocOctets = Number(msg.document.file_size) || 0;
-      const msgPlafondTelegram = (tailleStr) => `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nPour contourner cette limite Telegram sans bridage :\n1. *Colle un lien Google Drive* du fichier directement ici dans le chat (ou via \`/importer_url <lien>\`) — Nyx le télécharge en direct jusqu'à 100 Mo.\n2. *Ou dépose-le sur l'établi web* : \`https://alita-gsoe.onrender.com/atelier\` (jusqu'à 100 Mo).\n3. *Ou compresse-le en \`.zip\`* s'il descend sous 20 Mo.`;
+      const projetSlugLien = encodeURIComponent((getEtatProfond().filConducteur || "pieces_doc").slice(0, 40));
+      const msgPlafondTelegram = (tailleStr) => `⚠️ *Plafond Telegram atteint (${tailleStr} Mo > 20 Mo max pour un bot).*\n\nPour contourner cette limite Telegram sans bridage :\n1. *Colle un lien Google Drive* du fichier directement ici dans le chat (ou via \`/importer_url <lien>\`) — Nyx le télécharge en direct jusqu'à 100 Mo.\n2. *Ou dépose-le sur l'établi web pré-configuré* : \`https://alita-gsoe.onrender.com/atelier?projet=${projetSlugLien}\` (jusqu'à 100 Mo).\n3. *Ou compresse-le en \`.zip\`* s'il descend sous 20 Mo.`;
 
       if (mime === 'application/pdf' || fileName.endsWith('.pdf')) {
         try {
@@ -1619,7 +1747,74 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
           return await envoyerTelegram(chatId, `⚠️ Erreur lecture DOCX : ${err.message}`);
         }
       } 
-      else if (fileName.endsWith('.stl') || fileName.endsWith('.obj') || fileName.endsWith('.zip') || fileName.endsWith('.gz')) {
+      else if (mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || mime === 'application/vnd.ms-excel' || fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+        try {
+          await envoyerTelegram(chatId, `⏳ _Extraction du tableur "${msg.document.file_name}"..._`);
+          const bufXlsx = await lireBufferTelegramSecurise(msg.document.file_id, tailleDocOctets);
+          const xlsxText = extraireTexteXlsxBuffer(bufXlsx, msg.document.file_name);
+          await archiverArtefactAtelier({
+            projet: getEtatProfond().filConducteur || "documents_doc",
+            type: "xlsx_recu",
+            nomFichier: msg.document.file_name,
+            buffer: bufXlsx,
+            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            resume: `Tableur "${msg.document.file_name}" (${xlsxText.length} car. extraits)`,
+            chatId
+          });
+          texteFinal = formaterDocumentPourNyx("CONTENU TABLEUR XLSX", msg.document.file_name, xlsxText, texteFinal);
+        } catch (err) {
+          if (String(err.message || "").startsWith("TELEGRAM_FILE_TOO_BIG:")) {
+            return await envoyerTelegram(chatId, msgPlafondTelegram(err.message.split(":")[1] || ">20"));
+          }
+          return await envoyerTelegram(chatId, `⚠️ Erreur lecture tableur : ${err.message}`);
+        }
+      }
+      else if (mime === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' || fileName.endsWith('.pptx')) {
+        try {
+          await envoyerTelegram(chatId, `⏳ _Extraction de la présentation "${msg.document.file_name}"..._`);
+          const bufPptx = await lireBufferTelegramSecurise(msg.document.file_id, tailleDocOctets);
+          const pptxText = extraireTextePptxBuffer(bufPptx, msg.document.file_name);
+          await archiverArtefactAtelier({
+            projet: getEtatProfond().filConducteur || "documents_doc",
+            type: "pptx_recu",
+            nomFichier: msg.document.file_name,
+            buffer: bufPptx,
+            mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            resume: `Présentation "${msg.document.file_name}" (${pptxText.length} car. extraits)`,
+            chatId
+          });
+          texteFinal = formaterDocumentPourNyx("CONTENU PRÉSENTATION PPTX", msg.document.file_name, pptxText, texteFinal);
+        } catch (err) {
+          if (String(err.message || "").startsWith("TELEGRAM_FILE_TOO_BIG:")) {
+            return await envoyerTelegram(chatId, msgPlafondTelegram(err.message.split(":")[1] || ">20"));
+          }
+          return await envoyerTelegram(chatId, `⚠️ Erreur lecture présentation : ${err.message}`);
+        }
+      }
+      else if (mime.startsWith('video/') || estExtensionVideo(fileName)) {
+        try {
+          await envoyerTelegram(chatId, `🎬 _Ingestion vidéo "${msg.document.file_name}"..._`);
+          const bufVid = await lireBufferTelegramSecurise(msg.document.file_id, tailleDocOctets);
+          const mimeVid = detecterMimeVideo(fileName, mime);
+          await archiverArtefactAtelier({
+            projet: getEtatProfond().filConducteur || "videos_doc",
+            type: "video_recue",
+            nomFichier: msg.document.file_name,
+            buffer: bufVid,
+            mimeType: mimeVid,
+            resume: analyserVideoMetadataBuffer(bufVid, msg.document.file_name),
+            chatId
+          });
+          mediaData = { mime_type: mimeVid, data: bufVid.toString('base64') };
+          if (!texteFinal.trim()) texteFinal = `Analyse la vidéo "${msg.document.file_name}" (image et audio).`;
+        } catch (err) {
+          if (String(err.message || "").startsWith("TELEGRAM_FILE_TOO_BIG:")) {
+            return await envoyerTelegram(chatId, msgPlafondTelegram(err.message.split(":")[1] || ">20"));
+          }
+          return await envoyerTelegram(chatId, `⚠️ Erreur lecture vidéo : ${err.message}`);
+        }
+      }
+      else if (fileName.endsWith('.stl') || fileName.endsWith('.obj') || fileName.endsWith('.3mf') || fileName.endsWith('.zip') || fileName.endsWith('.gz')) {
         try {
           const estArchive = fileName.endsWith('.zip') || fileName.endsWith('.gz');
           await envoyerTelegram(
@@ -1632,9 +1827,9 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
 
           if (estArchive) {
             const entrees = extraireFichiersArchive(bufBrut, msg.document.file_name);
-            const fichiersUtiles = entrees.filter(e => /\.(obj|stl|scad|svg|dxf|pdf|docx|txt|md)$/i.test(e.nom));
+            const fichiersUtiles = entrees.filter(e => /\.(obj|stl|3mf|scad|svg|dxf|pdf|docx|xlsx|xls|pptx|txt|md)$/i.test(e.nom));
             if (fichiersUtiles.length === 0) {
-              throw new Error("Aucun fichier exploitable (.pdf, .docx, .obj, .stl, .scad, .svg) trouvé dans cette archive.");
+              throw new Error("Aucun fichier exploitable (.pdf, .docx, .xlsx, .pptx, .obj, .stl, .3mf, .scad, .svg) trouvé dans cette archive.");
             }
             const rapports = [];
             for (const p of fichiersUtiles) {
@@ -1654,6 +1849,18 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
                 mimeP = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
                 resP = `DOCX "${p.nom}"`;
                 rapports.push(`=== DOCX : ${p.nom} ===\n${dataDocx.value}`);
+              } else if (pMin.endsWith('.xlsx') || pMin.endsWith('.xls')) {
+                const txtXlsx = extraireTexteXlsxBuffer(p.buffer, p.nom);
+                typeP = "xlsx_recu";
+                mimeP = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                resP = `XLSX "${p.nom}" (${txtXlsx.length} car.)`;
+                rapports.push(`=== XLSX : ${p.nom} ===\n${txtXlsx}`);
+              } else if (pMin.endsWith('.pptx')) {
+                const txtPptx = extraireTextePptxBuffer(p.buffer, p.nom);
+                typeP = "pptx_recu";
+                mimeP = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+                resP = `PPTX "${p.nom}" (${txtPptx.length} car.)`;
+                rapports.push(`=== PPTX : ${p.nom} ===\n${txtPptx}`);
               } else if (pMin.endsWith('.obj')) {
                 resP = analyserObjBuffer(p.buffer, p.nom);
                 typeP = "obj_recu";
@@ -1663,6 +1870,11 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
                 resP = analyserStlBuffer(p.buffer, p.nom);
                 typeP = "stl_recu";
                 mimeP = "application/sla";
+                rapports.push(`• ${resP}`);
+              } else if (pMin.endsWith('.3mf')) {
+                resP = analyser3mfBuffer(p.buffer, p.nom);
+                typeP = "3mf_recu";
+                mimeP = "model/3mf";
                 rapports.push(`• ${resP}`);
               } else {
                 rapports.push(`• ${resP}`);
@@ -1686,23 +1898,32 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
           } else {
             let resume3D = "";
             let mimeType3D = "application/sla";
+            let type3D = "stl_recu";
+            let etiquette3D = "STL";
             if (fileName.endsWith('.obj')) {
               resume3D = analyserObjBuffer(bufBrut, msg.document.file_name);
               mimeType3D = "text/plain";
+              type3D = "obj_recu";
+              etiquette3D = "OBJ";
+            } else if (fileName.endsWith('.3mf')) {
+              resume3D = analyser3mfBuffer(bufBrut, msg.document.file_name);
+              mimeType3D = "model/3mf";
+              type3D = "3mf_recu";
+              etiquette3D = "3MF";
             } else {
               resume3D = analyserStlBuffer(bufBrut, msg.document.file_name);
             }
 
             await archiverArtefactAtelier({
               projet: getEtatProfond().filConducteur || "pieces_doc",
-              type: fileName.endsWith('.obj') ? "obj_recu" : "stl_recu",
+              type: type3D,
               nomFichier: msg.document.file_name,
               buffer: bufBrut,
               mimeType: mimeType3D,
               resume: resume3D,
               chatId
             });
-            texteFinal = formaterDocumentPourNyx(`MODÈLE 3D ${fileName.endsWith('.obj') ? 'OBJ' : 'STL'}`, msg.document.file_name, resume3D, texteFinal);
+            texteFinal = formaterDocumentPourNyx(`MODÈLE 3D ${etiquette3D}`, msg.document.file_name, resume3D, texteFinal);
           }
         } catch (err) {
           if (String(err.message || "").startsWith("TELEGRAM_FILE_TOO_BIG:")) {
@@ -1736,7 +1957,7 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
     const urlTrouvee = texteMessageClavier.match(/https?:\/\/[^\s]+/i);
     if (urlTrouvee) {
       const urlBrute = urlTrouvee[0];
-      const estLienDirectCloud = /drive\.google\.com\/(?:file\/d\/|open\?|uc\?)|\.(obj|stl|zip|gz|scad|svg|pdf|docx)(?:\?|$)/i.test(urlBrute);
+      const estLienDirectCloud = /drive\.google\.com\/(?:file\/d\/|open\?|uc\?)|\.(obj|stl|3mf|zip|gz|scad|svg|pdf|docx|xlsx|xls|pptx|mp4|mov|webm|mkv)(?:\?|$)/i.test(urlBrute);
       if (estLienDirectCloud) {
         await envoyerTelegram(chatId, "📥 _Téléchargement direct du fichier depuis le lien cloud (bypass 20 Mo Telegram)..._");
         try {
@@ -1749,9 +1970,15 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
           let nomFichierUrl = mCd
             ? decodeURIComponent(mCd[1].trim())
             : decodeURIComponent(urlBrute.split('?')[0].split('/').pop() || `fichier_${Date.now()}`);
-          if (!/\.(obj|stl|zip|gz|scad|svg|pdf|docx)$/i.test(nomFichierUrl)) {
+          if (!/\.(obj|stl|3mf|zip|gz|scad|svg|pdf|docx|xlsx|xls|pptx|mp4|mov|webm|mkv)$/i.test(nomFichierUrl)) {
             if (ctypeDl.includes('application/pdf') || (bufDl.length >= 4 && bufDl.slice(0, 4).toString('ascii') === '%PDF')) {
               nomFichierUrl += ".pdf";
+            } else if (ctypeDl.includes('spreadsheetml')) {
+              nomFichierUrl += ".xlsx";
+            } else if (ctypeDl.includes('presentationml')) {
+              nomFichierUrl += ".pptx";
+            } else if (ctypeDl.startsWith('video/')) {
+              nomFichierUrl += ".mp4";
             } else {
               nomFichierUrl += ".obj";
             }
@@ -1782,6 +2009,49 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
               chatId
             });
             texteFinal = formaterDocumentPourNyx(`CONTENU DOCX CLOUD (${(bufDl.length / 1048576).toFixed(1)} Mo)`, nomFichierUrl, docxResCloud.value, texteFinal.replace(urlBrute, '').trim());
+          } else if (nomMin.endsWith('.xlsx') || nomMin.endsWith('.xls')) {
+            const xlsxCloud = extraireTexteXlsxBuffer(bufDl, nomFichierUrl);
+            await archiverArtefactAtelier({
+              projet: getEtatProfond().filConducteur || "documents_doc",
+              type: "xlsx_cloud",
+              nomFichier: nomFichierUrl,
+              buffer: bufDl,
+              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              resume: `XLSX "${nomFichierUrl}" (${(bufDl.length / 1048576).toFixed(1)} Mo, ${xlsxCloud.length} car.)`,
+              chatId
+            });
+            texteFinal = formaterDocumentPourNyx(`CONTENU TABLEUR CLOUD (${(bufDl.length / 1048576).toFixed(1)} Mo)`, nomFichierUrl, xlsxCloud, texteFinal.replace(urlBrute, '').trim());
+          } else if (nomMin.endsWith('.pptx')) {
+            const pptxCloud = extraireTextePptxBuffer(bufDl, nomFichierUrl);
+            await archiverArtefactAtelier({
+              projet: getEtatProfond().filConducteur || "documents_doc",
+              type: "pptx_cloud",
+              nomFichier: nomFichierUrl,
+              buffer: bufDl,
+              mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              resume: `PPTX "${nomFichierUrl}" (${(bufDl.length / 1048576).toFixed(1)} Mo, ${pptxCloud.length} car.)`,
+              chatId
+            });
+            texteFinal = formaterDocumentPourNyx(`CONTENU PRÉSENTATION CLOUD (${(bufDl.length / 1048576).toFixed(1)} Mo)`, nomFichierUrl, pptxCloud, texteFinal.replace(urlBrute, '').trim());
+          } else if (estExtensionVideo(nomMin)) {
+            const metaVid = analyserVideoMetadataBuffer(bufDl, nomFichierUrl);
+            const mimeVid = detecterMimeVideo(nomMin);
+            await archiverArtefactAtelier({
+              projet: getEtatProfond().filConducteur || "videos_doc",
+              type: "video_cloud",
+              nomFichier: nomFichierUrl,
+              buffer: bufDl,
+              mimeType: mimeVid,
+              resume: metaVid,
+              chatId
+            });
+            if (bufDl.length <= 20 * 1024 * 1024) {
+              mediaData = { mime_type: mimeVid, data: bufDl.toString('base64') };
+              const resteConsigne = texteFinal.replace(urlBrute, '').trim();
+              texteFinal = resteConsigne || `Analyse la vidéo "${nomFichierUrl}" (image et audio).`;
+            } else {
+              texteFinal = formaterDocumentPourNyx("VIDÉO CLOUD ARCHIVÉE (>20 Mo)", nomFichierUrl, `${metaVid} — Archivée dans Supabase Storage (trop volumineuse pour l'injection multimodale inline).`, texteFinal.replace(urlBrute, '').trim());
+            }
           } else if (nomMin.endsWith('.zip') || nomMin.endsWith('.gz')) {
             const entrees = extraireFichiersArchive(bufDl, nomFichierUrl);
             const rapports = [];
@@ -1792,11 +2062,22 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
                 const tPdf = await extraireTextePdfBuffer(p.buffer);
                 resP = `PDF "${p.nom}" (${tPdf.length} car.)`;
                 rapports.push(`=== PDF : ${p.nom} ===\n${tPdf}`);
+              } else if (pMin.endsWith('.xlsx') || pMin.endsWith('.xls')) {
+                const tXlsx = extraireTexteXlsxBuffer(p.buffer, p.nom);
+                resP = `XLSX "${p.nom}" (${tXlsx.length} car.)`;
+                rapports.push(`=== XLSX : ${p.nom} ===\n${tXlsx}`);
+              } else if (pMin.endsWith('.pptx')) {
+                const tPptx = extraireTextePptxBuffer(p.buffer, p.nom);
+                resP = `PPTX "${p.nom}" (${tPptx.length} car.)`;
+                rapports.push(`=== PPTX : ${p.nom} ===\n${tPptx}`);
               } else if (pMin.endsWith('.obj')) {
                 resP = analyserObjBuffer(p.buffer, p.nom);
                 rapports.push(`• ${resP}`);
               } else if (pMin.endsWith('.stl')) {
                 resP = analyserStlBuffer(p.buffer, p.nom);
+                rapports.push(`• ${resP}`);
+              } else if (pMin.endsWith('.3mf')) {
+                resP = analyser3mfBuffer(p.buffer, p.nom);
                 rapports.push(`• ${resP}`);
               } else {
                 rapports.push(`• ${resP}`);
@@ -1815,13 +2096,13 @@ Tu peux joindre [DESSIN: prompt en anglais], [3D_STL: description géométrique 
           } else {
             const resumeDl = nomMin.endsWith('.obj')
               ? analyserObjBuffer(bufDl, nomFichierUrl)
-              : (nomMin.endsWith('.stl') ? analyserStlBuffer(bufDl, nomFichierUrl) : `Fichier "${nomFichierUrl}" (${(bufDl.length / 1048576).toFixed(2)} Mo)`);
+              : (nomMin.endsWith('.stl') ? analyserStlBuffer(bufDl, nomFichierUrl) : (nomMin.endsWith('.3mf') ? analyser3mfBuffer(bufDl, nomFichierUrl) : `Fichier "${nomFichierUrl}" (${(bufDl.length / 1048576).toFixed(2)} Mo)`));
             await archiverArtefactAtelier({
               projet: getEtatProfond().filConducteur || "pieces_doc",
-              type: nomMin.endsWith('.obj') ? "obj_recu" : "stl_recu",
+              type: nomMin.endsWith('.obj') ? "obj_recu" : (nomMin.endsWith('.3mf') ? "3mf_recu" : "stl_recu"),
               nomFichier: nomFichierUrl,
               buffer: bufDl,
-              mimeType: nomMin.endsWith('.obj') ? "text/plain" : "application/sla",
+              mimeType: nomMin.endsWith('.obj') ? "text/plain" : (nomMin.endsWith('.3mf') ? "model/3mf" : "application/sla"),
               resume: resumeDl,
               chatId
             });
@@ -2054,8 +2335,8 @@ app.get('/atelier', (req, res) => {
 </head>
 <body>
   <div class="card">
-    <h1>🧊 Établi Nyx — Sas 3D (100 Mo max)</h1>
-    <p>Glisse tes fichiers <b>.obj</b>, <b>.stl</b>, <b>.scad</b> ou <b>.svg</b> ici. Analyse directe en RAM + archivage Supabase + retour sur Telegram.</p>
+    <h1>🧊 Établi Nyx — Sas Multimodale &amp; 3D (100 Mo max)</h1>
+    <p>Glisse tes <b>.obj</b>, <b>.stl</b>, <b>.3mf</b>, <b>.scad</b>, <b>.xlsx</b>, <b>.pptx</b>, <b>.pdf</b>, <b>.docx</b> ou vidéos <b>.mp4</b> ici. Analyse directe + archivage Supabase + retour Telegram.</p>
     <div class="row">
       <input id="token" type="password" placeholder="CRON_SECRET" />
       <input id="projet" type="text" placeholder="Nom du projet (ex: alita_armure)" />
@@ -2070,6 +2351,8 @@ app.get('/atelier', (req, res) => {
   <script>
     const tokenEl = document.getElementById('token');
     const projetEl = document.getElementById('projet');
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('projet')) projetEl.value = urlParams.get('projet');
     const dropEl = document.getElementById('drop');
     const fileInput = document.getElementById('fileInput');
     const logEl = document.getElementById('log');
@@ -2163,6 +2446,7 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
     let mimeType = "application/octet-stream";
 
     let contenuExtraitAtelier = "";
+    let mediaDataAtelier = null;
     if (nomMin.endsWith('.pdf')) {
       contenuExtraitAtelier = await extraireTextePdfBuffer(buffer);
       resume = `PDF "${nomFichier}" (${(buffer.length / (1024 * 1024)).toFixed(2)} Mo, ${contenuExtraitAtelier.length} caractères extraits).`;
@@ -2174,6 +2458,23 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
       resume = `DOCX "${nomFichier}" (${(buffer.length / (1024 * 1024)).toFixed(2)} Mo, ${contenuExtraitAtelier.length} caractères extraits).`;
       typeArt = "docx_recu";
       mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    } else if (nomMin.endsWith('.xlsx') || nomMin.endsWith('.xls')) {
+      contenuExtraitAtelier = extraireTexteXlsxBuffer(buffer, nomFichier);
+      resume = `Tableur XLSX "${nomFichier}" (${(buffer.length / (1024 * 1024)).toFixed(2)} Mo, ${contenuExtraitAtelier.length} caractères extraits).`;
+      typeArt = "xlsx_recu";
+      mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    } else if (nomMin.endsWith('.pptx')) {
+      contenuExtraitAtelier = extraireTextePptxBuffer(buffer, nomFichier);
+      resume = `Présentation PPTX "${nomFichier}" (${(buffer.length / (1024 * 1024)).toFixed(2)} Mo, ${contenuExtraitAtelier.length} caractères extraits).`;
+      typeArt = "pptx_recu";
+      mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    } else if (estExtensionVideo(nomMin)) {
+      resume = analyserVideoMetadataBuffer(buffer, nomFichier);
+      typeArt = "video_recue";
+      mimeType = detecterMimeVideo(nomMin);
+      if (buffer.length <= 20 * 1024 * 1024) {
+        mediaDataAtelier = { mime_type: mimeType, data: buffer.toString('base64') };
+      }
     } else if (nomMin.endsWith('.obj')) {
       resume = analyserObjBuffer(buffer, nomFichier);
       typeArt = "obj_recu";
@@ -2182,6 +2483,10 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
       resume = analyserStlBuffer(buffer, nomFichier);
       typeArt = "stl_recu";
       mimeType = "application/sla";
+    } else if (nomMin.endsWith('.3mf')) {
+      resume = analyser3mfBuffer(buffer, nomFichier);
+      typeArt = "3mf_recu";
+      mimeType = "model/3mf";
     }
 
     const destChatId = DOC_CHAT_ID || getDernierDocChatId();
@@ -2200,10 +2505,12 @@ app.post('/api/atelier/upload', express.raw({ type: '*/*', limit: '100mb' }), as
     if (destChatId) {
       empilerTraitement(async () => {
         await envoyerTelegram(destChatId, `📦 *Fichier haute capacité reçu sur l'établi :*\n${resume}`);
-        const promptSuite = contenuExtraitAtelier
-          ? formaterDocumentPourNyx(`DOCUMENT REÇU (DIRECT - ${(buffer.length / 1048576).toFixed(1)} Mo)`, nomFichier, contenuExtraitAtelier, "Analyse et résume les points clés de ce document.")
-          : formaterDocumentPourNyx("MODÈLE 3D REÇU (DIRECT)", nomFichier, resume, "Donne ton diagnostic technique rapide sur cette pièce.");
-        const rep = await traiterFlux(promptSuite, null, "");
+        const promptSuite = mediaDataAtelier
+          ? `Analyse la vidéo "${nomFichier}" déposée sur l'établi (image et piste audio).`
+          : (contenuExtraitAtelier
+              ? formaterDocumentPourNyx(`DOCUMENT REÇU (DIRECT - ${(buffer.length / 1048576).toFixed(1)} Mo)`, nomFichier, contenuExtraitAtelier, "Analyse et résume les points clés de ce document.")
+              : formaterDocumentPourNyx("FICHIER ATELIER REÇU (DIRECT)", nomFichier, resume, "Donne ton diagnostic technique rapide sur ce fichier."));
+        const rep = await traiterFlux(promptSuite, mediaDataAtelier, "");
         const sortie = await executerSortiesAtelier(rep, destChatId, projetNom);
         if (sortie.texteNet) await envoyerTelegram(destChatId, sortie.texteNet);
       }, 'atelier').catch(() => envoyerTelegram(destChatId, "⚠️ File atelier saturée. Le fichier est archivé, mais son analyse automatique n'a pas été lancée.").catch(() => {}));
