@@ -41,7 +41,7 @@ const MODEL_OPENROUTER_CHAT = modelOpenRouter;
 const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
 
 const MISTRAL_API_KEY = assainirParametre(process.env.MISTRAL_API_KEY);
-const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "open-mistral-nemo";
+const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "mistral-small-latest";
 
 const GEMINI_API_KEY_FREE = assainirParametre(process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const GEMINI_API_KEY_PAID = assainirParametre(process.env.GEMINI_API_KEY_PAID);
@@ -496,7 +496,7 @@ const lectureEngine = createLectureEngine({
 let lectureEnCoursLock = false;
 async function explorerLectureAutonome() {
   if (lectureEnCoursLock) return;
-  if (!GROQ_API_KEY && !GEMINI_API_KEY_FREE) return;
+  if (!GROQ_API_KEY && !OPENROUTER_API_KEY && !MISTRAL_API_KEY) return;
   lectureEnCoursLock = true;
   try {
     await synchroniserEtatDepuisFirebase();
@@ -848,15 +848,21 @@ async function appelerMistral(systemInstruction, promptActuel, temperature = 0.4
 }
 
 async function appelerCascadeSubconscient(systemInstruction, promptActuel, temperature = 0.6, maxTokens = 400) {
-  if (VENICE_API_KEY) {
-    try {
-      const r = await appelerVenice(MODEL_VENICE_CHAT, systemInstruction, promptActuel, temperature, maxTokens);
-      if (r && r.trim()) return r.trim();
-    } catch (e) {}
-  }
   if (GROQ_API_KEY) {
     try {
       const r = await appelerGroq(systemInstruction, promptActuel, temperature, maxTokens);
+      if (r && r.trim()) return r.trim();
+    } catch (e) {}
+  }
+  if (peutUtiliserGeminiFree(systemInstruction, promptActuel, maxTokens)) {
+    try {
+      const r = await appelerGeminiFree(systemInstruction, promptActuel, temperature, maxTokens);
+      if (r && r.trim()) return r.trim();
+    } catch (e) {}
+  }
+  if (VENICE_API_KEY) {
+    try {
+      const r = await appelerVenice(MODEL_VENICE_CHAT, systemInstruction, promptActuel, temperature, maxTokens);
       if (r && r.trim()) return r.trim();
     } catch (e) {}
   }
@@ -868,7 +874,9 @@ async function appelerCascadeSubconscient(systemInstruction, promptActuel, tempe
   }
   if (MISTRAL_API_KEY) {
     try {
-      const r = await appelerMistral(systemInstruction, promptActuel, temperature, maxTokens);
+      // Température plafonnée à 0.55 sur Mistral pour éviter les dérives théâtrales/agressives
+      const tempMistral = Math.min(0.55, Number(temperature) || 0.5);
+      const r = await appelerMistral(systemInstruction, promptActuel, tempMistral, maxTokens);
       if (r && r.trim()) return r.trim();
     } catch (e) {}
   }
@@ -876,44 +884,114 @@ async function appelerCascadeSubconscient(systemInstruction, promptActuel, tempe
 }
 
 // ==========================================
-// CASCADE STRICTEMENT GRATUITE (ZÉRO VENICE / ZÉRO PAYANT)
+// GARDE-FOU QUOTA PAR MINUTE GEMINI FREE (APPELS LÉGERS UNIQUEMENT)
 // ==========================================
+const GEMINI_FREE_MAX_TOKENS_APPEL = 380;      // Au-delà (lecture chapitre, digestion, CAO) -> exclu de Gemini Free
+const GEMINI_FREE_MAX_CHARS_PROMPT = 3200;     // Évite les gros contextes (> ~900 tokens) qui explosent le TPM/min
+const GEMINI_FREE_RPM_MAX = 8;                 // Plafond prudent de requêtes/min
+const GEMINI_FREE_TPM_MAX = 12000;             // Plafond prudent de tokens/min
+let geminiFreeFenetre = [];                    // [{ ts, tokens }]
+let geminiFreeCooldownJusqua = 0;
+
+function estimerTokensAppel(sys, prompt, maxTokens) {
+  const chars = String(sys || "").length + String(prompt || "").length;
+  return Math.ceil(chars / 3.5) + (Number(maxTokens) || 200);
+}
+
+function peutUtiliserGeminiFree(sys, prompt, maxTokens) {
+  if (!GEMINI_API_KEY_FREE) return false;
+  const now = Date.now();
+  if (now < geminiFreeCooldownJusqua) return false;
+
+  const promptLen = String(sys || "").length + String(prompt || "").length;
+  if (Number(maxTokens) > GEMINI_FREE_MAX_TOKENS_APPEL || promptLen > GEMINI_FREE_MAX_CHARS_PROMPT) {
+    return false; // Appel lourd -> routé vers Groq/Venice/OpenRouter/Mistral
+  }
+
+  geminiFreeFenetre = geminiFreeFenetre.filter(e => now - e.ts < 60 * 1000);
+  const tokensMinute = geminiFreeFenetre.reduce((acc, e) => acc + e.tokens, 0);
+  const est = estimerTokensAppel(sys, prompt, maxTokens);
+
+  if (geminiFreeFenetre.length >= GEMINI_FREE_RPM_MAX || (tokensMinute + est) > GEMINI_FREE_TPM_MAX) {
+    return false; // Quota minute saturé -> glissement fluide sans 429/404
+  }
+  return true;
+}
+
 async function appelerGeminiFree(systemInstruction, promptActuel, temperature = 0.5, maxTokens = 220) {
   if (!GEMINI_API_KEY_FREE) throw new Error("GEMINI_API_KEY_FREE absente");
+  if (!peutUtiliserGeminiFree(systemInstruction, promptActuel, maxTokens)) {
+    throw new Error("GEMINI_FREE_QUOTA_SKIP");
+  }
+
+  const est = estimerTokensAppel(systemInstruction, promptActuel, maxTokens);
+  geminiFreeFenetre.push({ ts: Date.now(), tokens: est });
+
   const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(MODEL_GEMINI) + ":generateContent";
-  const res = await axios.post(url, {
-    system_instruction: { parts: [{ text: systemInstruction }] },
-    contents: [{ role: "user", parts: [{ text: promptActuel }] }],
-    generation_config: { temperature, max_output_tokens: maxTokens }
-  }, {
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY_FREE },
-    timeout: 20000
-  });
-  return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  try {
+    const res = await axios.post(url, {
+      system_instruction: { parts: [{ text: systemInstruction }] },
+      contents: [{ role: "user", parts: [{ text: promptActuel }] }],
+      generation_config: { temperature, max_output_tokens: maxTokens }
+    }, {
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY_FREE },
+      timeout: 20000
+    });
+    return res.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  } catch (err) {
+    const status = err.response?.status;
+    if (status === 429) {
+      geminiFreeCooldownJusqua = Date.now() + 65 * 1000; // Pause 65s sur quota minute
+    } else if (status === 404) {
+      geminiFreeCooldownJusqua = Date.now() + 10 * 60 * 1000; // Pause 10 min si modèle introuvable
+    }
+    throw err;
+  }
 }
 
 async function appelerCascadeGratuiteStrict(systemInstruction, promptActuel, temperature = 0.55, maxTokens = 220) {
-  // 1. Priorité absolue : Groq (quota gratuit haut débit)
+  // 1. Priorité absolue : Groq (quota gratuit haut débit, supporte aussi les gros appels de lecture)
   if (GROQ_API_KEY) {
     try {
       const r = await appelerGroq(systemInstruction, promptActuel, temperature, maxTokens);
       if (r && r.trim()) return r.trim();
     } catch (eGroq) {
-      console.warn("[CURIOSITÉ GRATUITE] Groq indisponible/429 :", eGroq.response?.status || eGroq.message);
+      console.warn("[SUBCONSCIENT GRATUIT] Groq indisponible/429 :", eGroq.response?.status || eGroq.message);
     }
   }
 
-  // 2. Secours unique : Gemini Free (interdiction formelle de toucher à Venice ou GEMINI_API_KEY_PAID)
-  if (GEMINI_API_KEY_FREE) {
+  // 2. Gemini Free UNIQUEMENT si l'appel est léger et tient dans le budget tokens/minute
+  if (peutUtiliserGeminiFree(systemInstruction, promptActuel, maxTokens)) {
     try {
       const r = await appelerGeminiFree(systemInstruction, promptActuel, temperature, maxTokens);
       if (r && r.trim()) return r.trim();
     } catch (eGem) {
-      console.warn("[CURIOSITÉ GRATUITE] Gemini Free indisponible/429 :", eGem.response?.status || eGem.message);
+      if (eGem.message !== "GEMINI_FREE_QUOTA_SKIP") {
+        console.warn("[SUBCONSCIENT GRATUIT] Gemini Free indisponible :", eGem.response?.status || eGem.message);
+      }
     }
   }
 
-  throw new Error("Relais gratuits épuisés (429/absents) — arrêt strict sans bascule payante.");
+  // 3. Secours : OpenRouter ou Mistral Small (température bridée <= 0.5)
+  if (OPENROUTER_API_KEY) {
+    try {
+      const r = await appelerOpenRouter(systemInstruction, promptActuel, Math.min(0.6, temperature), maxTokens);
+      if (r && r.trim()) return r.trim();
+    } catch (eOr) {
+      console.warn("[SUBCONSCIENT GRATUIT] OpenRouter indisponible :", eOr.response?.status || eOr.message);
+    }
+  }
+
+  if (MISTRAL_API_KEY) {
+    try {
+      const r = await appelerMistral(systemInstruction, promptActuel, Math.min(0.5, temperature), maxTokens);
+      if (r && r.trim()) return r.trim();
+    } catch (eMis) {
+      console.warn("[SUBCONSCIENT GRATUIT] Mistral indisponible :", eMis.response?.status || eMis.message);
+    }
+  }
+
+  throw new Error("Relais gratuits épuisés — arrêt strict sans bascule payante.");
 }
 
 async function genererImageVenice(prompt) {
@@ -1950,7 +2028,7 @@ Suis l'impulsion du moment avec ta vraie voix intérieure, cash et vivante.`;
 // ==========================================
 async function explorerCuriositeAutonome() {
   if (curiositeEnCours || !TAVILY_API_KEY) return;
-  if (!GROQ_API_KEY && !GEMINI_API_KEY_FREE) return; // Verrou strict : aucun moteur gratuit configuré
+  if (!GROQ_API_KEY && !OPENROUTER_API_KEY && !MISTRAL_API_KEY) return; // Verrou strict : aucun moteur gratuit configuré
   curiositeEnCours = true;
 
   try {
@@ -2086,7 +2164,7 @@ const INTERVALLE_FORGE_MS = 90 * 60 * 1000; // 1 collision créative max toutes 
 
 async function forgerEtincelleCreative() {
   if (forgeEnCours) return;
-  if (!GROQ_API_KEY && !GEMINI_API_KEY_FREE) return;
+  if (!GROQ_API_KEY && !OPENROUTER_API_KEY && !MISTRAL_API_KEY) return;
 
   const now = Date.now();
   const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
@@ -2196,7 +2274,7 @@ const INTERVALLE_ACTION_PROACTIVE_MS = 2 * 60 * 60 * 1000; // 1 action proactive
 
 async function agirAutonomementPourLeDuo() {
   if (actionProactiveEnCours || !DOC_CHAT_ID) return;
-  if (!GROQ_API_KEY && !GEMINI_API_KEY_FREE && !VENICE_API_KEY) return;
+  if (!GROQ_API_KEY && !OPENROUTER_API_KEY && !MISTRAL_API_KEY && !VENICE_API_KEY) return;
 
   const now = Date.now();
   const silenceMinutes = Math.round((now - derniereActiviteDoc) / (1000 * 60));
@@ -2617,7 +2695,7 @@ async function appelerLlmOniriqueFrugal(systemInstruction, promptActuel, tempera
         if (r && r.trim()) return r.trim();
       } catch (e) {}
     }
-    if (GEMINI_API_KEY_FREE) {
+    if (peutUtiliserGeminiFree(systemInstruction, promptActuel, maxTokens)) {
       try {
         const r = await appelerGeminiFree(systemInstruction, promptActuel, temperature, maxTokens);
         if (r && r.trim()) return r.trim();
@@ -2898,7 +2976,7 @@ async function executerCycleOnirique(cleNuitOptionnelle = "") {
     return null;
   }
 
-  if (!VENICE_API_KEY && !GROQ_API_KEY && !GEMINI_API_KEY_FREE) return null;
+  if (!VENICE_API_KEY && !GROQ_API_KEY && !OPENROUTER_API_KEY && !MISTRAL_API_KEY) return null;
 
   // Régime 3 : Jardin secret (rêve court intime ~180 tokens forgé via reveEngine sans liste en dur)
   if (regime === "jardin_secret") {
@@ -3048,7 +3126,7 @@ async function verifierHorlogeNocturne() {
 // ==========================================
 async function verifierEveilMatinal() {
   if (eveilMatinalEnCours) return;
-  if (!GROQ_API_KEY && !GEMINI_API_KEY_FREE) return;
+  if (!GROQ_API_KEY && !OPENROUTER_API_KEY && !MISTRAL_API_KEY) return;
 
   const { heure: h, minute: m } = obtenirHeureMinuteParis();
   const dansFenetreMatin = (h === 7 && m >= 45) || (h >= 8 && h < 11);
