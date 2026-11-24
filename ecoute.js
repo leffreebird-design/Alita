@@ -1131,7 +1131,11 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
   else {
     try {
-      reponseNyx = await appelerCascadeDiscussion(systemBase, historiqueHorodate, promptPourLlm, plafondTokens);
+      // Sur les relais gratuits / de secours (Mistral, OpenRouter), la température haute fait dérailler son caractère
+      const systemeSecoursLisse = !VENICE_API_KEY
+        ? `${systemBase}\n[CALIBRAGE RELAIS SECOURS] : Garde ton franc-parler naturel de Nyx mais reste posée, lucide et constructive — zéro agressivité gratuite, zéro théâtralité.`
+        : systemBase;
+      reponseNyx = await appelerCascadeDiscussion(systemeSecoursLisse, historiqueHorodate, promptPourLlm, plafondTokens);
     } catch (errCascade) {
       console.error("[CASCADE ÉCHEC TOTAL] :", errCascade.message);
       reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
