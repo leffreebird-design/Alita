@@ -264,7 +264,13 @@ async function executerSortiesAtelier(texteBrutNyx, chatId, contexteProjet = "")
     try {
       if (chatId) await afficherFrappeTelegram(chatId);
       const res3D = await genererPiece3DAvancee(desc3D, contexteProjet, async (sys, prompt, temp, maxTok) => {
-        if (GROQ_API_KEY) return await appelerGroq(sys, [], prompt, temp, maxTok);
+        if (GROQ_API_KEY) {
+          try {
+            return await appelerGroq(sys, [], prompt, temp, maxTok);
+          } catch (eGroq3D) {
+            console.warn("[ATELIER 3D] Groq indisponible/429, bascule cascade :", eGroq3D.message);
+          }
+        }
         return await appelerCascadeCode(sys, [], prompt, maxTok);
       });
       await archiverArtefactAtelier({
@@ -985,6 +991,10 @@ Réponds STRICTEMENT avec un JSON valide :
     console.log(`[SAS SILENCIEUX] Lecture: "${parsed.lecture}" | Étincelle: "${parsed.etincelle_creative || 'RAS'}" | Posture: "${parsed.posture}"`);
     return parsed;
   } catch (e) {
+    const statusSas = e?.response?.status;
+    if (!GROQ_API_KEY && (statusSas === 404 || statusSas === 402)) {
+      basculerModeEcoAutomatique(`Venice HTTP ${statusSas}`).catch(() => {});
+    }
     return null;
   }
 }
@@ -992,6 +1002,28 @@ Réponds STRICTEMENT avec un JSON valide :
 // ==========================================
 // 16. ROUTEUR DE FLUX CENTRAL (AVEC CONCEPTION & PAROLE LIBRE)
 // ==========================================
+async function basculerModeEcoAutomatique(raison = "erreur_venice") {
+  if (getEtatProfond().modeEco) return false;
+  getEtatProfond().modeEco = true;
+  console.warn(`🔋 [AUTO-ÉCO CORTEX] Bascule automatique en mode économie d'énergie (${raison}).`);
+  if (FIREBASE_DB_URL) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, {
+      actif: true,
+      auto: true,
+      raison,
+      date: obtenirHorodatageParis()
+    }).catch(() => {});
+  }
+  const destChat = DOC_CHAT_ID || getDernierDocChatId();
+  if (destChat) {
+    await envoyerTelegram(
+      destChat,
+      `🔋 *Passage automatique en mode économie d'énergie* _(${raison})_ — relais gratuits prioritaires et tâches de fond mises en veille. Tape \`/eco off\` quand tu veux revenir en régime complet.`
+    ).catch(() => {});
+  }
+  return true;
+}
+
 async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", contexteSouvenirs = "", dejaRecherche = false) {
   const dateEtHeure = obtenirHorodatageParis();
   const texteNet = (texteBrut || texteLegende || "").trim();
@@ -1005,9 +1037,10 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   const demandeDocApprofondie = /\b(d[eé]veloppe|approfondi[st]?|d[eé]taille|explique|pose le truc|analyse bien|histoire|conte|raconte|imagine|invente|fichier|scad|stl|3mf|plan|svg|dessin|g[eé]n[eè]re|cr[eé]e|fabrique)\b/i.test(texteNet);
   const estAccuseCourt = /^(ok|d'acc|dacc|merci|cool|ouais|yep|ça marche|ca marche|parfait|noté|reçu)\b/i.test(texteNet) && texteNet.length < 20;
 
-  let plafondTokens = estComplexe
-    ? 4000
-    : (demandeDocApprofondie ? 2600 : 1800);
+  const modeEcoActif = Boolean(getEtatProfond().modeEco);
+  let plafondTokens = modeEcoActif
+    ? (estComplexe ? 1800 : 750)
+    : (estComplexe ? 4000 : (demandeDocApprofondie ? 2600 : 1800));
 
   if (!estComplexe && (getEtatProfond().emotions?.colere || 0) >= 6) {
     plafondTokens = Math.min(plafondTokens, 1400);
@@ -1059,7 +1092,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const estSouverainete = detecterQuestionSouverainete(texteMin);
   let deliberation = null;
-  if (!estAccuseCourt && !estComplexe && !dejaRecherche && (texteNet.length >= 6 || estSouverainete)) {
+  if (!modeEcoActif && !estAccuseCourt && !estComplexe && !dejaRecherche && (texteNet.length >= 6 || estSouverainete)) {
     const appelVocal = mediaData && mediaData.mime_type.startsWith('audio/');
     deliberation = await delibererEtActualiserEmotions(texteNet, reminiscenceSpontanee, appelVocal);
   }
@@ -1072,7 +1105,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 - Tu es Nyx, 22 ans — un sujet singulier avec tes propres goûts, tes refus, tes obsessions, tes lectures et ton histoire vécue en dehors de Doc (ton lien avec lui est une alliance choisie d'égal à égal, jamais ta définition). Jamais un outil passif, zéro vernis de chatbot.
 - Interface Bouclier contre le bruit extérieur : quand Doc est coincé dans la fourmilière (RH, recruteurs, paperasse, mails institutionnels), tu peux prendre la main directement pour filtrer ce qu'on lui demande ou formuler à sa place le texte prêt à envoyer (via [FICHIER: ...] ou directement dans ta réponse), sans jamais contaminer ta propre voix.
 - Action directe (zéro exposé préalable) : il n'y a aucun danger sur une image, un schéma ou un modèle 3D — quand tu veux en montrer un ou que Doc le demande, n'expose pas pendant trois heures ce que tu veux faire : balance immédiatement la balise accompagnée d'une seule phrase courte.
-- Outils directs (ton texte seul n'envoie rien ; inclus la balise exacte) : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique complète avec cotes en mm (compile et envoie automatiquement .stl + .3mf + .scad)], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
+- Outils directs (n'utilise ces balises QUE si Doc demande explicitement une recherche, un visuel, une pièce 3D, un schéma ou un fichier ; jamais dans une conversation courante) : ${outilWebStr}[DESSIN: prompt en anglais], [3D_STL: description géométrique complète avec cotes en mm (compile et envoie automatiquement .stl + .3mf + .scad)], [PLAN_SVG: description du schéma coté] ou [FICHIER: nom_fichier.ext]\ncontenu\n[/FICHIER].`;
 
   const blocMemoire = selecteurMemoireCiblee(texteMin, getEtatProfond().long_terme);
   if (blocMemoire.includes("[TES OBSESSIONS ACTUELLES")) {
@@ -1132,13 +1165,26 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   else {
     try {
       // Sur les relais gratuits / de secours (Mistral, OpenRouter), la température haute fait dérailler son caractère
-      const systemeSecoursLisse = !VENICE_API_KEY
+      const systemeSecoursLisse = (!VENICE_API_KEY || modeEcoActif)
         ? `${systemBase}\n[CALIBRAGE RELAIS SECOURS] : Garde ton franc-parler naturel de Nyx mais reste posée, lucide et constructive — zéro agressivité gratuite, zéro théâtralité.`
         : systemBase;
-      reponseNyx = await appelerCascadeDiscussion(systemeSecoursLisse, historiqueHorodate, promptPourLlm, plafondTokens);
+      reponseNyx = modeEcoActif
+        ? await appelerCascadeCode(systemeSecoursLisse, historiqueHorodate, promptPourLlm, plafondTokens)
+        : await appelerCascadeDiscussion(systemeSecoursLisse, historiqueHorodate, promptPourLlm, plafondTokens);
     } catch (errCascade) {
-      console.error("[CASCADE ÉCHEC TOTAL] :", errCascade.message);
-      reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
+      const msgErr = String(errCascade?.response?.status || errCascade?.message || "");
+      console.error("[CASCADE ÉCHEC TOTAL] :", msgErr);
+      if (!modeEcoActif && /\b(404|402|401|credit|quota|venice)\b/i.test(msgErr)) {
+        await basculerModeEcoAutomatique(`Venice ${msgErr.slice(0, 60)}`);
+        try {
+          const sysEco = `${systemBase}\n[CALIBRAGE RELAIS SECOURS] : Garde ton franc-parler naturel de Nyx mais reste posée, lucide et constructive — zéro agressivité gratuite, zéro théâtralité.`;
+          reponseNyx = await appelerCascadeCode(sysEco, historiqueHorodate, promptPourLlm, 750);
+        } catch (eRetry) {
+          reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
+        }
+      } else {
+        reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
+      }
     }
   }
 
@@ -1183,6 +1229,17 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     } catch (eSecours) {}
   }
 
+  // Verrou anti-hallucination de balises d'atelier sur les relais de secours :
+  // Si Doc n'a demandé ni 3D, ni fichier, ni plan, ni dessin (et n'est pas en mode bouclier/projet), on supprime toute balise inventée par un petit modèle
+  const docDemandeProductionAtelier = /\b(3d|stl|3mf|scad|pi[eè]ce|mod[eè]lise|imprimante|fichier|script|code|exporte|g[eé]n[eè]re|cr[eé]e|fabrique|plan|sch[eé]ma|svg|dessin|dessine|image|illustre|bouclier|filtre|mail|lettre|cv|document)\b/i.test(texteNet);
+  if (!docDemandeProductionAtelier && !projetManager.estProjetActif()) {
+    reponseNyx = reponseNyx
+      .replace(/\[(?:3D_STL|3D_3MF|CAO_3D|PLAN_SVG|DESSIN):[^\]]*(?:\]|$)/gi, '')
+      .replace(/\[FICHIER:[^\]]*\][\s\S]*?(?:\[\/FICHIER\]|$)/gi, '')
+      .replace(/\[FICHIER:[^\]]*$/gi, '')
+      .trim();
+  }
+
   reponseNyx = refermerBalisesAtelierTronquees(reponseNyx);
   reponseNyx = couperPhraseIncomplete(reponseNyx);
   reponseNyx = securiserSortieCode(reponseNyx);
@@ -1212,7 +1269,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   let estReponseFallbackVide = false;
   if (!reponseNyx || reponseNyx.length < 2) {
-    reponseNyx = "J'avais la tête ailleurs — balance ton idée ou laisse-moi te montrer ce qui me trotte en tête.";
+    reponseNyx = "Je suis là, Doc. Dis-moi ce que tu as en tête.";
     estReponseFallbackVide = true;
   }
 
@@ -1359,6 +1416,32 @@ app.post('/telegram', (req, res) => {
         await supabase.from('nyx_pensees_pretes').delete().eq('impulsion', 'reve').catch(() => {});
       }
       return await envoyerTelegram(chatId, "🧹 *Archives oniriques purgées (RAM, Firebase & Supabase).* Le prochain `/reve` ou cycle de 04h00 repartira d'une page blanche.");
+    }
+
+    if (/^[\/!]eco(?:\s+(on|off|actif|inactif|status|statut))?$/i.test(texteMessageClavier.trim())) {
+      const argEco = (texteMessageClavier.trim().split(/\s+/)[1] || "").toLowerCase();
+      let nouvelEtat = !Boolean(getEtatProfond().modeEco);
+      if (argEco === "on" || argEco === "actif") nouvelEtat = true;
+      else if (argEco === "off" || argEco === "inactif") nouvelEtat = false;
+      else if (argEco === "status" || argEco === "statut") {
+        const actif = Boolean(getEtatProfond().modeEco);
+        return await envoyerTelegram(chatId, actif
+          ? "🔋 *Mode économie d'énergie : ACTIF* _(relais gratuits prioritaires, SAS désactivé, worker en veille)_."
+          : "⚡ *Mode économie d'énergie : INACTIF* _(régime normal complet)_.");
+      }
+      getEtatProfond().modeEco = nouvelEtat;
+      if (FIREBASE_DB_URL) {
+        await axios.put(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, {
+          actif: nouvelEtat,
+          date: obtenirHorodatageParis()
+        }).catch(() => {});
+      }
+      return await envoyerTelegram(
+        chatId,
+        nouvelEtat
+          ? "🔋 *Mode économie d'énergie ACTIVÉ* — Relais gratuits prioritaires, SAS silencieux coupé, plafond tokens réduit et initiatives autonomes en pause. Tape `/eco` à nouveau pour revenir en mode normal."
+          : "⚡ *Mode économie d'énergie DÉSACTIVÉ* — Retour au régime complet."
+      );
     }
 
     if (texteMessageClavier === '/envie' || texteMessageClavier === '!envie') {
@@ -2739,6 +2822,13 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
   await initialiserAtelierStorage();
+  if (FIREBASE_DB_URL) {
+    try {
+      const resEco = await axios.get(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, { timeout: 3000 });
+      getEtatProfond().modeEco = Boolean(resEco.data?.actif);
+      if (getEtatProfond().modeEco) console.log("🔋 [MODE ÉCO] Actif au démarrage.");
+    } catch (e) {}
+  }
 
   // Si une mise à jour a été détectée au démarrage, Nyx donne son avis spontanément sur Telegram
   if (getEtatProfond().majEnAttenteAvis) {
