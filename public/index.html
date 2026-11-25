@@ -89,6 +89,12 @@
       50% { opacity: 0.3; transform: scale(0.8); }
     }
 
+    .hud-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     .link-tag {
       font-family: monospace;
       font-size: 10px;
@@ -97,6 +103,17 @@
       border: 1px solid rgba(0, 243, 255, 0.3);
       color: #94a3b8;
       clip-path: polygon(6px 0%, 100% 0%, calc(100% - 6px) 100%, 0% 100%);
+    }
+
+    .btn-key {
+      font-family: monospace;
+      font-size: 11px;
+      padding: 3px 7px;
+      background: rgba(0, 243, 255, 0.08);
+      border: 1px solid rgba(0, 243, 255, 0.35);
+      color: var(--cyan);
+      border-radius: 3px;
+      cursor: pointer;
     }
 
     /* ZONE DE CHAT */
@@ -271,7 +288,10 @@
       <div class="radar-pulse"></div>
       <span>NYX // NET.CORE</span>
     </div>
-    <div class="link-tag">META GEN3 LINK</div>
+    <div class="hud-right">
+      <div class="link-tag">META GEN3 LINK</div>
+      <button class="btn-key" id="btn-set-token" title="Configurer CRON_SECRET">🔑</button>
+    </div>
   </header>
 
   <div id="chat-box">
@@ -302,6 +322,7 @@
     const userInput = document.getElementById('user-input');
     const btnTextSend = document.getElementById('btn-text-send');
     const btnMic = document.getElementById('btn-mic');
+    const btnSetToken = document.getElementById('btn-set-token');
     const fileInput = document.getElementById('file-input');
     const previewContainer = document.getElementById('preview-container');
     const previewThumb = document.getElementById('preview-thumb');
@@ -309,6 +330,23 @@
 
     let currentPhotoB64 = null;
     let audioOutput = new Audio();
+
+    function getCronToken(forcePrompt = false) {
+      let token = localStorage.getItem('nyx_cron_secret') || '';
+      if (forcePrompt || !token) {
+        const saisi = window.prompt('Entre la clé CRON_SECRET de Render :', token);
+        if (saisi && saisi.trim()) {
+          token = saisi.trim();
+          localStorage.setItem('nyx_cron_secret', token);
+        }
+      }
+      return token;
+    }
+
+    btnSetToken.addEventListener('click', () => {
+      const t = getCronToken(true);
+      if (t) appendChatBubble('Nyx', 'Clé d’accès enregistrée dans le navigateur.');
+    });
 
     // 1. SÉLECTION PHOTO (RAY-BAN META OU GALERIE)
     fileInput.addEventListener('change', (e) => {
@@ -349,6 +387,12 @@
       const finalMsg = text && text.trim() ? text.trim() : (currentPhotoB64 ? "Analyse cette frame." : "");
       if (!finalMsg && !currentPhotoB64) return;
 
+      const token = getCronToken(false);
+      if (!token) {
+        appendChatBubble('Nyx', 'ACCÈS REFUSÉ : clique sur 🔑 en haut à droite pour coller ton CRON_SECRET.');
+        return;
+      }
+
       const photoToSend = currentPhotoB64;
       appendChatBubble('Doc', finalMsg, photoToSend);
 
@@ -363,14 +407,25 @@
 
         const res = await fetch('/api/voix', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify(payload)
         });
 
         const data = await res.json();
 
+        if (res.status === 401) {
+          localStorage.removeItem('nyx_cron_secret');
+          appendChatBubble('Nyx', 'TOKEN INVALIDE (401) : clique sur 🔑 en haut à droite pour saisir le bon CRON_SECRET.');
+          return;
+        }
+
         if (data.reponse) {
-          appendChatBubble('Nyx', data.reponse);
+          appendChatBubble('Nyx', data.reponse, data.image || null);
+        } else if (data.erreur) {
+          appendChatBubble('Nyx', `ERREUR : ${data.erreur}`);
         }
 
         // Restitution vocale Google Neural2 dans les haut-parleurs Meta
