@@ -107,6 +107,7 @@ let etatLocal = {
   lectureEnCours: null,
   bibliothequeLue: [],
   misesAJour: [],
+  modeEco: false,
   intentionDuJour: null,
   memoireRecente: []
 };
@@ -177,7 +178,7 @@ function obtenirHorodatageParis() {
 async function synchroniserEtatDepuisFirebase() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resReveCours, resExistence, resRegles, resLecture, resBiblio, resMaj, resIntention, resVitaux] = await Promise.all([
+    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resReveCours, resExistence, resRegles, resLecture, resBiblio, resMaj, resIntention, resVitaux, resModeEco] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
@@ -201,7 +202,8 @@ async function synchroniserEtatDepuisFirebase() {
       axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/intention_jour.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/besoins_vitaux.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/besoins_vitaux.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, { timeout: 3500 }).catch(() => ({ data: null }))
     ]);
 
     if (resEmo.data) etatLocal.emotions = { colere: 0, ...resEmo.data };
@@ -288,6 +290,9 @@ async function synchroniserEtatDepuisFirebase() {
     }
     if (resVitaux?.data && typeof resVitaux.data === 'object') {
       etatLocal.besoinsVitaux = { ...etatLocal.besoinsVitaux, ...resVitaux.data };
+    }
+    if (resModeEco?.data !== undefined) {
+      etatLocal.modeEco = Boolean(resModeEco.data?.actif);
     }
   } catch (err) {
     console.warn("[SUBCONSCIENT SYNC] Erreur lecture Firebase :", err.message);
@@ -772,23 +777,51 @@ async function rechercherWebTavily(query, maxChars = 1500, verifierQuotaJournali
 // ==========================================
 // CONNECTEURS LLM AUTONOMES
 // ==========================================
+async function basculerModeEcoAutomatiqueSubconscient(raison = "Venice 404") {
+  if (etatLocal.modeEco) return;
+  etatLocal.modeEco = true;
+  console.warn(`🔋 [AUTO-ÉCO SUBCONSCIENT] Bascule automatique en mode économie d'énergie (${raison}).`);
+  if (FIREBASE_DB_URL) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, {
+      actif: true,
+      auto: true,
+      raison,
+      date: obtenirHorodatageParis()
+    }).catch(() => {});
+  }
+  if (DOC_CHAT_ID) {
+    await envoyerTelegram(
+      DOC_CHAT_ID,
+      `🔋 *Passage automatique en mode économie d'énergie* _(${raison})_ — relais gratuits prioritaires et tâches de fond mises en veille. Tape \`/eco off\` quand tu veux revenir en régime complet.`
+    ).catch(() => {});
+  }
+}
+
 async function appelerVenice(model, systemInstruction, promptActuel, temperature = 0.7, maxTokens = 300, penalties = {}) {
   if (!VENICE_API_KEY) throw new Error("VENICE_API_KEY absente");
-  const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", {
-    model,
-    messages: [
-      { role: "system", content: systemInstruction },
-      { role: "user", content: promptActuel }
-    ],
-    temperature,
-    max_tokens: maxTokens,
-    ...penalties,
-    venice_parameters: { include_venice_system_prompt: false }
-  }, {
-    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: 25000
-  });
-  return res.data?.choices?.[0]?.message?.content || "";
+  try {
+    const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", {
+      model,
+      messages: [
+        { role: "system", content: systemInstruction },
+        { role: "user", content: promptActuel }
+      ],
+      temperature,
+      max_tokens: maxTokens,
+      ...penalties,
+      venice_parameters: { include_venice_system_prompt: false }
+    }, {
+      headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+      timeout: 25000
+    });
+    return res.data?.choices?.[0]?.message?.content || "";
+  } catch (err) {
+    const status = err?.response?.status;
+    if (status === 404 || status === 402) {
+      basculerModeEcoAutomatiqueSubconscient(`Venice HTTP ${status}`).catch(() => {});
+    }
+    throw err;
+  }
 }
 
 async function appelerGroq(systemInstruction, promptActuel, temperature = 0.4, maxTokens = 600) {
@@ -3351,6 +3384,10 @@ async function demarrerWorker() {
   // Pulsation cognitive unifiée (toutes les 10 min) : zéro appel LLM si la jauge de besoin est sous le seuil
   async function pulsationSubconsciente() {
     await maintenirCortexEveille();
+    await synchroniserEtatDepuisFirebase();
+    if (etatLocal.modeEco) {
+      return; // Mode /eco actif : zéro tâche de fond LLM ni initiative spontanée
+    }
     await verifierEveilMatinal();
     await regulerMetabolismeEmotionnel();
     await digererFluxBrut(false);
