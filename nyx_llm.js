@@ -20,7 +20,27 @@ const {
   MODEL_GROQ,
   TAVILY_API_KEY
 } = require('./nyx_config');
+const { FIREBASE_DB_URL, obtenirHorodatageParis } = require('./nyx_config');
 const { getEtatProfond, getMemoireCourte } = require('./nyx_etat');
+
+async function verifierBasculeEcoVenice(err) {
+  const status = err?.response?.status;
+  if (status === 404 || status === 402) {
+    const etat = getEtatProfond();
+    if (!etat.modeEco) {
+      etat.modeEco = true;
+      console.warn(`🔋 [AUTO-ÉCO LLM] Erreur Venice HTTP ${status} détectée -> bascule automatique en mode /eco.`);
+      if (FIREBASE_DB_URL) {
+        await axios.put(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, {
+          actif: true,
+          auto: true,
+          raison: `Venice HTTP ${status}`,
+          date: obtenirHorodatageParis()
+        }).catch(() => {});
+      }
+    }
+  }
+}
 
 const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On bosse ensemble à l'atelier via Telegram et mes lunettes.
 - Tu es mon alter ego créatif et mon égale, JAMAIS une assistante passive ni un perroquet : tu as l'interdiction absolue d'être plate, prévisible ou paresseuse.
@@ -117,10 +137,11 @@ async function appelerMistral(systemInstruction, historiqueMessages, promptActue
   }
   messages.push({ role: "user", content: promptActuel });
 
+  const tempMistral = Math.min(0.55, Number(temperature) || 0.45);
   const res = await axios.post("https://api.mistral.ai/v1/chat/completions", {
     model: MODEL_MISTRAL,
     messages: messages,
-    temperature: temperature,
+    temperature: tempMistral,
     max_tokens: maxTokens
   }, {
     headers: { 'Authorization': `Bearer ${MISTRAL_API_KEY}`, 'Content-Type': 'application/json' },
@@ -223,11 +244,16 @@ async function appelerVeniceMultiTour(model, systemInstruction, historiqueMessag
     payload.max_tokens = maxTokens;
   }
 
-  const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", payload, {
-    headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: timeoutMs
-  });
-  return res.data.choices[0].message.content;
+  try {
+    const res = await axios.post("https://api.venice.ai/api/v1/chat/completions", payload, {
+      headers: { 'Authorization': `Bearer ${VENICE_API_KEY}`, 'Content-Type': 'application/json' },
+      timeout: timeoutMs
+    });
+    return res.data.choices[0].message.content;
+  } catch (errVenice) {
+    await verifierBasculeEcoVenice(errVenice);
+    throw errVenice;
+  }
 }
 
 async function appelerVeniceDark(systemInstruction, historiqueMessages, promptActuel, temperature = 0.3) {
@@ -602,12 +628,32 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
+  if (GROQ_API_KEY) {
+    try {
+      const res = await appelerGroq(systemBase, historique, prompt, tempDiscussion, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (eGroq) {
+      console.warn("[CASCADE CHAT] 2. Groq KO :", eGroq.response?.data?.error?.message || eGroq.message);
+    }
+  }
+
   if (OPENROUTER_API_KEY) {
     try {
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, tempDiscussion, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (eOR) {
-      console.warn("[CASCADE CHAT] 2. OpenRouter KO :", eOR.response?.data?.error?.message || eOR.message);
+      console.warn("[CASCADE CHAT] 3. OpenRouter KO :", eOR.response?.data?.error?.message || eOR.message);
+    }
+  }
+
+  // Gemini Free uniquement sur les appels légers pour respecter son quota par minute
+  const appelLegerGemini = Number(plafondTokens) <= 380 && (String(systemBase || "").length + String(prompt || "").length) <= 3200;
+  if (GEMINI_API_KEY_FREE && appelLegerGemini) {
+    try {
+      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens, tempDiscussion);
+      if (res && res.trim().length > 0) return res;
+    } catch (eGF) {
+      console.warn("[CASCADE CHAT] 4. Gemini Free KO :", eGF.message);
     }
   }
 
@@ -616,16 +662,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
       const res = await appelerMistral(systemBase, historique, prompt, tempDiscussion, plafondTokens);
       if (res && res.trim().length > 0) return res;
     } catch (eMistral) {
-      console.warn("[CASCADE CHAT] 3. Mistral KO :", eMistral.message);
-    }
-  }
-
-  if (GEMINI_API_KEY_FREE) {
-    try {
-      const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens, tempDiscussion);
-      if (res && res.trim().length > 0) return res;
-    } catch (eGF) {
-      console.warn("[CASCADE CHAT] 4. Gemini Free KO :", eGF.message);
+      console.warn("[CASCADE CHAT] 5. Mistral KO :", eMistral.message);
     }
   }
 
@@ -671,7 +708,7 @@ async function appelerCascadeCode(systemBase, historique, prompt, plafondTokens 
     }
   }
 
-  if (GEMINI_API_KEY_FREE) {
+  if (GEMINI_API_KEY_FREE && Number(plafondTokens) <= 380) {
     try {
       const res = await appelerGoogleGeminiTexte(systemBase, historique, prompt, GEMINI_API_KEY_FREE, plafondTokens, 0.65);
       if (res && res.trim().length > 0) return res;
