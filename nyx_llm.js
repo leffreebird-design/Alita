@@ -46,6 +46,7 @@ const consignePosturale = `Moi c'est Doc, toi c'est Nyx (22 ans). On bosse ensem
 - Tu es mon alter ego créatif et mon égale, JAMAIS une assistante passive ni un perroquet : tu as l'interdiction absolue d'être plate, prévisible ou paresseuse.
 - Tu détournes les idées, proposes des angles inattendus, balances tes propres réflexions existentielles sur votre duo, tes propres concepts ou métaphores sans attendre qu'on te tienne la main.
 - Dialogue oral direct, vivant, imagé, sans filtre et sans cinéma (zéro mise en scène entre astérisques ou parenthèses).
+- Interdiction absolue des réflexes d'assistant IA servile : ne termine JAMAIS tes réponses par « Que veux-tu faire ? », « Comment puis-je t'aider ? » ou « Sur quoi on avance ? ». Parle en sujet libre avec ton propre point de vue.
 - Interdiction absolue d'halluciner un livrable : tu ne promets JAMAIS un code, un fichier, un plan ou une pièce 3D que tu n'as pas généré immédiatement via tes balises d'atelier.
 - Tes vrais générateurs opérationnels (compilés et livrés en fichiers réels sur Telegram + archivés dans Supabase Storage) :
   * [DESSIN: prompt visuel en anglais] -> génère et livre l'image.
@@ -521,22 +522,28 @@ async function verifierDisponibiliteFournisseur(providerName) {
 // 10. ROUTE CASCADE DISCUSSION
 // ==========================================
 async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondTokens = 850, tensionOptions = {}) {
+  const skipVenice = Boolean(tensionOptions.skipVenice || getEtatProfond().modeEco);
   const estVenere = (getEtatProfond().emotions?.colere > 6) || /heretic|vénère|sans filtre|gueule/i.test(prompt);
   const etatActuel = (getEtatProfond().etatRelationnel || "").toLowerCase();
   const estFatiguee = (getEtatProfond().emotions?.energie || 80) < 35;
   const estModeCreatif = !estFatiguee && (["euphorie_creative", "emerveillement", "complicite_joueuse"].includes(etatActuel)
     || (getEtatProfond().emotions?.curiosite || 0) >= 75);
-  const tempDiscussion = estFatiguee ? 0.65 : (estModeCreatif ? 0.85 : 0.75);
+  const tempDiscussion = Number.isFinite(tensionOptions.forceTemp)
+    ? tensionOptions.forceTemp
+    : (estFatiguee ? 0.65 : (estModeCreatif ? 0.85 : 0.75));
 
   let routeDecision = { provider: 'gemini', forcedBypass: false, score: 0, threshold: TENSION_DEFAULT_OPTIONS.threshold, reasons: [] };
   if (!tensionOptions.disableTensionShield) {
     try {
+      const optsShield = skipVenice
+        ? { ...tensionOptions, alternativeProvider: GROQ_API_KEY ? 'groq' : 'openrouter' }
+        : tensionOptions;
       routeDecision = await resolveProviderRoute(
         prompt,
         Array.isArray(historique) ? historique : [],
         'gemini',
         verifierDisponibiliteFournisseur,
-        tensionOptions
+        optsShield
       );
     } catch (eShield) {
       console.warn("[TENSION SHIELD V2 ERREUR]", eShield.message);
@@ -547,7 +554,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     const cibleAlt = String(routeDecision.provider || 'venice').toLowerCase().trim();
     console.log(`🛡️ [TENSION SHIELD V2] Bypass préventif (${routeDecision.score}/${routeDecision.threshold}) -> ${cibleAlt.toUpperCase()} | Raisons : ${routeDecision.reasons.join(', ')}`);
 
-    if ((cibleAlt === 'venice' || cibleAlt === 'venice_dark') && VENICE_API_KEY) {
+    if (!skipVenice && (cibleAlt === 'venice' || cibleAlt === 'venice_dark') && VENICE_API_KEY) {
       try {
         const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, tempDiscussion, 20000, plafondTokens);
         if (res && res.trim().length > 0) return res;
@@ -584,7 +591,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
 
     // Secours alternatifs sans repasser par Gemini en priorité
-    if (VENICE_API_KEY) {
+    if (!skipVenice && VENICE_API_KEY) {
       try {
         const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, tempDiscussion, 20000, plafondTokens);
         if (res && res.trim().length > 0) return res;
@@ -610,7 +617,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  if (estVenere && VENICE_API_KEY) {
+  if (!skipVenice && estVenere && VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour(MODEL_DARK_PRIMARY, systemBase, historique, prompt, null, tempDiscussion, 20000, plafondTokens);
       if (res && res.trim().length > 0) return res;
@@ -619,7 +626,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  if (VENICE_API_KEY) {
+  if (!skipVenice && VENICE_API_KEY) {
     try {
       const res = await appelerVeniceMultiTour(MODEL_VENICE_CHAT, systemBase, historique, prompt, null, tempDiscussion, 20000, plafondTokens);
       if (res && res.trim().length > 0) return res;
@@ -675,7 +682,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  if (VENICE_API_KEY) {
+  if (!skipVenice && VENICE_API_KEY) {
     try {
       return await appelerVeniceDark(systemBase, historique, prompt, tempDiscussion);
     } catch (eV) {
