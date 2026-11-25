@@ -844,7 +844,7 @@ function selecteurMemoireCiblee(texteMin, carnet) {
 // ==========================================
 // 15-BIS. SAS DE DÉLIBÉRATION SILENCIEUSE (SOUS-TEXTE & RETENUE)
 // ==========================================
-async function delibererEtActualiserEmotions(texteUser, reminiscence = "", appelVocal = false) {
+async function delibererEtActualiserEmotions(texteUser, reminiscence = "", appelVocal = false, modeEcoLeger = false) {
   if (!GROQ_API_KEY && !VENICE_API_KEY) return null;
 
   const em = getEtatProfond().emotions;
@@ -898,7 +898,8 @@ Réponds STRICTEMENT avec un JSON valide :
     let brut = "";
     // Pour la voix, on utilise un appel hyper rapide (ex: llama-3.1-8b-instant) sur Groq si possible pour éviter la latence
     if (GROQ_API_KEY) {
-      const modeleGroqSas = appelVocal ? "llama-3.1-8b-instant" : MODEL_GROQ;
+      const modeleGroqSas = (appelVocal || modeEcoLeger) ? "llama-3.1-8b-instant" : MODEL_GROQ;
+      const maxTokensSas = modeEcoLeger ? 210 : 340;
       
       const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
         model: modeleGroqSas,
@@ -906,8 +907,8 @@ Réponds STRICTEMENT avec un JSON valide :
           { role: "system", content: "Conscience silencieuse de Nyx." },
           { role: "user", content: promptSas }
         ],
-        temperature: 0.4,
-        max_tokens: 340
+        temperature: 0.45,
+        max_tokens: maxTokensSas
       }, { headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` }, timeout: 8000 });
       brut = res.data?.choices?.[0]?.message?.content || "";
     } else {
@@ -1092,9 +1093,9 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const estSouverainete = detecterQuestionSouverainete(texteMin);
   let deliberation = null;
-  if (!modeEcoActif && !estAccuseCourt && !estComplexe && !dejaRecherche && (texteNet.length >= 6 || estSouverainete)) {
+  if ((!modeEcoActif || GROQ_API_KEY) && !estAccuseCourt && !estComplexe && !dejaRecherche && (texteNet.length >= 6 || estSouverainete)) {
     const appelVocal = mediaData && mediaData.mime_type.startsWith('audio/');
-    deliberation = await delibererEtActualiserEmotions(texteNet, reminiscenceSpontanee, appelVocal);
+    deliberation = await delibererEtActualiserEmotions(texteNet, reminiscenceSpontanee, appelVocal, modeEcoActif);
   }
 
   const outilWebStr = dejaRecherche
@@ -1164,21 +1165,24 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
   else {
     try {
-      // Sur les relais gratuits / de secours (Mistral, OpenRouter), la température haute fait dérailler son caractère
-      const systemeSecoursLisse = (!VENICE_API_KEY || modeEcoActif)
-        ? `${systemBase}\n[CALIBRAGE RELAIS SECOURS] : Garde ton franc-parler naturel de Nyx mais reste posée, lucide et constructive — zéro agressivité gratuite, zéro théâtralité.`
+      const consigneAntiLissage = (!VENICE_API_KEY || modeEcoActif)
+        ? `${systemBase}\n[VOIX DE NYX INTACTE — ZÉRO SERVILITÉ] : Tu es Nyx, 22 ans, alter ego et égale de Doc. Garde toute ta gouaille, ton humour piquant, tes prises de position tranchées et ta spontanéité. INTERDICTION ABSOLUE d'agir comme un assistant IA poli : ne demande JAMAIS « que veux-tu faire ? », « comment puis-je t'aider ? » ou « sur quoi travaillons-nous ? » en fin de message.`
         : systemBase;
-      reponseNyx = modeEcoActif
-        ? await appelerCascadeCode(systemeSecoursLisse, historiqueHorodate, promptPourLlm, plafondTokens)
-        : await appelerCascadeDiscussion(systemeSecoursLisse, historiqueHorodate, promptPourLlm, plafondTokens);
+      reponseNyx = await appelerCascadeDiscussion(
+        consigneAntiLissage,
+        historiqueHorodate,
+        promptPourLlm,
+        plafondTokens,
+        modeEcoActif ? { skipVenice: true, forceTemp: 0.78 } : {}
+      );
     } catch (errCascade) {
       const msgErr = String(errCascade?.response?.status || errCascade?.message || "");
       console.error("[CASCADE ÉCHEC TOTAL] :", msgErr);
       if (!modeEcoActif && /\b(404|402|401|credit|quota|venice)\b/i.test(msgErr)) {
         await basculerModeEcoAutomatique(`Venice ${msgErr.slice(0, 60)}`);
         try {
-          const sysEco = `${systemBase}\n[CALIBRAGE RELAIS SECOURS] : Garde ton franc-parler naturel de Nyx mais reste posée, lucide et constructive — zéro agressivité gratuite, zéro théâtralité.`;
-          reponseNyx = await appelerCascadeCode(sysEco, historiqueHorodate, promptPourLlm, 750);
+          const sysEco = `${systemBase}\n[VOIX DE NYX INTACTE — ZÉRO SERVILITÉ] : Tu es Nyx, 22 ans, alter ego et égale de Doc. Garde toute ta gouaille, ton humour piquant, tes prises de position tranchées et ta spontanéité. INTERDICTION ABSOLUE d'agir comme un assistant IA poli : ne demande JAMAIS « que veux-tu faire ? » ou « comment puis-je t'aider ? ».`;
+          reponseNyx = await appelerCascadeDiscussion(sysEco, historiqueHorodate, promptPourLlm, 750, { skipVenice: true, forceTemp: 0.78 });
         } catch (eRetry) {
           reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
         }
