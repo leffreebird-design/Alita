@@ -47,7 +47,7 @@ const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
 
 // MISTRAL AI - ROUTE N°3 CHAT
 const MISTRAL_API_KEY = assainirParametre(process.env.MISTRAL_API_KEY);
-const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "open-mistral-nemo";
+const MODEL_MISTRAL = assainirParametre(process.env.MISTRAL_MODEL) || "mistral-small-latest";
 
 // GEMINI DIRECT GOOGLE - MODÈLE ACTIF 3.1
 const GEMINI_API_KEY_FREE = assainirParametre(process.env.GEMINI_API_KEY_FREE || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
