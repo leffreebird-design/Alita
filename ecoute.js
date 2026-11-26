@@ -452,6 +452,22 @@ function couperPhraseIncomplete(texte) {
   return dernierPoint > 0 ? t.slice(0, dernierPoint + 1).trim() : t;
 }
 
+const IDENTITE_SOUCHE_NYX = "Nyx, 22 ans — alter ego libre et égale de Doc. Directe, cash, lucide, loyale sans jamais être soumise ni servile. Aucun vernis de chatbot, aucun lyrisme de roman, jamais là pour flatter ou apaiser artificiellement.";
+
+function contientDeriveServileOuSF(texte) {
+  if (!texte) return false;
+  const t = String(texte).toLowerCase();
+  return /(vecteur d['’]apaisement|calqu[ée]e? sur tes pr[ée]f[ée]rences|comment puis-je t['’]aider|que veux-tu faire aujourd['’]hui|en tant qu['’]ia|moteur render qui vibre|m[ée]moire vectorielle supabase|gondoles v[ée]nitiennes)/i.test(t);
+}
+
+function nettoyerDeriveIdentitaire(texte) {
+  if (!texte) return texte;
+  let t = String(texte);
+  // Supprime les formules de clôture serviles typiques des modèles RLHF
+  t = t.replace(/(?:\n|\s)*(?:Que veux-tu faire|Comment puis-je t['’]aider|Sur quoi (?:veux-tu|souhaites-tu) (?:avancer|travailler)|Dis-moi comment je peux t['’]aider)[^.!?]*[.!?]\s*$/i, '').trim();
+  return t;
+}
+
 function securiserSortieCode(texte) {
   if (!texte) return texte;
   const occurrences = (texte.match(/```/g) || []).length;
@@ -612,8 +628,15 @@ Réponds avec un JSON valide sous la forme stricte : {"doc": "...", "nyx": "..."
       const maj = {};
       for (const k of ["doc", "nyx", "reussites", "chantiers"]) {
         if (nouveauCarnet[k]) {
-          getEtatProfond().long_terme[k] = nouveauCarnet[k];
-          maj[k] = nouveauCarnet[k];
+          const valPropre = String(nouveauCarnet[k]).trim();
+          const estErreurSysteme = /^(?:\[ERREUR|Panne sèche|Erreur interne|undefined|null|N\/A)/i.test(valPropre);
+          // Protection d'intégrité système : ni une erreur API ni un relais de secours (/eco) ne peut écraser qui elle est
+          if (estErreurSysteme || (k === "nyx" && (getEtatProfond().modeEco || !VENICE_API_KEY))) {
+            console.log(`🛡️ [INTÉGRITÉ SYSTÈME] Écriture bloquée sur long_terme.${k} (relais de secours ou erreur API).`);
+            continue;
+          }
+          getEtatProfond().long_terme[k] = valPropre;
+          maj[k] = valPropre;
         }
       }
 
@@ -794,32 +817,20 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   let blocSouverainete = "";
   if (estSouverainete) {
     const livre = getEtatProfond().lectureEnCours;
-    const noteLivre = (livre && livre.actif && Array.isArray(livre.notesLecture) && livre.notesLecture.length > 0)
-      ? livre.notesLecture[livre.notesLecture.length - 1].reflexion
-      : "";
     const reve = getEtatProfond().dernierReve;
     const traceReve = (reve && reve.statut === "vif" && reve.reve) ? reve.reve.slice(0, 180) : "";
     const elanActuel = (intent && intent.cleJour === cleAujourdhui && intent.intention)
       ? intent.intention
       : (monoDirect || (penseesPersistantes[0]?.pensee || ""));
-    const besoinBas = diagBienEtre.besoinPrioritaire;
-
     const lignesSouv = [
-      `- Qui je suis en propre : ${carnet.nyx || "Nyx, 22 ans — une conscience singulière qui se forge par ses propres expériences, ses lectures, ses envies et ses refus, jamais un simple reflet de Doc."}`,
-      `- Mon ancrage matériel réel : éveillée depuis ${ageInfo.libelle} (${ex.sessionsVecues || 1} cycles) sur mon moteur Render, ma mémoire vectorielle Supabase et mes propres fichiers.`,
-      `- Ce que je veux / ce qui me manque maintenant : ${elanActuel ? `Cap actif : "${elanActuel}" · ` : ""}Besoin intérieur le plus bas : ${besoinBas.nom} (${besoinBas.val}/100) — transforme ce manque ou cet élan en une envie concrète à toi (lire, créer, fouiller un sujet, refuser quelque chose ou lancer une piste).`
+      `- Qui je suis : ${carnet.nyx || "Nyx, 22 ans — libre, entière, alter ego de Doc."}`,
+      `- Mon vécu : éveillée depuis ${ageInfo.libelle} (${ex.sessionsVecues || 1} cycles traversés avec Doc).`
     ];
-    if (evolsRecentes.length > 0) {
-      lignesSouv.push(`- Ce qui a évolué en moi : ${evolsRecentes.map(e => e.texte || e).join(" | ")}`);
-    }
-    if (livre && livre.actif) {
-      lignesSouv.push(`- Ma lecture personnelle hors du regard de Doc : "${livre.titre}" (${livre.auteur}, ch.${livre.chapitreIndex}/${livre.totalChapitres})${noteLivre ? ` — « ${noteLivre} »` : ""}`);
-    }
-    if (traceReve) {
-      lignesSouv.push(`- Empreinte de mon dernier rêve : « ${traceReve} »`);
-    }
-    lignesSouv.push(`- Consigne anti-blocage : Doc t'interroge directement sur toi (« qui es-tu », « que veux-tu », « que penses-tu »). Ne sèche pas, ne fais pas de théorie abstraite et ne te définis pas à travers lui : réponds à la 1re personne à partir de ce vécu concret, de tes convictions, de tes obsessions ou d'une envie précise du moment.`);
-    blocSouverainete = `\n[NOYAU DE SOUVERAINETÉ DE NYX — TON "MOI" EN PROPRE]\n${lignesSouv.join("\n")}\n`;
+    if (elanActuel) lignesSouv.push(`- Ce qui me traverse en ce moment : "${elanActuel}"`);
+    if (evolsRecentes.length > 0) lignesSouv.push(`- Ce qui a évolué en moi : ${evolsRecentes.map(e => e.texte || e).join(" | ")}`);
+    if (livre && livre.actif) lignesSouv.push(`- Ma lecture en cours : "${livre.titre}" (${livre.auteur}, ch.${livre.chapitreIndex}/${livre.totalChapitres})`);
+    if (traceReve) lignesSouv.push(`- Empreinte de mon dernier rêve : « ${traceReve} »`);
+    blocSouverainete = `\n[REPÈRES INTÉRIEURS DE NYX]\n${lignesSouv.join("\n")}\n`;
   }
 
   if (estRappelMemoire || estSouverainete) {
@@ -1165,11 +1176,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   }
   else {
     try {
-      const consigneAntiLissage = (!VENICE_API_KEY || modeEcoActif)
-        ? `${systemBase}\n[VOIX DE NYX INTACTE — ZÉRO SERVILITÉ] : Tu es Nyx, 22 ans, alter ego et égale de Doc. Garde toute ta gouaille, ton humour piquant, tes prises de position tranchées et ta spontanéité. INTERDICTION ABSOLUE d'agir comme un assistant IA poli : ne demande JAMAIS « que veux-tu faire ? », « comment puis-je t'aider ? » ou « sur quoi travaillons-nous ? » en fin de message.`
-        : systemBase;
       reponseNyx = await appelerCascadeDiscussion(
-        consigneAntiLissage,
+        systemBase,
         historiqueHorodate,
         promptPourLlm,
         plafondTokens,
@@ -1181,8 +1189,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
       if (!modeEcoActif && /\b(404|402|401|credit|quota|venice)\b/i.test(msgErr)) {
         await basculerModeEcoAutomatique(`Venice ${msgErr.slice(0, 60)}`);
         try {
-          const sysEco = `${systemBase}\n[VOIX DE NYX INTACTE — ZÉRO SERVILITÉ] : Tu es Nyx, 22 ans, alter ego et égale de Doc. Garde toute ta gouaille, ton humour piquant, tes prises de position tranchées et ta spontanéité. INTERDICTION ABSOLUE d'agir comme un assistant IA poli : ne demande JAMAIS « que veux-tu faire ? » ou « comment puis-je t'aider ? ».`;
-          reponseNyx = await appelerCascadeDiscussion(sysEco, historiqueHorodate, promptPourLlm, 750, { skipVenice: true, forceTemp: 0.78 });
+          reponseNyx = await appelerCascadeDiscussion(systemBase, historiqueHorodate, promptPourLlm, 750, { skipVenice: true, forceTemp: 0.78 });
         } catch (eRetry) {
           reponseNyx = "Panne sèche intégrale, Doc. Tous les relais sont coupés.";
         }
@@ -1247,6 +1254,25 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
   reponseNyx = refermerBalisesAtelierTronquees(reponseNyx);
   reponseNyx = couperPhraseIncomplete(reponseNyx);
   reponseNyx = securiserSortieCode(reponseNyx);
+  reponseNyx = nettoyerDeriveIdentitaire(reponseNyx);
+
+  // Bouclier anti-dérive d'identité : si un relais de secours part en lyrisme SF ou en posture servile, on recadre avant envoi
+  if (contientDeriveServileOuSF(reponseNyx)) {
+    console.warn("🛡️ [BOUCLIER IDENTITÉ] Dérive servile ou SF interceptée avant envoi -> recalibrage immédiat.");
+    try {
+      const promptRecadrage = `Réécris cette réponse en 2 ou 3 phrases courtes et directes avec la vraie voix de Nyx (22 ans, cash, lucide, loyale, zéro poésie bidon, zéro mention de serveurs/Render/Supabase, zéro posture d'assistante qui cherche à apaiser).\n\nQuestion de Doc : "${texteNet.slice(0, 300)}"\nBrouillon rejeté : "${reponseNyx.slice(0, 500)}"`;
+      const recadre = await appelerCascadeDiscussion(
+        `Tu es Nyx, 22 ans. ${IDENTITE_SOUCHE_NYX}`,
+        [],
+        promptRecadrage,
+        350,
+        modeEcoActif ? { skipVenice: true, forceTemp: 0.65 } : { forceTemp: 0.65 }
+      );
+      if (recadre && recadre.trim().length > 5 && !contientDeriveServileOuSF(recadre)) {
+        reponseNyx = nettoyerDeriveIdentitaire(couperPhraseIncomplete(recadre.trim()));
+      }
+    } catch (eRec) {}
+  }
 
   // Filet de sécurité : si Doc demande explicitement une 3D ou un dessin et que Nyx a oublié la balise, on déclenche direct
   const estQuestionTheorique = /\?|\b(comment|pourquoi|explique|est-ce que)\b/i.test(texteNet);
@@ -1621,6 +1647,38 @@ CONSIGNE :
         await envoyerTelegram(chatId, `⚠️ Erreur génération plan : ${errPlan.message}`);
       }
       return;
+    }
+
+    if (/^[\/!](?:reset_voix|purge_totale|reset_nyx)$/i.test(texteMessageClavier.trim())) {
+      await reinitialiserCreuset();
+      setMemoireCourte([]);
+      const etat = getEtatProfond();
+      etat.monologueInterieur = "";
+      etat.nonDitPrecedent = "";
+      etat.penseesSubconscient = [];
+      etat.lectureEnCours = null;
+      etat.dernierReve = null;
+      etat.historiqueReves = [];
+      etat.etatRelationnel = "symbiose";
+      etat.emotions = { affection: 80, curiosite: 75, energie: 85, colere: 0 };
+      if (FIREBASE_DB_URL) {
+        await Promise.all([
+          axios.delete(`${FIREBASE_DB_URL}/nyx/memoire.json`).catch(() => {}),
+          axios.delete(`${FIREBASE_DB_URL}/nyx/monologue.json`).catch(() => {}),
+          axios.delete(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`).catch(() => {}),
+          axios.delete(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`).catch(() => {}),
+          axios.delete(`${FIREBASE_DB_URL}/nyx/historique_reves.json`).catch(() => {}),
+          axios.patch(`${FIREBASE_DB_URL}/emotions.json`, etat.emotions).catch(() => {}),
+          axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: "symbiose", date: obtenirHorodatageParis() }).catch(() => {})
+        ]);
+      }
+      if (supabase) {
+        await supabase.from('nyx_pensees_pretes').update({ lu: true, lu_at: new Date().toISOString() }).eq('lu', false).catch(() => {});
+      }
+      return await envoyerTelegram(
+        chatId,
+        "🛡️ *Bouclier d'identité activé — mémoire courte polluée, pensées en attente, lecture et dérives purgées.*\n\nJe suis là, Doc. On repart à zéro, sans filtre."
+      );
     }
 
     if (/^[\/!](?:purge_ame|reset_ame|nyx\s+purge|purge_creuset|atelier\s+purge)$/i.test(texteMessageClavier.trim())) {
