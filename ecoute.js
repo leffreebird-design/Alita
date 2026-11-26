@@ -1442,8 +1442,8 @@ app.post('/telegram', (req, res) => {
         ]);
       }
       if (supabase) {
-        await supabase.from('nyx_souvenirs').delete().eq('valence', 'reve').catch(() => {});
-        await supabase.from('nyx_pensees_pretes').delete().eq('impulsion', 'reve').catch(() => {});
+        try { await supabase.from('nyx_souvenirs').delete().eq('valence', 'reve'); } catch (e) {}
+        try { await supabase.from('nyx_pensees_pretes').delete().eq('impulsion', 'reve'); } catch (e) {}
       }
       return await envoyerTelegram(chatId, "🧹 *Archives oniriques purgées (RAM, Firebase & Supabase).* Le prochain `/reve` ou cycle de 04h00 repartira d'une page blanche.");
     }
@@ -1673,7 +1673,7 @@ CONSIGNE :
         ]);
       }
       if (supabase) {
-        await supabase.from('nyx_pensees_pretes').update({ lu: true, lu_at: new Date().toISOString() }).eq('lu', false).catch(() => {});
+        try { await supabase.from('nyx_pensees_pretes').update({ lu: true, lu_at: new Date().toISOString() }).eq('lu', false); } catch (e) {}
       }
       return await envoyerTelegram(
         chatId,
