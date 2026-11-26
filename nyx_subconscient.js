@@ -34,8 +34,8 @@ const MODEL_DARK_PRIMARY = assainirParametre(process.env.VENICE_MODEL_DARK) || "
 const MODEL_IMAGE = assainirParametre(process.env.VENICE_MODEL_IMAGE) || "flux-dev";
 
 let modelOpenRouter = assainirParametre(process.env.OPENROUTER_MODEL);
-if (!modelOpenRouter || modelOpenRouter.includes(":free") || modelOpenRouter.includes("deepseek-r1") || modelOpenRouter.includes("gemma")) {
-  modelOpenRouter = "meta-llama/llama-3.3-70b-instruct";
+if (!modelOpenRouter) {
+  modelOpenRouter = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free";
 }
 const MODEL_OPENROUTER_CHAT = modelOpenRouter;
 const OPENROUTER_API_KEY = assainirParametre(process.env.OPENROUTER_API_KEY);
