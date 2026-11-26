@@ -97,6 +97,18 @@ async function rechercherWebTavily(query) {
 
 // 9. CONNECTEURS LLM INDIVIDUELS
 // ==========================================
+function getModelesOpenRouterCandidats(modelCible) {
+  const envOr = String(process.env.OPENROUTER_MODEL || "").trim();
+  const base = envOr || modelCible || "cognitivecomputations/dolphin-mistral-24b-venice-edition:free";
+  const liste = [
+    base,
+    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "openrouter/free"
+  ];
+  return [...new Set(liste.filter(Boolean))];
+}
+
 async function appelerOpenRouter(systemInstruction, historiqueMessages, promptActuel, modelCible, temperature = 0.25, maxTokens = 850) {
   if (!OPENROUTER_API_KEY) throw new Error("Clé OPENROUTER_API_KEY absente.");
 
@@ -108,22 +120,34 @@ async function appelerOpenRouter(systemInstruction, historiqueMessages, promptAc
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
-    model: modelCible,
-    messages: messages,
-    temperature: temperature,
-    max_tokens: maxTokens
-  }, {
-    headers: {
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://alita-gsoe.onrender.com',
-      'X-Title': 'Nyx Core'
-    },
-    timeout: 25000
-  });
+  const candidats = getModelesOpenRouterCandidats(modelCible);
+  let derniereErr = null;
 
-  return res.data?.choices?.[0]?.message?.content || "";
+  for (const modele of candidats) {
+    try {
+      const res = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
+        model: modele,
+        messages: messages,
+        temperature: temperature,
+        max_tokens: maxTokens
+      }, {
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://alita-gsoe.onrender.com',
+          'X-Title': 'Nyx Core'
+        },
+        timeout: 25000
+      });
+      const contenu = res.data?.choices?.[0]?.message?.content || "";
+      if (contenu.trim()) return contenu;
+    } catch (err) {
+      derniereErr = err;
+      console.warn(`[OPENROUTER] Modèle ${modele} indisponible (${err.response?.status || err.message}), essai suivant...`);
+    }
+  }
+
+  throw derniereErr || new Error("Tous les modèles OpenRouter ont échoué.");
 }
 
 async function appelerMistral(systemInstruction, historiqueMessages, promptActuel, temperature = 0.25, maxTokens = 850) {
@@ -535,7 +559,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
   if (!tensionOptions.disableTensionShield) {
     try {
       const optsShield = skipVenice
-        ? { ...tensionOptions, alternativeProvider: GROQ_API_KEY ? 'groq' : 'openrouter' }
+        ? { ...tensionOptions, alternativeProvider: OPENROUTER_API_KEY ? 'openrouter' : 'groq' }
         : tensionOptions;
       routeDecision = await resolveProviderRoute(
         prompt,
@@ -634,6 +658,16 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
+  // En mode /eco (sans crédit Venice), OpenRouter (modèles :free non-censurés) passe AVANT Groq pour éviter le mur RLHF
+  if (skipVenice && OPENROUTER_API_KEY) {
+    try {
+      const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, tempDiscussion, plafondTokens);
+      if (res && res.trim().length > 0) return res;
+    } catch (eOREco) {
+      console.warn("[CASCADE CHAT ÉCO] OpenRouter libre KO :", eOREco.response?.data?.error?.message || eOREco.message);
+    }
+  }
+
   if (GROQ_API_KEY) {
     try {
       const res = await appelerGroq(systemBase, historique, prompt, tempDiscussion, plafondTokens);
@@ -643,7 +677,7 @@ async function appelerCascadeDiscussion(systemBase, historique, prompt, plafondT
     }
   }
 
-  if (OPENROUTER_API_KEY) {
+  if (!skipVenice && OPENROUTER_API_KEY) {
     try {
       const res = await appelerOpenRouter(systemBase, historique, prompt, MODEL_OPENROUTER_CHAT, tempDiscussion, plafondTokens);
       if (res && res.trim().length > 0) return res;
