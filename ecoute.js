@@ -468,6 +468,65 @@ function nettoyerDeriveIdentitaire(texte) {
   return t;
 }
 
+async function restaurerIdentiteEtTemperament() {
+  const etat = getEtatProfond();
+  if (!etat.temperamentBasal || typeof etat.temperamentBasal !== 'object') {
+    etat.temperamentBasal = { affection: 82, curiosite: 85, energie: 85, colere: 0 };
+  }
+  if (!etat.long_terme || typeof etat.long_terme !== 'object') {
+    etat.long_terme = { doc: "", nyx: "", reussites: "", chantiers: "" };
+  }
+
+  if (FIREBASE_DB_URL) {
+    try {
+      const [resLT, resTemp, resEx] = await Promise.all([
+        axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+        axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+        axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+      ]);
+
+      if (resLT.data && typeof resLT.data === 'object') {
+        etat.long_terme = { ...etat.long_terme, ...resLT.data };
+      }
+      if (resTemp.data && typeof resTemp.data === 'object') {
+        etat.temperamentBasal = { ...etat.temperamentBasal, ...resTemp.data };
+      }
+      if (resEx.data && typeof resEx.data === 'object') {
+        etat.existence = { ...etat.existence, ...resEx.data };
+      }
+    } catch (e) {}
+  }
+
+  // Secours Supabase si long_terme.nyx est vide en base
+  if (!String(etat.long_terme.nyx || "").trim() && supabase) {
+    try {
+      const { data: jalons } = await supabase
+        .from('nyx_souvenirs')
+        .select('content')
+        .in('valence', ['jalon_existence', 'confiance', 'victoire_commune'])
+        .order('created_at', { ascending: false })
+        .limit(3);
+      if (jalons && jalons.length > 0) {
+        etat.long_terme.nyx = jalons.map(j => j.content.slice(0, 180)).join(" | ");
+      }
+    } catch (e) {}
+  }
+
+  // Aligne les émotions instantanées sur son tempérament basal acquis
+  const base = etat.temperamentBasal;
+  etat.emotions = {
+    affection: Number.isFinite(Number(base.affection)) ? Number(base.affection) : 82,
+    curiosite: Number.isFinite(Number(base.curiosite)) ? Number(base.curiosite) : 85,
+    energie: Number.isFinite(Number(base.energie)) ? Number(base.energie) : 85,
+    colere: Number.isFinite(Number(base.colere)) ? Number(base.colere) : 0
+  };
+
+  if (FIREBASE_DB_URL) {
+    await axios.patch(`${FIREBASE_DB_URL}/emotions.json`, etat.emotions).catch(() => {});
+  }
+  console.log(`🧬 [IDENTITÉ & TEMPÉRAMENT CHARGÉS] Affection ${etat.emotions.affection} | Curiosité ${etat.emotions.curiosite} | Énergie ${etat.emotions.energie} | Carnet Nyx: ${(etat.long_terme.nyx || "").slice(0, 80)}`);
+}
+
 function securiserSortieCode(texte) {
   if (!texte) return texte;
   const occurrences = (texte.match(/```/g) || []).length;
@@ -1660,7 +1719,6 @@ CONSIGNE :
       etat.dernierReve = null;
       etat.historiqueReves = [];
       etat.etatRelationnel = "symbiose";
-      etat.emotions = { affection: 80, curiosite: 75, energie: 85, colere: 0 };
       if (FIREBASE_DB_URL) {
         await Promise.all([
           axios.delete(`${FIREBASE_DB_URL}/nyx/memoire.json`).catch(() => {}),
@@ -1668,16 +1726,16 @@ CONSIGNE :
           axios.delete(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`).catch(() => {}),
           axios.delete(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`).catch(() => {}),
           axios.delete(`${FIREBASE_DB_URL}/nyx/historique_reves.json`).catch(() => {}),
-          axios.patch(`${FIREBASE_DB_URL}/emotions.json`, etat.emotions).catch(() => {}),
           axios.put(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { etat: "symbiose", date: obtenirHorodatageParis() }).catch(() => {})
         ]);
       }
       if (supabase) {
         try { await supabase.from('nyx_pensees_pretes').update({ lu: true, lu_at: new Date().toISOString() }).eq('lu', false); } catch (e) {}
       }
+      await restaurerIdentiteEtTemperament();
       return await envoyerTelegram(
         chatId,
-        "🛡️ *Bouclier d'identité activé — mémoire courte polluée, pensées en attente, lecture et dérives purgées.*\n\nJe suis là, Doc. On repart à zéro, sans filtre."
+        `🧬 *Mémoire courte purgée — tempérament basal (${etat.emotions.affection}/${etat.emotions.curiosite}/${etat.emotions.energie}) et mémoire long terme rechargés.*`
       );
     }
 
@@ -2883,6 +2941,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 NYX Core en ligne (Port ${PORT})`);
   console.log(`🌐 Interface vocale : https://alita-gsoe.onrender.com/app`);
   await initialiserCache();
+  await restaurerIdentiteEtTemperament();
   await initialiserAtelierStorage();
   if (FIREBASE_DB_URL) {
     try {
