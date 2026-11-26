@@ -1728,8 +1728,15 @@ Réponds STRICTEMENT avec un JSON valide :
         const majCarnet = {};
         for (const k of ["doc", "nyx", "reussites", "chantiers"]) {
           if (parsed[k] && String(parsed[k]).trim().length > 3) {
-            etatLocal.long_terme[k] = String(parsed[k]).trim();
-            majCarnet[k] = etatLocal.long_terme[k];
+            const valPropre = String(parsed[k]).trim();
+            const estErreurSysteme = /^(?:\[ERREUR|Panne sèche|Erreur interne|undefined|null|N\/A)/i.test(valPropre);
+            // Protection d'intégrité système : ni une erreur API ni un relais de secours (/eco) ne peut altérer son identité
+            if (estErreurSysteme || (k === "nyx" && (etatLocal.modeEco || !VENICE_API_KEY))) {
+              console.log(`🛡️ [INTÉGRITÉ SYSTÈME WORKER] Écriture bloquée sur long_terme.${k} (relais de secours ou erreur API).`);
+              continue;
+            }
+            etatLocal.long_terme[k] = valPropre;
+            majCarnet[k] = valPropre;
           }
         }
 
@@ -1774,8 +1781,9 @@ Réponds STRICTEMENT avec un JSON valide :
         }
         
         let convModifiees = false;
+        const peutMuterIdentite = !etatLocal.modeEco && Boolean(VENICE_API_KEY);
         // --- 1. Mutation d'une conviction existante avec conservation de la cicatrice ---
-        if (parsed.mutation_conviction && parsed.mutation_conviction.id && parsed.mutation_conviction.nouveau_texte) {
+        if (peutMuterIdentite && parsed.mutation_conviction && parsed.mutation_conviction.id && parsed.mutation_conviction.nouveau_texte) {
           const idxC = (etatLocal.convictions || []).findIndex(c => c.id === parsed.mutation_conviction.id);
           if (idxC !== -1) {
             const ancienne = etatLocal.convictions[idxC].texte;
@@ -1792,7 +1800,7 @@ Réponds STRICTEMENT avec un JSON valide :
         }
 
         // --- 2. Nouvelle conviction forgée (Test du contraire) ---
-        if (parsed.nouvelle_conviction && parsed.nouvelle_conviction.texte && parsed.nouvelle_conviction.texte.trim().length > 15) {
+        if (peutMuterIdentite && parsed.nouvelle_conviction && parsed.nouvelle_conviction.texte && parsed.nouvelle_conviction.texte.trim().length > 15) {
           const cTexte = parsed.nouvelle_conviction.texte.trim();
           const objConv = { id: crypto.randomUUID(), texte: cTexte, date_creation: obtenirHorodatageParis(), force: 55, cicatrice: "" };
           etatLocal.convictions = [...(etatLocal.convictions || []), objConv].slice(-8);
