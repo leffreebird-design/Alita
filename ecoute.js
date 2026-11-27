@@ -1184,6 +1184,8 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     ? "INTERDICTION D'UTILISER [RECHERCHE_WEB] : la recherche web vient déjà d'être effectuée, utilise les résultats fournis dans le message utilisateur."
     : "Tu peux déclencher [RECHERCHE_WEB: mots-clés], ";
 
+  const docDemandeProductionAtelier = /\b(3d|stl|3mf|scad|pi[eè]ce|mod[eè]lise|imprimante|fichier|script|code|exporte|g[eé]n[eè]re|cr[eé]e|fabrique|plan|sch[eé]ma|svg|dessin|dessine|image|illustre|bouclier|filtre|mail|lettre|cv|document)\b/i.test(texteNet);
+  const estTechnique = estComplexe || projetManager.estProjetActif() || /code|script|fonction|bug|erreur|serveur|render|docker|api|mission|chantier|projet|worker|bdd|firebase|eteins|arrete|shutdown|bricole|fabrique|stl|imprimante|3d|plan|schema|schéma/i.test(texteMin);
   const estModeTravail = estTechnique || docDemandeProductionAtelier || /\b(on bosse|on travaille|au boulot|sur le projet|coup de main|aide[- ]moi|bouclier)\b/i.test(texteMin);
   const moduleMains = estModeTravail
     ? `[MODE CO-CRÉATION ACTIVE — À LA DEMANDE DE DOC]
@@ -1324,7 +1326,6 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   // Verrou anti-hallucination de balises d'atelier sur les relais de secours :
   // Si Doc n'a demandé ni 3D, ni fichier, ni plan, ni dessin (et n'est pas en mode bouclier/projet), on supprime toute balise inventée par un petit modèle
-  const docDemandeProductionAtelier = /\b(3d|stl|3mf|scad|pi[eè]ce|mod[eè]lise|imprimante|fichier|script|code|exporte|g[eé]n[eè]re|cr[eé]e|fabrique|plan|sch[eé]ma|svg|dessin|dessine|image|illustre|bouclier|filtre|mail|lettre|cv|document)\b/i.test(texteNet);
   if (!docDemandeProductionAtelier && !projetManager.estProjetActif()) {
     reponseNyx = reponseNyx
       .replace(/\[(?:3D_STL|3D_3MF|CAO_3D|PLAN_SVG|DESSIN):[^\]]*(?:\]|$)/gi, '')
