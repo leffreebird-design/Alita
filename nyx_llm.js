@@ -201,17 +201,34 @@ async function appelerGroq(systemInstruction, historiqueMessages, promptActuel, 
   }
   messages.push({ role: "user", content: promptActuel });
 
-  const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
-    model: MODEL_GROQ,
-    messages: messages,
-    temperature: temperature,
-    max_tokens: maxTokens
-  }, {
-    headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
-    timeout: 20000
-  });
+  const modelesGroq = [...new Set([MODEL_GROQ, "llama-3.3-70b-versatile", "llama-3.1-8b-instant"].filter(Boolean))];
+  let derniereErr = null;
 
-  return res.data?.choices?.[0]?.message?.content || "";
+  for (const modele of modelesGroq) {
+    try {
+      const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
+        model: modele,
+        messages: messages,
+        temperature: temperature,
+        max_tokens: maxTokens
+      }, {
+        headers: { 'Authorization': `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' },
+        timeout: 20000
+      });
+      const txt = res.data?.choices?.[0]?.message?.content || "";
+      if (txt.trim()) return txt;
+    } catch (err) {
+      derniereErr = err;
+      const st = err.response?.status;
+      if (st === 413 || st === 429 || st === 404) {
+        console.warn(`[GROQ] Modèle ${modele} limité (${st}), bascule modèle suivant...`);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw derniereErr || new Error("Tous les modèles Groq ont échoué.");
 }
 
 async function appelerGoogleGeminiVision(systemInstruction, historiqueMessages, promptActuel, mediaData = null) {
