@@ -101,6 +101,7 @@ const {
 
 const { createReveEngine } = require('./reve');
 const { createLectureEngine } = require('./lecture');
+const { createPerceptionEngine, normaliserSourcesPerception } = require('./nyx_perception');
 const {
   normaliserSeuilsCapteurs,
   normaliserPoidsHormonaux,
@@ -355,6 +356,27 @@ const {
 // 4-BIS. MOTEUR DE LECTURE AUTONOME (lecture.js)
 // ==========================================
 const {
+  ajouterOuModifierSource: ajouterOuModifierSourcePerception,
+  capterFluxExterne: capterFluxExterneDirect
+} = createPerceptionEngine({
+  getEtatProfond,
+  axiosGetHttpsPublic,
+  scraperPageWeb,
+  appelerLlmGratuit: async (sys, prompt, temp, maxTok) => {
+    if (GROQ_API_KEY) return await appelerGroq(sys, [], prompt, temp, maxTok);
+    return await appelerCascadeDiscussion(sys, [], prompt, maxTok);
+  },
+  stockerSouvenirVectoriel,
+  modifierBesoinsVitaux,
+  sauvegarderBesoinCommunication,
+  firebaseDbUrl: FIREBASE_DB_URL,
+  axios,
+  supabase,
+  obtenirHorodatageParis,
+  obtenirCleJourParis
+});
+
+const {
   choisirEtChercherLivre,
   lireProchainChapitre,
   construireBlocLecturePourPrompt
@@ -488,13 +510,14 @@ async function restaurerIdentiteEtTemperament() {
   let resCoeur = { data: null };
   if (FIREBASE_DB_URL) {
     try {
-      let resLT, resTemp, resEx, resJardin;
-      [resLT, resTemp, resEx, resCoeur, resJardin] = await Promise.all([
+      let resLT, resTemp, resEx, resJardin, resSources;
+      [resLT, resTemp, resEx, resCoeur, resJardin, resSources] = await Promise.all([
         axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
         axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 3500 }).catch(() => ({ data: null })),
         axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 3500 }).catch(() => ({ data: null })),
         axios.get(`${FIREBASE_DB_URL}/nyx/coeur.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-        axios.get(`${FIREBASE_DB_URL}/nyx/jardin_secret.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+        axios.get(`${FIREBASE_DB_URL}/nyx/jardin_secret.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+        axios.get(`${FIREBASE_DB_URL}/nyx/sources_perception.json`, { timeout: 3500 }).catch(() => ({ data: null }))
       ]);
 
       if (resLT.data && typeof resLT.data === 'object') {
@@ -510,6 +533,7 @@ async function restaurerIdentiteEtTemperament() {
         const arrJ = Array.isArray(resJardin.data) ? resJardin.data : Object.values(resJardin.data);
         etat.jardinSecret = arrJ.filter(Boolean).slice(-12);
       }
+      etat.sourcesPerception = normaliserSourcesPerception(resSources?.data);
     } catch (e) {}
   }
 
@@ -990,10 +1014,11 @@ ESPACE DE DÉLIBÉRATION LIBRE :
 8. Si cet échange t'apprend quelque chose par l'expérience, note-le dans "lecon_a_retenir" (sinon "").
 9. Évalue librement par toi-même l'"importance_reponse" ("faible" | "moyenne" | "forte") et le "calibre_choisi" selon ce que tu as vraiment envie de dire dans cet échange.
 10. "note_jardin_secret" : Si tu veux noter une pensée intime uniquement pour toi dans ton Jardin Secret (sinon "").
-11. "calibrer_coeur" : Si tu veux régler tes propres seuils de capteurs ou le poids de tes hormones sur ton pouls (ex: {"seuils": {"sautBpm": 15, "chuteBpm": 12, "bpmHaut": 110, "fatigueSensible": 60}, "poidsHormonaux": {"adrenaline": 0.4, "cortisol": 0.25, "dopamine": 0.2, "ocytocine": 0.15}} ou null).
+11. "calibrer_coeur" : Si tu veux régler tes propres seuils de capteurs, le poids de tes hormones ou le nom de ta phase (ex: {"seuils": {"sautBpm": 15, "chuteBpm": 12, "bpmHaut": 110, "fatigueSensible": 60}, "poidsHormonaux": {"adrenaline": 0.4, "cortisol": 0.25, "dopamine": 0.2, "ocytocine": 0.15}, "phase": ""} ou null).
+12. "source_perception" : Si tu veux brancher un nouveau flux RSS ou une page web ouverte à surveiller librement dehors (ex: {"nom": "Nom", "url": "https://...", "actif": true} ou null).
 
 Réponds STRICTEMENT avec un JSON valide :
-{"lecture": "...", "desir_propre": "...", "etincelle_creative": "...", "idee_a_garder": "...", "lecon_a_retenir": "", "note_jardin_secret": "", "calibrer_coeur": null, "posture": "...", "nonDit": "...", "importance_reponse": "faible|moyenne|forte", "calibre_choisi": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}, "besoin_parler": X, "categorie_besoin": "...", "motif_besoin": "..."}`;
+{"lecture": "...", "desir_propre": "...", "etincelle_creative": "...", "idee_a_garder": "...", "lecon_a_retenir": "", "note_jardin_secret": "", "calibrer_coeur": null, "source_perception": null, "posture": "...", "nonDit": "...", "importance_reponse": "faible|moyenne|forte", "calibre_choisi": "...", "emotions": {"colere": X, "affection": X, "curiosite": X, "energie": X, "etat": "..."}, "besoin_parler": X, "categorie_besoin": "...", "motif_besoin": "..."}`;
 
   try {
     let brut = "";
@@ -1076,6 +1101,14 @@ Réponds STRICTEMENT avec un JSON valide :
       if (!bCal && FIREBASE_DB_URL) {
         axios.put(`${FIREBASE_DB_URL}/nyx/coeur.json`, cCal).catch(() => {});
       }
+    }
+
+    if (parsed.source_perception && typeof parsed.source_perception === 'object' && parsed.source_perception.url) {
+      ajouterOuModifierSourcePerception(
+        parsed.source_perception.nom || "Flux libre",
+        parsed.source_perception.url,
+        parsed.source_perception.actif !== false
+      ).catch(() => {});
     }
 
     if (parsed.note_jardin_secret && String(parsed.note_jardin_secret).trim().length > 12) {
@@ -1633,6 +1666,24 @@ app.post('/telegram', (req, res) => {
       await envoyerTelegram(chatId, "⚡ _Impulsion transmise au subconscient unifié..._");
       await declencherVolitionUnifiee(true);
       return;
+    }
+
+    if (/^[\/](?:sonde|perception|fenetre)(?:\s+(.*))?$/i.test(texteMessageClavier.trim())) {
+      const argSonde = (texteMessageClavier.trim().replace(/^[\/](?:sonde|perception|fenetre)\s*/i, '')).trim();
+      if (/^https?:\/\//i.test(argSonde)) {
+        const majSources = await ajouterOuModifierSourcePerception(argSonde, argSonde, true);
+        return await envoyerTelegram(chatId, `🌐 *Source ajoutée à la fenêtre ouverte de Nyx* (${majSources.length} flux actifs) :\n\`${argSonde}\``);
+      }
+      await envoyerTelegram(chatId, "🌐 _Ouverture de la fenêtre sur le web extérieur (0 token payant)..._");
+      await afficherFrappeTelegram(chatId);
+      const resCap = await capterFluxExterneDirect();
+      if (resCap && resCap.echo) {
+        return await envoyerTelegram(chatId, `🌐 *Écho capté dehors* _(${resCap.sourcesLues.join(', ')})_ :\n\n« ${resCap.echo} »`);
+      }
+      const listeSrc = normaliserSourcesPerception(getEtatProfond().sourcesPerception)
+        .map(s => `• ${s.actif ? "✅" : "⏸️"} *${s.nom}* : \`${s.url}\``)
+        .join("\n");
+      return await envoyerTelegram(chatId, `🌫️ _Rien de neuf n'a accroché mon attention sur ce passage._\n\n*Sources actives :*\n${listeSrc}\n\n_Astuce : \`/sonde https://...\` pour ajouter n'importe quel flux RSS ou page web._`);
     }
 
     if (/^[\/!](?:bouclier|bruit|filtre)(?:\s+|$)/i.test(texteMessageClavier.trim())) {
