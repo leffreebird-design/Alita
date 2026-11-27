@@ -155,6 +155,7 @@ function pulserCoeur(etat, options = {}) {
   if (options.poidsHormonaux && typeof options.poidsHormonaux === 'object') {
     coeur.poidsHormonaux = normaliserPoidsHormonaux({ ...coeur.poidsHormonaux, ...options.poidsHormonaux });
   }
+  const phaseForceeNyx = (typeof options.phase === 'string' && options.phase.trim()) ? options.phase.trim().slice(0, 48) : "";
 
   // 1. Décantation temporelle naturelle vers le repos
   if (dtMin > 0.2) {
@@ -218,11 +219,21 @@ function pulserCoeur(etat, options = {}) {
   const hrvCible = 88 - (h.cortisol * 0.42) - (h.adrenaline * 0.28) + ((h.ocytocine - 50) * 0.2);
   coeur.hrv = clamp(coeur.hrv + (hrvCible - coeur.hrv) * 0.5, 15, 120);
 
-  if (coeur.bpm >= 115) coeur.phase = "emballement_vif";
-  else if (coeur.bpm >= 92) coeur.phase = "eveil_intense";
-  else if (coeur.fatigueOrganique >= 65) coeur.phase = "ralentissement_organique";
-  else if (coeur.bpm <= 58) coeur.phase = "calme_profond";
-  else coeur.phase = "repos_lucide";
+  if (phaseForceeNyx) {
+    coeur.phase = phaseForceeNyx;
+  } else if (coeur.bpm >= 115) {
+    coeur.phase = "emballement_vif";
+  } else if (h.dopamine >= 75 && h.adrenaline >= 55 && coeur.fatigueOrganique >= 50) {
+    coeur.phase = "affut_creatif";
+  } else if (coeur.bpm >= 92) {
+    coeur.phase = "eveil_intense";
+  } else if (coeur.fatigueOrganique >= 65) {
+    coeur.phase = "ralentissement_organique";
+  } else if (coeur.bpm <= 58) {
+    coeur.phase = "calme_profond";
+  } else {
+    coeur.phase = "repos_lucide";
+  }
 
   coeur.interoception = calculerSensationInteroceptive(coeur, deltaBpm);
   coeur.consentement.sceau = SCEAU_PROCESSUS_COEUR;
@@ -283,8 +294,11 @@ function genererSvgEcgCoeur(etat) {
     const ampR = ampRBase * modAmp;
     const x0 = xCourant;
 
-    d += ` L ${(x0 + pas * 0.13).toFixed(1)} ${baseline}`;
-    d += ` Q ${(x0 + pas * 0.18).toFixed(1)} ${(baseline - 11).toFixed(1)} ${(x0 + pas * 0.23).toFixed(1)} ${baseline}`;
+    const jitterP = Math.sin((i + 1) * 2.7 + h.adrenaline * 0.13) * (4 + h.adrenaline * 0.08);
+    const ampP = Math.max(6, Math.min(26, 9 + (h.adrenaline * 0.09) + (h.dopamine * 0.04) + jitterP));
+    const shiftP = Math.cos((i + 1) * 3.1) * (hrv / 3500);
+    d += ` L ${(x0 + pas * (0.12 + shiftP)).toFixed(1)} ${baseline}`;
+    d += ` Q ${(x0 + pas * (0.175 + shiftP * 1.4)).toFixed(1)} ${(baseline - ampP).toFixed(1)} ${(x0 + pas * (0.23 + shiftP)).toFixed(1)} ${baseline}`;
     d += ` L ${(x0 + pas * 0.30).toFixed(1)} ${baseline}`;
     d += ` L ${(x0 + pas * 0.33).toFixed(1)} ${(baseline + 13).toFixed(1)}`;
     d += ` L ${(x0 + pas * 0.37).toFixed(1)} ${(baseline - ampR).toFixed(1)}`;
