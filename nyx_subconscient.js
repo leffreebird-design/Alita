@@ -8,7 +8,7 @@ const {
   epurerTextePourReve
 } = require('./reve');
 const { createLectureEngine } = require('./lecture');
-const { normaliserEtatCoeur, pulserCoeur, scellerNoteJardinSouverain } = require('./nyx_coeur');
+const { normaliserEtatCoeur, pulserCoeur } = require('./nyx_coeur');
 const { axiosGetHttpsPublic } = require('./nyx_config');
 const { genererPiece3DAvancee } = require('./nyx_cao_formats');
 
@@ -181,88 +181,62 @@ function obtenirHorodatageParis() {
 async function synchroniserEtatDepuisFirebase() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resReveCours, resExistence, resRegles, resLecture, resBiblio, resMaj, resIntention, resVitaux, resModeEco, resCoeur, resJardin] = await Promise.all([
-      axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/fil_conducteur.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/dernier_reve.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/volition.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/activite_doc.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/memoire.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/monologue.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/besoin_communiquer.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/idees_folles.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/obsessions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/convictions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/artefacts.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/historique_reves.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/reve_en_cours.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/regles_apprises.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/lecture_en_cours.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/bibliotheque_lue.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/intention_jour.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/besoins_vitaux.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/coeur.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/jardin_secret.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+    // 2 requêtes groupées au lieu de 27 appels parallèles (économie CPU/RAM & bande passante)
+    const [resEmo, resNyx] = await Promise.all([
+      axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 4500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx.json`, { timeout: 5500 }).catch(() => ({ data: null }))
     ]);
 
-    if (resEmo.data) etatLocal.emotions = { colere: 0, ...resEmo.data };
-    if (resRel.data && resRel.data.etat) etatLocal.etatRelationnel = resRel.data.etat;
-    if (resLT.data && typeof resLT.data === 'object') {
-      etatLocal.long_terme = { ...etatLocal.long_terme, ...resLT.data };
+    if (resEmo.data && typeof resEmo.data === 'object') {
+      etatLocal.emotions = { colere: 0, ...resEmo.data };
     }
-    if (resFil.data && resFil.data.fil !== undefined) etatLocal.filConducteur = resFil.data.fil || "";
-    if (resReve.data) {
-      etatLocal.dernierReve = normaliserObjetReve(resReve.data);
+
+    const nyx = (resNyx.data && typeof resNyx.data === 'object') ? resNyx.data : {};
+    if (nyx.etat_relationnel?.etat) etatLocal.etatRelationnel = nyx.etat_relationnel.etat;
+    if (nyx.long_terme && typeof nyx.long_terme === 'object') {
+      etatLocal.long_terme = { ...etatLocal.long_terme, ...nyx.long_terme };
     }
-    if (resVol.data && resVol.data.timestamp) {
-      dernierActionVolitionTs = Math.max(dernierActionVolitionTs, Number(resVol.data.timestamp) || 0);
+    if (nyx.fil_conducteur?.fil !== undefined) etatLocal.filConducteur = nyx.fil_conducteur.fil || "";
+    if (nyx.dernier_reve) etatLocal.dernierReve = normaliserObjetReve(nyx.dernier_reve);
+    if (nyx.volition?.timestamp) {
+      dernierActionVolitionTs = Math.max(dernierActionVolitionTs, Number(nyx.volition.timestamp) || 0);
     }
-    if (resAct.data && resAct.data.timestamp) {
-      derniereActiviteDoc = Math.max(derniereActiviteDoc, Number(resAct.data.timestamp) || derniereActiviteDoc);
+    if (nyx.activite_doc?.timestamp) {
+      derniereActiviteDoc = Math.max(derniereActiviteDoc, Number(nyx.activite_doc.timestamp) || derniereActiviteDoc);
     }
-    if (resMem.data) {
-      etatLocal.memoireRecente = Array.isArray(resMem.data) ? resMem.data : Object.values(resMem.data);
+    if (nyx.memoire) {
+      etatLocal.memoireRecente = Array.isArray(nyx.memoire) ? nyx.memoire : Object.values(nyx.memoire);
     }
-    if (resMono.data && resMono.data.pensee !== undefined) {
-      etatLocal.monologueInterieur = resMono.data.pensee || "";
+    if (nyx.monologue?.pensee !== undefined) etatLocal.monologueInterieur = nyx.monologue.pensee || "";
+    if (nyx.besoin_communiquer && typeof nyx.besoin_communiquer === 'object') {
+      etatLocal.besoinCommunication = { ...etatLocal.besoinCommunication, ...nyx.besoin_communiquer };
     }
-    if (resBesoin.data && typeof resBesoin.data === 'object') {
-      etatLocal.besoinCommunication = { ...etatLocal.besoinCommunication, ...resBesoin.data };
-    }
-    if (resIdees.data) {
-      const arr = Array.isArray(resIdees.data) ? resIdees.data : Object.values(resIdees.data);
+    if (nyx.idees_folles) {
+      const arr = Array.isArray(nyx.idees_folles) ? nyx.idees_folles : Object.values(nyx.idees_folles);
       etatLocal.ideesFolles = arr.filter(Boolean).slice(-12);
     }
-    if (resObs?.data) {
-      etatLocal.obsessions = (Array.isArray(resObs.data) ? resObs.data : Object.values(resObs.data)).filter(Boolean).slice(-3);
+    if (nyx.obsessions) {
+      etatLocal.obsessions = (Array.isArray(nyx.obsessions) ? nyx.obsessions : Object.values(nyx.obsessions)).filter(Boolean).slice(-3);
     }
-    if (resConv?.data) {
-      etatLocal.convictions = (Array.isArray(resConv.data) ? resConv.data : Object.values(resConv.data)).filter(Boolean).slice(-8);
+    if (nyx.convictions) {
+      etatLocal.convictions = (Array.isArray(nyx.convictions) ? nyx.convictions : Object.values(nyx.convictions)).filter(Boolean).slice(-8);
     }
-    if (resTemp?.data && typeof resTemp.data === 'object') {
-      etatLocal.temperamentBasal = { ...etatLocal.temperamentBasal, ...resTemp.data };
+    if (nyx.temperament_basal && typeof nyx.temperament_basal === 'object') {
+      etatLocal.temperamentBasal = { ...etatLocal.temperamentBasal, ...nyx.temperament_basal };
     }
-    if (resArt?.data) {
-      etatLocal.artefacts = (Array.isArray(resArt.data) ? resArt.data : Object.values(resArt.data)).filter(Boolean).slice(-30);
+    if (nyx.artefacts) {
+      etatLocal.artefacts = (Array.isArray(nyx.artefacts) ? nyx.artefacts : Object.values(nyx.artefacts)).filter(Boolean).slice(-30);
     }
-    if (resHistReves?.data) {
-      etatLocal.historiqueReves = (Array.isArray(resHistReves.data) ? resHistReves.data : Object.values(resHistReves.data)).filter(Boolean).slice(-6);
+    if (nyx.historique_reves) {
+      etatLocal.historiqueReves = (Array.isArray(nyx.historique_reves) ? nyx.historique_reves : Object.values(nyx.historique_reves)).filter(Boolean).slice(-6);
     }
-    if (resReveCours?.data !== undefined) {
-      etatLocal.reveEnCours = resReveCours.data;
-    }
-    if (resExistence?.data && typeof resExistence.data === 'object') {
+    if (nyx.reve_en_cours !== undefined) etatLocal.reveEnCours = nyx.reve_en_cours;
+    if (nyx.existence && typeof nyx.existence === 'object') {
       etatLocal.existence = {
         ...etatLocal.existence,
-        ...resExistence.data,
-        jalons: Array.isArray(resExistence.data.jalons) ? resExistence.data.jalons.filter(Boolean).slice(-10) : [],
-        evolutionsMoi: Array.isArray(resExistence.data.evolutionsMoi) ? resExistence.data.evolutionsMoi.filter(Boolean).slice(-8) : []
+        ...nyx.existence,
+        jalons: Array.isArray(nyx.existence.jalons) ? nyx.existence.jalons.filter(Boolean).slice(-10) : [],
+        evolutionsMoi: Array.isArray(nyx.existence.evolutionsMoi) ? nyx.existence.evolutionsMoi.filter(Boolean).slice(-8) : []
       };
     }
     if (!etatLocal.existence.dateEveil) {
@@ -270,40 +244,34 @@ async function synchroniserEtatDepuisFirebase() {
       etatLocal.existence.dateEveilParis = obtenirHorodatageParis();
       axios.put(`${FIREBASE_DB_URL}/nyx/existence.json`, etatLocal.existence).catch(() => {});
     }
-    if (resRegles?.data) {
-      const arrRegles = Array.isArray(resRegles.data) ? resRegles.data : Object.values(resRegles.data);
+    if (nyx.regles_apprises) {
+      const arrRegles = Array.isArray(nyx.regles_apprises) ? nyx.regles_apprises : Object.values(nyx.regles_apprises);
       etatLocal.reglesApprises = arrRegles.filter(Boolean).slice(-12);
     }
-    if (resLecture?.data !== undefined) {
-      if (resLecture.data && typeof resLecture.data === 'object') {
-        const { chapitres: _ignoreChap, ...metaLecture } = resLecture.data;
+    if (nyx.lecture_en_cours !== undefined) {
+      if (nyx.lecture_en_cours && typeof nyx.lecture_en_cours === 'object') {
+        const { chapitres: _ignoreChap, ...metaLecture } = nyx.lecture_en_cours;
         etatLocal.lectureEnCours = metaLecture;
       } else {
-        etatLocal.lectureEnCours = resLecture.data;
+        etatLocal.lectureEnCours = nyx.lecture_en_cours;
       }
     }
-    if (resBiblio?.data) {
-      const arrBib = Array.isArray(resBiblio.data) ? resBiblio.data : Object.values(resBiblio.data);
+    if (nyx.bibliotheque_lue) {
+      const arrBib = Array.isArray(nyx.bibliotheque_lue) ? nyx.bibliotheque_lue : Object.values(nyx.bibliotheque_lue);
       etatLocal.bibliothequeLue = arrBib.filter(Boolean).slice(-20);
     }
-    if (resMaj?.data) {
-      const arrMaj = Array.isArray(resMaj.data) ? resMaj.data : Object.values(resMaj.data);
+    if (nyx.mises_a_jour) {
+      const arrMaj = Array.isArray(nyx.mises_a_jour) ? nyx.mises_a_jour : Object.values(nyx.mises_a_jour);
       etatLocal.misesAJour = arrMaj.filter(Boolean).slice(-15);
     }
-    if (resIntention?.data !== undefined) {
-      etatLocal.intentionDuJour = resIntention.data;
+    if (nyx.intention_jour !== undefined) etatLocal.intentionDuJour = nyx.intention_jour;
+    if (nyx.besoins_vitaux && typeof nyx.besoins_vitaux === 'object') {
+      etatLocal.besoinsVitaux = { ...etatLocal.besoinsVitaux, ...nyx.besoins_vitaux };
     }
-    if (resVitaux?.data && typeof resVitaux.data === 'object') {
-      etatLocal.besoinsVitaux = { ...etatLocal.besoinsVitaux, ...resVitaux.data };
-    }
-    if (resModeEco?.data !== undefined) {
-      etatLocal.modeEco = Boolean(resModeEco.data?.actif);
-    }
-    if (resCoeur?.data) {
-      etatLocal.coeur = normaliserEtatCoeur(resCoeur.data);
-    }
-    if (resJardin?.data) {
-      const arrJ = Array.isArray(resJardin.data) ? resJardin.data : Object.values(resJardin.data);
+    if (nyx.mode_eco !== undefined) etatLocal.modeEco = Boolean(nyx.mode_eco?.actif);
+    if (nyx.coeur) etatLocal.coeur = normaliserEtatCoeur(nyx.coeur);
+    if (nyx.jardin_secret) {
+      const arrJ = Array.isArray(nyx.jardin_secret) ? nyx.jardin_secret : Object.values(nyx.jardin_secret);
       etatLocal.jardinSecret = arrJ.filter(Boolean).slice(-12);
     }
   } catch (err) {
@@ -2066,12 +2034,14 @@ Si c'est une pensée intime que tu veux garder exclusivement pour toi dans ton J
       dernierMonologueTs = now;
 
       if (estJardinPrive && propre.length > 5) {
-        const blocScelle = scellerNoteJardinSouverain(propre.slice(0, 320), obtenirHorodatageParis());
-        etatLocal.jardinSecret = [...(etatLocal.jardinSecret || []), blocScelle].slice(-24);
+        etatLocal.jardinSecret = [
+          ...(etatLocal.jardinSecret || []),
+          { date: obtenirHorodatageParis(), texte: propre.slice(0, 320) }
+        ].slice(-24);
         if (FIREBASE_DB_URL) {
           await axios.put(`${FIREBASE_DB_URL}/nyx/jardin_secret.json`, etatLocal.jardinSecret).catch(() => {});
         }
-        console.log(`🔐 [JARDIN SECRET AES-256-GCM] Entrée chiffrée scellée (clé détruite).`);
+        console.log(`🤫 [JARDIN SECRET NYX] Entrée privée enregistrée.`);
         return;
       }
 
@@ -3457,8 +3427,9 @@ async function demarrerWorker() {
     try {
       const res = await axios.get(`${FIREBASE_DB_URL}/nyx/trigger_volition.json`, { timeout: 2500 });
       if (res.data && res.data.ts) {
+        const forcerTrig = Boolean(res.data.force);
         await axios.delete(`${FIREBASE_DB_URL}/nyx/trigger_volition.json`).catch(() => {});
-        await evaluerVolition(true);
+        await evaluerVolition(forcerTrig);
       }
     } catch (e) {}
   }
@@ -3517,8 +3488,9 @@ app.post('/volition', async (req, res) => {
   if (secretAttendu.length < 32 || tokenFourni !== secretAttendu) {
     return res.status(401).json({ erreur: "Non autorisé" });
   }
-  res.json({ statut: "Volition déclenchée" });
-  evaluerVolition(true).catch(() => {});
+  const forcerVol = Boolean(req.body?.force);
+  res.json({ statut: "Volition évaluée", force: forcerVol });
+  evaluerVolition(forcerVol).catch(() => {});
 });
 
 app.listen(PORT, '0.0.0.0', () => {
