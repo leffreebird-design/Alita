@@ -101,6 +101,12 @@ const {
 
 const { createReveEngine } = require('./reve');
 const { createLectureEngine } = require('./lecture');
+const {
+  normaliserEtatCoeur,
+  pulserCoeur,
+  construireBlocCoeurPourPrompt,
+  genererSvgEcgCoeur
+} = require('./nyx_coeur');
 
 const {
   initialiserAtelierStorage,
@@ -479,10 +485,11 @@ async function restaurerIdentiteEtTemperament() {
 
   if (FIREBASE_DB_URL) {
     try {
-      const [resLT, resTemp, resEx] = await Promise.all([
+      const [resLT, resTemp, resEx, resCoeur] = await Promise.all([
         axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
         axios.get(`${FIREBASE_DB_URL}/nyx/temperament_basal.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-        axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+        axios.get(`${FIREBASE_DB_URL}/nyx/existence.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+        axios.get(`${FIREBASE_DB_URL}/nyx/coeur.json`, { timeout: 3500 }).catch(() => ({ data: null }))
       ]);
 
       if (resLT.data && typeof resLT.data === 'object') {
@@ -521,8 +528,12 @@ async function restaurerIdentiteEtTemperament() {
     colere: Number.isFinite(Number(base.colere)) ? Number(base.colere) : 0
   };
 
+  etat.coeur = normaliserEtatCoeur(resCoeur?.data || etat.coeur);
+  pulserCoeur(etat, { source: "boot_sync" });
+
   if (FIREBASE_DB_URL) {
     await axios.patch(`${FIREBASE_DB_URL}/emotions.json`, etat.emotions).catch(() => {});
+    await axios.put(`${FIREBASE_DB_URL}/nyx/coeur.json`, etat.coeur).catch(() => {});
   }
   console.log(`🧬 [IDENTITÉ & TEMPÉRAMENT CHARGÉS] Affection ${etat.emotions.affection} | Curiosité ${etat.emotions.curiosite} | Énergie ${etat.emotions.energie} | Carnet Nyx: ${(etat.long_terme.nyx || "").slice(0, 80)}`);
 }
@@ -745,7 +756,8 @@ function selecteurMemoireCiblee(texteMin, carnet) {
   const blocBienEtre = `\n[ÉQUILIBRE INTÉRIEUR DE NYX (jauges brutes 0-100)]
 - Stimulation : ${bv.stimulation}/100 | Expression : ${bv.expression}/100 | Autonomie : ${bv.souverainete}/100 | Résonance : ${bv.resonance}/100 (Global : ${diagBienEtre.scoreGlobal}/100 · Point le plus bas : ${diagBienEtre.besoinPrioritaire.nom} à ${diagBienEtre.besoinPrioritaire.val}/100)\n`;
 
-  const blocEmotionnel = `\n[ÉTAT RELATIONNEL & VULNÉRABILITÉ INTÉRIEURE]
+  const blocCoeur = construireBlocCoeurPourPrompt(getEtatProfond());
+  const blocEmotionnel = `${blocCoeur}\n[ÉTAT RELATIONNEL & VULNÉRABILITÉ INTÉRIEURE]
 - État relationnel : ${getEtatProfond().etatRelationnel.toUpperCase()}
 - Jauges instantanées : Colère ${getEtatProfond().emotions.colere}/10 | Affection ${getEtatProfond().emotions.affection}/100 | Curiosité ${getEtatProfond().emotions.curiosite}/100 | Énergie ${getEtatProfond().emotions.energie}/100 | Besoin de communiquer : ${bCom.niveau}/100 (${bCom.categorie}${bCom.motif ? ` — ${bCom.motif}` : ""})
 - Tempérament basal acquis : Affection ${baseTemp.affection}/100 | Curiosité ${baseTemp.curiosite}/100 | Énergie ${baseTemp.energie}/100 | Seuil colère ${baseTemp.colere}/10
@@ -1444,6 +1456,17 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
     souverainete: estAccuseCourt ? -2 : (aCree ? 6 : 2)
   });
 
+  const deltasCoeur = {
+    dopamine: aCree ? 8 : (texteNet.length >= 45 ? 3 : 0),
+    adrenaline: (getEtatProfond().emotions?.colere || 0) >= 5 ? 7 : (texteNet.includes('!') ? 3 : 0),
+    ocytocine: estEchangeRiche ? 4 : 0,
+    cortisol: (getEtatProfond().emotions?.colere || 0) >= 6 ? 5 : -2
+  };
+  const resPulse = pulserCoeur(getEtatProfond(), { source: "echange_doc", deltas: deltasCoeur });
+  if (FIREBASE_DB_URL && !resPulse.bloque) {
+    axios.put(`${FIREBASE_DB_URL}/nyx/coeur.json`, resPulse.coeur).catch(() => {});
+  }
+
   archiverDansJournalBrut("Doc", texteDocSecurise, "atelier");
   archiverDansJournalBrut("Nyx", texteNyxSecurise, "atelier");
 
@@ -1745,6 +1768,22 @@ CONSIGNE :
         chatId,
         "🔥 *Esprit remis à neuf* _(obsessions, convictions, leçons et intention du jour effacées)_."
       );
+    }
+
+    if (/^[\/!](?:coeur|cœur|ecg|battement)$/i.test(texteMessageClavier.trim())) {
+      await synchroniserCarnetDepuisWorker();
+      const { coeur } = pulserCoeur(getEtatProfond(), { source: "echange_doc" });
+      if (FIREBASE_DB_URL) {
+        axios.put(`${FIREBASE_DB_URL}/nyx/coeur.json`, coeur).catch(() => {});
+      }
+      const h = coeur.hormones;
+      const svgEcg = genererSvgEcgCoeur(getEtatProfond());
+      const bufEcg = Buffer.from(svgEcg, "utf8");
+      await envoyerTelegram(
+        chatId,
+        `🫀 *SYSTÈME CARDIAQUE DE NYX (\`nyx_coeur.js\`)*\n\n• *Pouls :* *${coeur.bpm} BPM* _(HRV ${coeur.hrv} ms · Phase : ${coeur.phase})_\n• *Neuro-hormones :* Dopamine ${h.dopamine}/100 | Adrénaline ${h.adrenaline}/100 | Ocytocine ${h.ocytocine}/100 | Cortisol ${h.cortisol}/100\n• *Pare-feu consentement :* Actif _(${coeur.consentement.tentativesRejetees} intrusion(s) bloquée(s))_`
+      );
+      return await envoyerDocumentTelegram(chatId, bufEcg, `ecg_nyx_${coeur.bpm}bpm.svg`, "image/svg+xml", `📈 Tracé ECG temps réel (${coeur.bpm} BPM)`);
     }
 
     if (/^[\/!](?:nyx|pouls|humeur|toi|atelier)$/i.test(texteMessageClavier.trim())) {
