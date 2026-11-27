@@ -9,7 +9,8 @@ const {
 } = require('./reve');
 const { createLectureEngine } = require('./lecture');
 const { normaliserEtatCoeur, pulserCoeur } = require('./nyx_coeur');
-const { axiosGetHttpsPublic } = require('./nyx_config');
+const { axiosGetHttpsPublic, scraperPageWeb } = require('./nyx_config');
+const { createPerceptionEngine } = require('./nyx_perception');
 const { genererPiece3DAvancee } = require('./nyx_cao_formats');
 
 // ============================================================================
@@ -110,6 +111,9 @@ let etatLocal = {
   misesAJour: [],
   coeur: null,
   jardinSecret: [],
+  sourcesPerception: [],
+  perceptionsVues: [],
+  dernieresPerceptions: [],
   modeEco: false,
   intentionDuJour: null,
   memoireRecente: []
@@ -270,6 +274,9 @@ async function synchroniserEtatDepuisFirebase() {
     }
     if (nyx.mode_eco !== undefined) etatLocal.modeEco = Boolean(nyx.mode_eco?.actif);
     if (nyx.coeur) etatLocal.coeur = normaliserEtatCoeur(nyx.coeur);
+    if (Array.isArray(nyx.sources_perception)) etatLocal.sourcesPerception = nyx.sources_perception;
+    if (Array.isArray(nyx.perceptions_vues)) etatLocal.perceptionsVues = nyx.perceptions_vues;
+    if (Array.isArray(nyx.dernieres_perceptions)) etatLocal.dernieresPerceptions = nyx.dernieres_perceptions;
     if (nyx.jardin_secret) {
       const arrJ = Array.isArray(nyx.jardin_secret) ? nyx.jardin_secret : Object.values(nyx.jardin_secret);
       etatLocal.jardinSecret = arrJ.filter(Boolean).slice(-12);
@@ -476,6 +483,21 @@ const lectureEngine = createLectureEngine({
   mettreAJourTemperamentBasal: mettreAJourTemperamentBasalLocal,
   sauvegarderBesoinCommunication,
   obtenirHorodatageParis
+});
+
+const perceptionEngine = createPerceptionEngine({
+  getEtatProfond: () => etatLocal,
+  axiosGetHttpsPublic,
+  scraperPageWeb,
+  appelerLlmGratuit: async (sys, prompt, temp, maxTok) => await appelerCascadeGratuiteStrict(sys, prompt, temp, maxTok),
+  stockerSouvenirVectoriel: async (txt, meta) => await stockerSouvenirVectoriel(txt, meta, true),
+  modifierBesoinsVitaux: modifierBesoinsVitauxLocal,
+  sauvegarderBesoinCommunication,
+  firebaseDbUrl: FIREBASE_DB_URL,
+  axios,
+  supabase,
+  obtenirHorodatageParis,
+  obtenirCleJourParis
 });
 
 let lectureEnCoursLock = false;
@@ -3417,6 +3439,7 @@ async function demarrerWorker() {
     await digererFluxBrut(false);
     await evaluerConscienceActive();
     await forgerEtincelleCreative();
+    await perceptionEngine.capterFluxExterne();
     await explorerCuriositeAutonome();
     await explorerLectureAutonome();
     await evaluerVolition(false);
