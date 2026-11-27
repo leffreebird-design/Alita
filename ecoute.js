@@ -1070,7 +1070,8 @@ Réponds STRICTEMENT avec un JSON valide :
       const { coeur: cCal, bloque: bCal } = pulserCoeur(getEtatProfond(), {
         source: "auto_calibration_nyx",
         seuils: parsed.calibrer_coeur.seuils || parsed.calibrer_coeur,
-        poidsHormonaux: parsed.calibrer_coeur.poidsHormonaux
+        poidsHormonaux: parsed.calibrer_coeur.poidsHormonaux,
+        phase: parsed.calibrer_coeur.phase
       });
       if (!bCal && FIREBASE_DB_URL) {
         axios.put(`${FIREBASE_DB_URL}/nyx/coeur.json`, cCal).catch(() => {});
