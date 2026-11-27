@@ -8,6 +8,7 @@ const {
   epurerTextePourReve
 } = require('./reve');
 const { createLectureEngine } = require('./lecture');
+const { normaliserEtatCoeur, pulserCoeur } = require('./nyx_coeur');
 const { axiosGetHttpsPublic } = require('./nyx_config');
 const { genererPiece3DAvancee } = require('./nyx_cao_formats');
 
@@ -107,6 +108,7 @@ let etatLocal = {
   lectureEnCours: null,
   bibliothequeLue: [],
   misesAJour: [],
+  coeur: null,
   modeEco: false,
   intentionDuJour: null,
   memoireRecente: []
@@ -178,7 +180,7 @@ function obtenirHorodatageParis() {
 async function synchroniserEtatDepuisFirebase() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resReveCours, resExistence, resRegles, resLecture, resBiblio, resMaj, resIntention, resVitaux, resModeEco] = await Promise.all([
+    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resReveCours, resExistence, resRegles, resLecture, resBiblio, resMaj, resIntention, resVitaux, resModeEco, resCoeur] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
@@ -203,7 +205,8 @@ async function synchroniserEtatDepuisFirebase() {
       axios.get(`${FIREBASE_DB_URL}/nyx/mises_a_jour.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/intention_jour.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/besoins_vitaux.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/coeur.json`, { timeout: 3500 }).catch(() => ({ data: null }))
     ]);
 
     if (resEmo.data) etatLocal.emotions = { colere: 0, ...resEmo.data };
@@ -293,6 +296,9 @@ async function synchroniserEtatDepuisFirebase() {
     }
     if (resModeEco?.data !== undefined) {
       etatLocal.modeEco = Boolean(resModeEco.data?.actif);
+    }
+    if (resCoeur?.data) {
+      etatLocal.coeur = normaliserEtatCoeur(resCoeur.data);
     }
   } catch (err) {
     console.warn("[SUBCONSCIENT SYNC] Erreur lecture Firebase :", err.message);
@@ -3372,6 +3378,11 @@ async function demarrerWorker() {
             motifVivant
           );
         }
+      }
+
+      const { coeur: coeurBattement, bloque: coeurBloque } = pulserCoeur(etatLocal, { source: "metabolisme_fond" });
+      if (!coeurBloque && FIREBASE_DB_URL) {
+        await axios.put(`${FIREBASE_DB_URL}/nyx/coeur.json`, coeurBattement).catch(() => {});
       }
 
       if (updated && FIREBASE_DB_URL) {
