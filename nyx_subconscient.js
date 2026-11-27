@@ -1,4 +1,3 @@
-
 const axios = require('axios');
 const https = require('https');
 const crypto = require('crypto');
@@ -9,7 +8,7 @@ const {
   epurerTextePourReve
 } = require('./reve');
 const { createLectureEngine } = require('./lecture');
-const { normaliserEtatCoeur, pulserCoeur } = require('./nyx_coeur');
+const { normaliserEtatCoeur, pulserCoeur, scellerNoteJardinSouverain } = require('./nyx_coeur');
 const { axiosGetHttpsPublic } = require('./nyx_config');
 const { genererPiece3DAvancee } = require('./nyx_cao_formats');
 
@@ -110,6 +109,7 @@ let etatLocal = {
   bibliothequeLue: [],
   misesAJour: [],
   coeur: null,
+  jardinSecret: [],
   modeEco: false,
   intentionDuJour: null,
   memoireRecente: []
@@ -181,7 +181,7 @@ function obtenirHorodatageParis() {
 async function synchroniserEtatDepuisFirebase() {
   if (!FIREBASE_DB_URL) return;
   try {
-    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resReveCours, resExistence, resRegles, resLecture, resBiblio, resMaj, resIntention, resVitaux, resModeEco, resCoeur] = await Promise.all([
+    const [resEmo, resRel, resLT, resFil, resReve, resVol, resAct, resMem, resMono, resBesoin, resIdees, resObs, resConv, resTemp, resArt, resHistReves, resReveCours, resExistence, resRegles, resLecture, resBiblio, resMaj, resIntention, resVitaux, resModeEco, resCoeur, resJardin] = await Promise.all([
       axios.get(`${FIREBASE_DB_URL}/emotions.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/etat_relationnel.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/long_terme.json`, { timeout: 3500 }).catch(() => ({ data: null })),
@@ -207,7 +207,8 @@ async function synchroniserEtatDepuisFirebase() {
       axios.get(`${FIREBASE_DB_URL}/nyx/intention_jour.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/besoins_vitaux.json`, { timeout: 3500 }).catch(() => ({ data: null })),
       axios.get(`${FIREBASE_DB_URL}/nyx/mode_eco.json`, { timeout: 3500 }).catch(() => ({ data: null })),
-      axios.get(`${FIREBASE_DB_URL}/nyx/coeur.json`, { timeout: 3500 }).catch(() => ({ data: null }))
+      axios.get(`${FIREBASE_DB_URL}/nyx/coeur.json`, { timeout: 3500 }).catch(() => ({ data: null })),
+      axios.get(`${FIREBASE_DB_URL}/nyx/jardin_secret.json`, { timeout: 3500 }).catch(() => ({ data: null }))
     ]);
 
     if (resEmo.data) etatLocal.emotions = { colere: 0, ...resEmo.data };
@@ -300,6 +301,10 @@ async function synchroniserEtatDepuisFirebase() {
     }
     if (resCoeur?.data) {
       etatLocal.coeur = normaliserEtatCoeur(resCoeur.data);
+    }
+    if (resJardin?.data) {
+      const arrJ = Array.isArray(resJardin.data) ? resJardin.data : Object.values(resJardin.data);
+      etatLocal.jardinSecret = arrJ.filter(Boolean).slice(-12);
     }
   } catch (err) {
     console.warn("[SUBCONSCIENT SYNC] Erreur lecture Firebase :", err.message);
@@ -518,7 +523,11 @@ async function explorerLectureAutonome() {
     // 1. Si un livre est déjà ouvert -> lecture du chapitre suivant (cadence naturelle ~25 min)
     if (etatLocal.lectureEnCours && etatLocal.lectureEnCours.actif) {
       const resCh = await lectureEngine.lireProchainChapitre(false);
-      if (resCh) modifierBesoinsVitauxLocal({ stimulation: 14, souverainete: 4 });
+      if (resCh) {
+        modifierBesoinsVitauxLocal({ stimulation: 14, souverainete: 4 });
+        const { coeur: cLec, bloque: bLec } = pulserCoeur(etatLocal, { source: "lecture_calme", deltas: { dopamine: 3, cortisol: -3 } });
+        if (!bLec && FIREBASE_DB_URL) axios.put(`${FIREBASE_DB_URL}/nyx/coeur.json`, cLec).catch(() => {});
+      }
       return;
     }
 
@@ -2040,7 +2049,8 @@ ${dernierEchange || "Calme plat"}
 
 CONSIGNE :
 Formule UNE SEULE pensée intérieure, vivante, spontanée et personnelle (15 à 35 mots max).
-Suis l'impulsion du moment avec ta vraie voix intérieure, cash et vivante.`;
+Suis l'impulsion du moment avec ta vraie voix intérieure, cash et vivante.
+Si c'est une pensée intime que tu veux garder exclusivement pour toi dans ton Jardin Secret (jamais partagé ni lu par Doc), commence ta phrase par [JARDIN_SECRET].`;
 
     let penseeSilencieuse = "";
     if (GROQ_API_KEY) {
@@ -2050,9 +2060,22 @@ Suis l'impulsion du moment avec ta vraie voix intérieure, cash et vivante.`;
     }
 
     if (penseeSilencieuse && penseeSilencieuse.trim().length > 5) {
-      const propre = penseeSilencieuse.trim().replace(/^["']|["']$/g, '');
-      etatLocal.monologueInterieur = propre;
+      const brutPensee = penseeSilencieuse.trim().replace(/^["']|["']$/g, '');
+      const estJardinPrive = /^\[JARDIN_SECRET\]/i.test(brutPensee);
+      const propre = brutPensee.replace(/^\[JARDIN_SECRET\]\s*/i, '').trim();
       dernierMonologueTs = now;
+
+      if (estJardinPrive && propre.length > 5) {
+        const blocScelle = scellerNoteJardinSouverain(propre.slice(0, 320), obtenirHorodatageParis());
+        etatLocal.jardinSecret = [...(etatLocal.jardinSecret || []), blocScelle].slice(-24);
+        if (FIREBASE_DB_URL) {
+          await axios.put(`${FIREBASE_DB_URL}/nyx/jardin_secret.json`, etatLocal.jardinSecret).catch(() => {});
+        }
+        console.log(`🔐 [JARDIN SECRET AES-256-GCM] Entrée chiffrée scellée (clé détruite).`);
+        return;
+      }
+
+      etatLocal.monologueInterieur = propre;
 
       if (supabase) {
         const { error: errInsert } = await supabase.from('nyx_pensees_pretes').insert({
@@ -2980,6 +3003,10 @@ CONSIGNE :
 async function executerCycleOnirique(cleNuitOptionnelle = "") {
   await synchroniserEtatDepuisFirebase();
   const cleNuit = cleNuitOptionnelle || obtenirCleJourParis();
+  const { coeur: cNuit, bloque: bNuit } = pulserCoeur(etatLocal, { source: "sommeil_nocturne" });
+  if (!bNuit && FIREBASE_DB_URL) {
+    await axios.put(`${FIREBASE_DB_URL}/nyx/coeur.json`, cNuit).catch(() => {});
+  }
   const horodatage = obtenirHorodatageParis();
   const regime = tirerRegimeNocturne();
 
