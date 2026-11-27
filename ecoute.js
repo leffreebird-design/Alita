@@ -980,8 +980,8 @@ Réponds STRICTEMENT avec un JSON valide :
     let brut = "";
     // Pour la voix, on utilise un appel hyper rapide (ex: llama-3.1-8b-instant) sur Groq si possible pour éviter la latence
     if (GROQ_API_KEY) {
-      const modeleGroqSas = (appelVocal || modeEcoLeger) ? "llama-3.1-8b-instant" : MODEL_GROQ;
-      const maxTokensSas = modeEcoLeger ? 210 : 340;
+      const modeleGroqSas = appelVocal ? "llama-3.1-8b-instant" : MODEL_GROQ;
+      const maxTokensSas = 340;
       
       const res = await axios.post("https://api.groq.com/openai/v1/chat/completions", {
         model: modeleGroqSas,
@@ -1122,7 +1122,7 @@ async function traiterFlux(texteBrut, mediaData = null, texteLegende = "", conte
 
   const modeEcoActif = Boolean(getEtatProfond().modeEco);
   let plafondTokens = modeEcoActif
-    ? (estComplexe ? 1800 : 750)
+    ? (estComplexe ? 2800 : (demandeDocApprofondie ? 2000 : 1500))
     : (estComplexe ? 4000 : (demandeDocApprofondie ? 2600 : 1800));
 
   if (!estComplexe && (getEtatProfond().emotions?.colere || 0) >= 6) {
@@ -1551,7 +1551,7 @@ app.post('/telegram', (req, res) => {
       return await envoyerTelegram(
         chatId,
         nouvelEtat
-          ? "🔋 *Mode économie d'énergie ACTIVÉ* — Relais gratuits prioritaires, SAS silencieux coupé, plafond tokens réduit et initiatives autonomes en pause. Tape `/eco` à nouveau pour revenir en mode normal."
+          ? "🔋 *Mode 100 % GRATUIT (/eco) ACTIVÉ* — Venice coupé (0 €), OpenRouter non-censuré + Groq en priorité, SAS complet, cœur battant, rêves, lectures et initiatives autonomes actifs."
           : "⚡ *Mode économie d'énergie DÉSACTIVÉ* — Retour au régime complet."
       );
     }
